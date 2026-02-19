@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Presets</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html" class="active"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <h1 style="margin-bottom: 1rem;">💾 Presets</h1>
+
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Presets disponibles</span>
+            </div>
+            <div class="preset-list" id="presetList">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Sauvegarder la config actuelle</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Nom du preset</label>
+                <input type="text" class="form-input" id="newPresetName" placeholder="Mon preset...">
+            </div>
+            <button class="btn btn-primary btn-block" onclick="savePreset()">
+                💾 Sauvegarder comme preset
+            </button>
+        </div>
+
+        <div id="presetStatus" style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;"></div>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        async function loadPresets() {
+            try {
+                const res = await fetch('/api/presets');
+                const data = await res.json();
+                const list = document.getElementById('presetList');
+                list.innerHTML = '';
+
+                data.presets.forEach(p => {
+                    list.innerHTML += `
+                        <div class="preset-card">
+                            <div>
+                                <div class="preset-name">${p.name}</div>
+                                ${p.is_builtin ? '<span class="preset-builtin">Intégré</span>' : '<span class="preset-builtin">Utilisateur</span>'}
+                            </div>
+                            <button class="btn btn-outline btn-sm" onclick="applyPreset('${p.name}')">
+                                Appliquer
+                            </button>
+                        </div>`;
+                });
+            } catch (e) {
+                console.error('Load presets failed:', e);
+            }
+        }
+
+        async function applyPreset(name) {
+            try {
+                await fetch('/api/presets/' + encodeURIComponent(name) + '/apply', { method: 'POST' });
+                showStatus('✅ Preset "' + name + '" appliqué');
+            } catch (e) {
+                console.error('Apply preset failed:', e);
+            }
+        }
+
+        async function savePreset() {
+            const name = document.getElementById('newPresetName').value.trim();
+            if (!name) {
+                showStatus('⚠️ Nom du preset requis', true);
+                return;
+            }
+
+            try {
+                await fetch('/api/presets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                showStatus('✅ Preset "' + name + '" sauvegardé');
+                document.getElementById('newPresetName').value = '';
+                loadPresets();
+            } catch (e) {
+                console.error('Save preset failed:', e);
+            }
+        }
+
+        function showStatus(msg, isWarning) {
+            const el = document.getElementById('presetStatus');
+            el.textContent = msg;
+            el.style.color = isWarning ? 'var(--warning)' : 'var(--green)';
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        }
+
+        loadPresets();
+    </script>
+</body>
+</html>

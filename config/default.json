@@ -1,0 +1,40 @@
+{
+  "exposure": {
+    "iso_min": 100,
+    "iso_max": 3200,
+    "shutter_min_us": 1000000,
+    "shutter_max_us": 30000000,
+    "ev_step_max": 0.33
+  },
+  "detection": {
+    "roi_top_percent": 65,
+    "green_threshold": 15.0,
+    "luminosity_threshold": 30.0,
+    "variation_threshold": 10.0,
+    "consecutive_required": 2
+  },
+  "capture": {
+    "watch_interval_secs": 60,
+    "preview_interval_secs": 30,
+    "output_format": "RawDng",
+    "focal_length_mm": 2.7
+  },
+  "time_range": {
+    "start": "21:00:00",
+    "end": "06:00:00"
+  },
+  "storage": {
+    "mount_point": "/mnt/usb",
+    "warning_percent": 15,
+    "critical_percent": 5
+  },
+  "network": {
+    "ssid": "AuroraCam",
+    "password": "aurora2024",
+    "channel": 6
+  },
+  "web": {
+    "port": 8080
+  },
+  "preset_name": "FullDark"
+}

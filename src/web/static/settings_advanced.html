@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Réglages avancés</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html" class="active"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <h1 style="margin-bottom: 1rem;">🔧 Réglages avancés</h1>
+
+        <!-- Detection Settings -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Détection d'aurores</span>
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Zone d'analyse (ROI) — % haut de l'image analysé</span>
+                    <span class="range-value" id="roiVal">65%</span>
+                </div>
+                <input type="range" id="roiPercent" min="50" max="99" step="1" value="65"
+                       oninput="updateVal('roiVal', this.value + '%')">
+                <span class="form-hint">Exclure le sol en bas de l'image. 65% = ignore les 35% inférieurs</span>
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Seuil dominance verte</span>
+                    <span class="range-value" id="greenVal">15.0</span>
+                </div>
+                <input type="range" id="greenThreshold" min="5" max="50" step="0.5" value="15"
+                       oninput="updateVal('greenVal', parseFloat(this.value).toFixed(1))">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Seuil luminosité</span>
+                    <span class="range-value" id="lumVal">30.0</span>
+                </div>
+                <input type="range" id="lumThreshold" min="10" max="100" step="1" value="30"
+                       oninput="updateVal('lumVal', parseFloat(this.value).toFixed(1))">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Seuil variation temporelle</span>
+                    <span class="range-value" id="varVal">10.0</span>
+                </div>
+                <input type="range" id="varThreshold" min="1" max="50" step="0.5" value="10"
+                       oninput="updateVal('varVal', parseFloat(this.value).toFixed(1))">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Détections consécutives requises</label>
+                <input type="number" class="form-input" id="consecutiveRequired" min="1" max="10" value="2">
+                <span class="form-hint">Nombre de détections positives consécutives avant de passer en mode RUN</span>
+            </div>
+        </div>
+
+        <!-- Exposure Fine-tuning -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Exposition avancée</span>
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Pas EV maximum (par frame en RUN)</span>
+                    <span class="range-value" id="evVal">0.33</span>
+                </div>
+                <input type="range" id="evStepMax" min="0.1" max="1.0" step="0.01" value="0.33"
+                       oninput="updateVal('evVal', parseFloat(this.value).toFixed(2))">
+                <span class="form-hint">Variation d'exposition max entre deux frames (anti-yoyo)</span>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Longueur focale (mm)</label>
+                <input type="number" class="form-input" id="focalLength" min="1" max="50" step="0.1" value="2.7">
+                <span class="form-hint">Pour le calcul de la règle 500 (étoiles filées)</span>
+            </div>
+        </div>
+
+        <!-- Preview Settings -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Preview</span>
+            </div>
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Intervalle preview (s)</span>
+                    <span class="range-value" id="previewVal">30s</span>
+                </div>
+                <input type="range" id="previewInterval" min="5" max="120" step="5" value="30"
+                       oninput="updateVal('previewVal', this.value + 's')">
+            </div>
+        </div>
+
+        <!-- Storage Thresholds -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Seuils stockage</span>
+            </div>
+            <div class="info-grid">
+                <div class="form-group">
+                    <label class="form-label">Warning (%)</label>
+                    <input type="number" class="form-input" id="storageWarning" min="5" max="50" value="15">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Critical (%)</label>
+                    <input type="number" class="form-input" id="storageCritical" min="1" max="20" value="5">
+                </div>
+            </div>
+            <span class="form-hint">En dessous du seuil critique → passage en SAFE MODE</span>
+        </div>
+
+        <!-- Network -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Réseau Wi-Fi AP</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">SSID</label>
+                <input type="text" class="form-input" id="wifiSsid" value="AuroraCam">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Mot de passe</label>
+                <input type="password" class="form-input" id="wifiPassword" value="aurora2024">
+            </div>
+        </div>
+
+        <button class="btn btn-primary btn-block" onclick="saveAdvanced()">
+            💾 Sauvegarder
+        </button>
+
+        <div id="saveStatus" style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
+            ✅ Configuration sauvegardée
+        </div>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        function updateVal(id, val) {
+            document.getElementById(id).textContent = val;
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+
+                document.getElementById('roiPercent').value = cfg.detection.roi_top_percent;
+                document.getElementById('roiVal').textContent = cfg.detection.roi_top_percent + '%';
+                document.getElementById('greenThreshold').value = cfg.detection.green_threshold;
+                document.getElementById('greenVal').textContent = cfg.detection.green_threshold.toFixed(1);
+                document.getElementById('lumThreshold').value = cfg.detection.luminosity_threshold;
+                document.getElementById('lumVal').textContent = cfg.detection.luminosity_threshold.toFixed(1);
+                document.getElementById('varThreshold').value = cfg.detection.variation_threshold;
+                document.getElementById('varVal').textContent = cfg.detection.variation_threshold.toFixed(1);
+                document.getElementById('consecutiveRequired').value = cfg.detection.consecutive_required;
+
+                document.getElementById('evStepMax').value = cfg.exposure.ev_step_max;
+                document.getElementById('evVal').textContent = cfg.exposure.ev_step_max.toFixed(2);
+                document.getElementById('focalLength').value = cfg.capture.focal_length_mm;
+
+                document.getElementById('previewInterval').value = cfg.capture.preview_interval_secs;
+                document.getElementById('previewVal').textContent = cfg.capture.preview_interval_secs + 's';
+
+                document.getElementById('storageWarning').value = cfg.storage.warning_percent;
+                document.getElementById('storageCritical').value = cfg.storage.critical_percent;
+
+                document.getElementById('wifiSsid').value = cfg.network.ssid;
+                document.getElementById('wifiPassword').value = cfg.network.password;
+            } catch (e) {
+                console.error('Load config failed:', e);
+            }
+        }
+
+        async function saveAdvanced() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+
+                cfg.detection.roi_top_percent = parseInt(document.getElementById('roiPercent').value);
+                cfg.detection.green_threshold = parseFloat(document.getElementById('greenThreshold').value);
+                cfg.detection.luminosity_threshold = parseFloat(document.getElementById('lumThreshold').value);
+                cfg.detection.variation_threshold = parseFloat(document.getElementById('varThreshold').value);
+                cfg.detection.consecutive_required = parseInt(document.getElementById('consecutiveRequired').value);
+
+                cfg.exposure.ev_step_max = parseFloat(document.getElementById('evStepMax').value);
+                cfg.capture.focal_length_mm = parseFloat(document.getElementById('focalLength').value);
+                cfg.capture.preview_interval_secs = parseInt(document.getElementById('previewInterval').value);
+
+                cfg.storage.warning_percent = parseInt(document.getElementById('storageWarning').value);
+                cfg.storage.critical_percent = parseInt(document.getElementById('storageCritical').value);
+
+                cfg.network.ssid = document.getElementById('wifiSsid').value;
+                cfg.network.password = document.getElementById('wifiPassword').value;
+
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cfg),
+                });
+
+                const status = document.getElementById('saveStatus');
+                status.style.display = 'block';
+                setTimeout(() => status.style.display = 'none', 3000);
+            } catch (e) {
+                console.error('Save failed:', e);
+            }
+        }
+
+        loadConfig();
+    </script>
+</body>
+</html>

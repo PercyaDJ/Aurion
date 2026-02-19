@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Preview</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html" class="active"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Preview en direct</span>
+                <span class="badge badge-ok" id="refreshBadge">Auto 30s</span>
+            </div>
+            <div class="preview-container" id="previewContainer">
+                <img id="previewImg" src="" alt="Preview" style="display:none;">
+                <div class="preview-placeholder" id="placeholder">
+                    📷 En attente de la première capture...
+                </div>
+                <div class="preview-overlay" id="previewOverlay" style="display:none;">
+                    <span id="previewTime">--:--:--</span>
+                    <span id="previewExposure">ISO -- / -- µs</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Informations capture</span>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Dernière capture</span>
+                    <span class="info-value" id="lastCapture">--:--:--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Prochaine capture</span>
+                    <span class="info-value" id="nextCapture">--:--:--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Phase</span>
+                    <span class="info-value" id="currentPhase">ARM</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Résolution</span>
+                    <span class="info-value" id="resolution">--</span>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary btn-block" onclick="refreshPreview()">
+            🔄 Rafraîchir maintenant
+        </button>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        async function refreshPreview() {
+            try {
+                const res = await fetch('/api/preview');
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const img = document.getElementById('previewImg');
+                    img.src = url;
+                    img.style.display = 'block';
+                    document.getElementById('placeholder').style.display = 'none';
+                    document.getElementById('previewOverlay').style.display = 'flex';
+
+                    const now = new Date();
+                    document.getElementById('lastCapture').textContent =
+                        now.toLocaleTimeString('fr-FR');
+                    document.getElementById('previewTime').textContent =
+                        now.toLocaleTimeString('fr-FR');
+                }
+            } catch (e) {
+                console.error('Preview refresh failed:', e);
+            }
+        }
+
+        refreshPreview();
+        setInterval(refreshPreview, 30000);
+    </script>
+</body>
+</html>

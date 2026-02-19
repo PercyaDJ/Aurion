@@ -1,0 +1,19 @@
+# Rust build artifacts
+/target/
+
+# Output directory (simulation)
+/output/
+
+# Config files generated at runtime
+/config/aurora-cam.json
+/config/presets/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

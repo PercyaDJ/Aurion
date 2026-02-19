@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Réglages rapides</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html" class="active"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <h1 style="margin-bottom: 1rem;">⚙️ Réglages rapides</h1>
+
+        <!-- Exposure -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Exposition</span>
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">ISO minimum</span>
+                    <span class="range-value" id="isoMinVal">100</span>
+                </div>
+                <input type="range" id="isoMin" min="100" max="6400" step="100" value="100"
+                       oninput="updateVal('isoMinVal', this.value)">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">ISO maximum</span>
+                    <span class="range-value" id="isoMaxVal">3200</span>
+                </div>
+                <input type="range" id="isoMax" min="100" max="6400" step="100" value="3200"
+                       oninput="updateVal('isoMaxVal', this.value)">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Temps de pose min (s)</span>
+                    <span class="range-value" id="shutterMinVal">1</span>
+                </div>
+                <input type="range" id="shutterMin" min="1" max="60" step="1" value="1"
+                       oninput="updateVal('shutterMinVal', this.value + 's')">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Temps de pose max (s)</span>
+                    <span class="range-value" id="shutterMaxVal">30</span>
+                </div>
+                <input type="range" id="shutterMax" min="1" max="60" step="1" value="30"
+                       oninput="updateVal('shutterMaxVal', this.value + 's')">
+            </div>
+        </div>
+
+        <!-- Output Format -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Format de sortie</span>
+            </div>
+
+            <div class="form-group">
+                <select class="form-select" id="outputFormat">
+                    <option value="RawDng">RAW (DNG 12-bit)</option>
+                    <option value="Jpg">JPG uniquement</option>
+                    <option value="RawAndJpg">RAW + JPG</option>
+                </select>
+                <span class="form-hint">RAW DNG recommandé pour l'astrophotographie</span>
+            </div>
+        </div>
+
+        <!-- Capture Interval -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Intervalle de capture (Watch)</span>
+            </div>
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Intervalle</span>
+                    <span class="range-value" id="intervalVal">60s</span>
+                </div>
+                <input type="range" id="watchInterval" min="10" max="300" step="5" value="60"
+                       oninput="updateVal('intervalVal', this.value + 's')">
+                <span class="form-hint">Intervalle entre les captures en phase Watch</span>
+            </div>
+        </div>
+
+        <!-- Time Range -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Plage horaire d'observation</span>
+            </div>
+            <div class="info-grid">
+                <div class="form-group">
+                    <label class="form-label">Début</label>
+                    <input type="time" class="form-input" id="timeStart" value="21:00">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Fin</label>
+                    <input type="time" class="form-input" id="timeEnd" value="06:00">
+                </div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary btn-block" onclick="saveSettings()">
+            💾 Sauvegarder
+        </button>
+
+        <div id="saveStatus" style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
+            ✅ Configuration sauvegardée
+        </div>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        function updateVal(id, val) {
+            document.getElementById(id).textContent = val;
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+
+                document.getElementById('isoMin').value = cfg.exposure.iso_min;
+                document.getElementById('isoMinVal').textContent = cfg.exposure.iso_min;
+                document.getElementById('isoMax').value = cfg.exposure.iso_max;
+                document.getElementById('isoMaxVal').textContent = cfg.exposure.iso_max;
+
+                const shutterMinS = Math.round(cfg.exposure.shutter_min_us / 1000000);
+                const shutterMaxS = Math.round(cfg.exposure.shutter_max_us / 1000000);
+                document.getElementById('shutterMin').value = shutterMinS;
+                document.getElementById('shutterMinVal').textContent = shutterMinS + 's';
+                document.getElementById('shutterMax').value = shutterMaxS;
+                document.getElementById('shutterMaxVal').textContent = shutterMaxS + 's';
+
+                document.getElementById('outputFormat').value = cfg.capture.output_format;
+                document.getElementById('watchInterval').value = cfg.capture.watch_interval_secs;
+                document.getElementById('intervalVal').textContent = cfg.capture.watch_interval_secs + 's';
+                document.getElementById('timeStart').value = cfg.time_range.start.substring(0, 5);
+                document.getElementById('timeEnd').value = cfg.time_range.end.substring(0, 5);
+            } catch (e) {
+                console.error('Load config failed:', e);
+            }
+        }
+
+        async function saveSettings() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+
+                cfg.exposure.iso_min = parseInt(document.getElementById('isoMin').value);
+                cfg.exposure.iso_max = parseInt(document.getElementById('isoMax').value);
+                cfg.exposure.shutter_min_us = parseInt(document.getElementById('shutterMin').value) * 1000000;
+                cfg.exposure.shutter_max_us = parseInt(document.getElementById('shutterMax').value) * 1000000;
+                cfg.capture.output_format = document.getElementById('outputFormat').value;
+                cfg.capture.watch_interval_secs = parseInt(document.getElementById('watchInterval').value);
+                cfg.time_range.start = document.getElementById('timeStart').value + ':00';
+                cfg.time_range.end = document.getElementById('timeEnd').value + ':00';
+
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cfg),
+                });
+
+                const status = document.getElementById('saveStatus');
+                status.style.display = 'block';
+                setTimeout(() => status.style.display = 'none', 3000);
+            } catch (e) {
+                console.error('Save failed:', e);
+            }
+        }
+
+        loadConfig();
+    </script>
+</body>
+</html>

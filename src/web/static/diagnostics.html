@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Diagnostics</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html" class="active"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <h1 style="margin-bottom: 1rem;">📋 Diagnostics</h1>
+
+        <!-- System Info -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Système</span>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Phase</span>
+                    <span class="info-value" id="sysPhase">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Uptime</span>
+                    <span class="info-value" id="sysUptime">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Version</span>
+                    <span class="info-value">0.1.0</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Plateforme</span>
+                    <span class="info-value" id="sysPlatform">PC (Mock)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Logs récents</span>
+                <button class="btn btn-outline btn-sm" onclick="refreshLogs()">🔄 Rafraîchir</button>
+            </div>
+            <div class="log-container" id="logContainer">
+                <div class="log-line" style="color: var(--text-muted);">Chargement des logs...</div>
+            </div>
+        </div>
+
+        <button class="btn btn-outline btn-block" onclick="refreshLogs()">
+            🔄 Rafraîchir les logs
+        </button>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        async function refreshLogs() {
+            try {
+                const res = await fetch('/api/logs');
+                const data = await res.json();
+                const container = document.getElementById('logContainer');
+
+                if (data.logs.length === 0) {
+                    container.innerHTML = '<div class="log-line" style="color: var(--text-muted);">Aucun log disponible</div>';
+                } else {
+                    container.innerHTML = data.logs
+                        .map(line => `<div class="log-line">${escapeHtml(line)}</div>`)
+                        .join('');
+                    container.scrollTop = container.scrollHeight;
+                }
+            } catch (e) {
+                console.error('Logs refresh failed:', e);
+            }
+        }
+
+        async function updateDiagnostics() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('sysPhase').textContent = data.phase;
+            } catch (e) {
+                console.error('Diagnostics update failed:', e);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        refreshLogs();
+        updateDiagnostics();
+        setInterval(refreshLogs, 5000);
+        setInterval(updateDiagnostics, 3000);
+    </script>
+</body>
+</html>

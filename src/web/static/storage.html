@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AuroraCam — Stockage</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <button class="burger-btn" onclick="toggleMenu()">☰</button>
+    </nav>
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html" class="active"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <div class="main-content">
+        <h1 style="margin-bottom: 1rem;">💿 Stockage</h1>
+
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Clé USB</span>
+                <span class="badge badge-ok" id="storageBadge">OK</span>
+            </div>
+
+            <div class="progress-bar" style="height: 12px; margin: 1rem 0;">
+                <div class="progress-fill ok" id="storageBar" style="width: 70%"></div>
+            </div>
+
+            <div style="text-align: center; margin-bottom: 1.5rem;">
+                <div class="info-value" style="font-size: 1.3rem;" id="storageSummary">Chargement...</div>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Espace total</span>
+                    <span class="info-value" id="totalSpace">-- Go</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Espace libre</span>
+                    <span class="info-value" id="freeSpace">-- Go</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Espace utilisé</span>
+                    <span class="info-value" id="usedSpace">-- Go</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Seuil warning</span>
+                    <span class="info-value" id="warningThreshold">15%</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="storageWarnings"></div>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        async function updateStorage() {
+            try {
+                const res = await fetch('/api/storage');
+                const data = await res.json();
+
+                document.getElementById('storageSummary').textContent = data.summary;
+                document.getElementById('totalSpace').textContent = data.total_gb.toFixed(0) + ' Go';
+                document.getElementById('freeSpace').textContent = data.free_gb.toFixed(0) + ' Go';
+                document.getElementById('usedSpace').textContent = (data.total_gb - data.free_gb).toFixed(0) + ' Go';
+
+                const bar = document.getElementById('storageBar');
+                bar.style.width = data.free_percent + '%';
+
+                const badge = document.getElementById('storageBadge');
+                const status = data.status.toLowerCase();
+                bar.className = 'progress-fill ' + status;
+                badge.textContent = data.status;
+                badge.className = 'badge badge-' + (status === 'ok' ? 'ok' : status);
+
+                const warnings = document.getElementById('storageWarnings');
+                warnings.innerHTML = '';
+                if (status === 'warning') {
+                    warnings.innerHTML = `
+                        <div class="warning-box warning">
+                            <span class="warning-icon">⚠️</span>
+                            <span>Espace disque faible — seuil warning atteint</span>
+                        </div>`;
+                } else if (status === 'critical') {
+                    warnings.innerHTML = `
+                        <div class="warning-box danger">
+                            <span class="warning-icon">🚨</span>
+                            <span>Espace disque critique — passage en SAFE MODE imminent</span>
+                        </div>`;
+                }
+            } catch (e) {
+                console.error('Storage update failed:', e);
+            }
+        }
+
+        updateStorage();
+        setInterval(updateStorage, 5000);
+    </script>
+</body>
+</html>
