@@ -91,6 +91,20 @@ impl NetworkApPort for NetworkRpi {
             ])
             .spawn();
 
+        // Redirect port 80 → 8080 for captive portal detection
+        // Phones check port 80 for captive portal; nftables (Trixie) handles the redirect
+        let _ = Command::new("sudo")
+            .args(["nft", "add", "table", "ip", "aurion_nat"])
+            .output();
+        let _ = Command::new("sudo")
+            .args(["nft", "add", "chain", "ip", "aurion_nat", "prerouting",
+                   "{ type nat hook prerouting priority 0 ; }"])
+            .output();
+        let _ = Command::new("sudo")
+            .args(["nft", "add", "rule", "ip", "aurion_nat", "prerouting",
+                   "tcp", "dport", "80", "redirect", "to", ":8080"])
+            .output();
+
         info!("NetworkRpi: AP started — SSID: {}, IP: 192.168.4.1 (captive portal active)", ssid);
         Ok(())
     }
@@ -106,6 +120,11 @@ impl NetworkApPort for NetworkRpi {
         // Kill dnsmasq
         let _ = Command::new("sudo")
             .args(["killall", "dnsmasq"])
+            .output();
+
+        // Remove nftables redirect
+        let _ = Command::new("sudo")
+            .args(["nft", "delete", "table", "ip", "aurion_nat"])
             .output();
 
         // Bring down wlan0
