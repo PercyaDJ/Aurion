@@ -115,20 +115,32 @@ disable_apt_auto() {
 }
 
 detect_usb_candidates() {
-  # Step 1: Find USB disk devices (TRAN is only on parent, not partitions)
+  # Step 1: Find USB disk device names (TRAN is only on parent disk)
   local usb_disks
   usb_disks=$(lsblk -dnpo NAME,TRAN 2>/dev/null | awk '$2=="usb"{print $1}')
-
   [[ -z "$usb_disks" ]] && return
 
-  # Step 2: For each USB disk, find vfat/exfat partitions with a UUID
+  # Step 2: For each USB disk, list partitions and query blkid for reliable info
   while read -r disk; do
-    lsblk -lnpo NAME,FSTYPE,UUID,LABEL,SIZE,MOUNTPOINT "$disk" 2>/dev/null \
-      | while read -r name fstype uuid label size mnt; do
-          if [[ "$fstype" == "vfat" || "$fstype" == "exfat" ]] && [[ -n "$uuid" ]]; then
-            echo "${name}|${fstype}|${uuid}|${label:-"-"}|${size}|${mnt:-"-"}"
-          fi
-        done
+    for part in $(lsblk -lnpo NAME "$disk" 2>/dev/null); do
+      [[ "$part" == "$disk" ]] && continue  # Skip parent device
+
+      # blkid -o export gives clean KEY=VALUE pairs, one per line
+      local btype="" buuid="" blabel=""
+      while IFS='=' read -r key val; do
+        case "$key" in
+          TYPE)  btype="$val" ;;
+          UUID)  buuid="$val" ;;
+          LABEL) blabel="$val" ;;
+        esac
+      done < <(blkid -o export "$part" 2>/dev/null)
+
+      if [[ "$btype" == "vfat" || "$btype" == "exfat" ]] && [[ -n "$buuid" ]]; then
+        local psize
+        psize=$(lsblk -dnpo SIZE "$part" 2>/dev/null || echo "?")
+        echo "${part}|${btype}|${buuid}|${blabel:-"-"}|${psize}|-"
+      fi
+    done
   done <<< "$usb_disks"
 }
 
