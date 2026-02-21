@@ -5,10 +5,10 @@ use std::process::Command;
 use crate::core::models::{CaptureFormat, CaptureFrame, ExposureSettings, FrameMetadata};
 use crate::ports::camera::{CameraError, CameraPort};
 
-/// Raspberry Pi camera adapter using libcamera-still.
-/// Captures images via the libcamera command-line tools.
+/// Raspberry Pi camera adapter using rpicam-still.
+/// Captures images via the rpicam command-line tools.
 ///
-/// Requires: libcamera-apps installed on the Pi.
+/// Requires: rpicam-apps installed on the Pi.
 pub struct CameraRpi {
     /// Whether the camera has been detected
     connected: bool,
@@ -16,17 +16,17 @@ pub struct CameraRpi {
 
 impl CameraRpi {
     pub fn new() -> Self {
-        // Check if libcamera is available
-        let connected = Command::new("libcamera-still")
+        // Check if rpicam-still is available
+        let connected = Command::new("rpicam-still")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
 
         if connected {
-            info!("CameraRpi: libcamera detected");
+            info!("CameraRpi: rpicam-still detected");
         } else {
-            error!("CameraRpi: libcamera NOT found — camera unavailable");
+            error!("CameraRpi: rpicam-still NOT found — camera unavailable");
         }
 
         Self { connected }
@@ -38,7 +38,7 @@ impl CameraRpi {
         output_path: &str,
         raw: bool,
     ) -> Command {
-        let mut cmd = Command::new("libcamera-still");
+        let mut cmd = Command::new("rpicam-still");
         cmd.arg("--nopreview");
         cmd.arg("-o").arg(output_path);
 
@@ -81,7 +81,7 @@ impl CameraPort for CameraRpi {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(CameraError::CaptureFailed(format!(
-                "libcamera-still failed: {}",
+                "rpicam-still failed: {},",
                 stderr
             )));
         }
@@ -119,7 +119,7 @@ impl CameraPort for CameraRpi {
         let tmp_jpg = "/tmp/aurora_capture_raw.jpg";
         let tmp_dng = "/tmp/aurora_capture_raw.dng";
 
-        // libcamera-still --raw produces a DNG alongside the JPG
+        // rpicam-still --raw produces a DNG alongside the JPG
         let output = self
             .build_capture_command(exposure, tmp_jpg, true)
             .output()
@@ -128,7 +128,7 @@ impl CameraPort for CameraRpi {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(CameraError::CaptureFailed(format!(
-                "libcamera-still raw failed: {}",
+                "rpicam-still raw failed: {},",
                 stderr
             )));
         }

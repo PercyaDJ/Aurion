@@ -64,7 +64,7 @@ src/
 ├── ports/          # Traits d'interface (camera, storage, network, clock, system)
 ├── adapters/
 │   ├── pc/         # Mocks pour développement sur PC
-│   └── rpi/        # Implémentations Raspberry Pi (libcamera, hostapd, mount)
+│   └── rpi/        # Implémentations Raspberry Pi (rpicam, hostapd, mount)
 ├── web/            # Serveur Axum + API REST + fichiers statiques
 │   └── static/     # Interface web (HTML/CSS/JS, dark theme)
 └── cli/            # Simulation d'un cycle complet

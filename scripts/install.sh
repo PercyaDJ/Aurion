@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Installs the Aurion application on Raspberry Pi:
 # 1. Installs Rust (rustup) if not present
-# 2. Installs system dependencies (libcamera, hostapd, dnsmasq)
+# 2. Installs system dependencies (rpicam-apps, hostapd, dnsmasq)
 # 3. Compiles the project (cargo build --release --features rpi)
 # 4. Configures hostapd/dnsmasq (disabled at boot, managed by app)
 # 5. Sets up sudoers for passwordless hardware commands
@@ -54,7 +54,7 @@ install_dependencies() {
     build-essential \
     pkg-config \
     libssl-dev \
-    libcamera-apps \
+    rpicam-apps \
     hostapd \
     dnsmasq
   info "System dependencies installed."
@@ -175,7 +175,7 @@ generate_config() {
 
 verify_camera() {
   info "Checking camera..."
-  if libcamera-hello --list-cameras 2>/dev/null | grep -q "Available cameras"; then
+  if rpicam-hello --list-cameras 2>/dev/null | grep -q "Available cameras"; then
     info "✅ Camera detected!"
   else
     warn "⚠️  No camera detected. Check:"

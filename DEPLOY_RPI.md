@@ -75,7 +75,7 @@ bash ~/Aurion/scripts/install.sh
 
 **Ce que fait l'install :**
 1. Installe Rust via rustup
-2. Installe les dépendances : `build-essential`, `libssl-dev`, `libcamera-apps`, `hostapd`, `dnsmasq`
+2. Installe les dépendances : `build-essential`, `libssl-dev`, `rpicam-apps`, `hostapd`, `dnsmasq`
 3. Compile le projet : `cargo build --release --features rpi` (~15-30 min)
 4. Configure hostapd/dnsmasq (désactivés au boot, gérés par l'app)
 5. Configure sudoers (commandes hardware sans mot de passe)
@@ -143,7 +143,7 @@ aux URLs de détection captive portal de chaque OS :
 | Problème | Solution |
 |----------|----------|
 | Service ne démarre pas | `sudo journalctl -u aurion -n 50` pour voir les erreurs |
-| Caméra non détectée | Vérifier le câble CSI, `libcamera-hello --list-cameras` |
+| Caméra non détectée | Vérifier le câble CSI, `rpicam-hello --list-cameras` |
 | Wi-Fi ne se crée pas | `sudo journalctl -u aurion -f`, vérifier hostapd |
 | USB non montée | `lsblk` pour vérifier, `sudo mount -a` pour forcer le montage |
 | Compilation échoue (RAM) | Le script crée un swap temporaire de 2 Go automatiquement |
