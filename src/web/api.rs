@@ -3,7 +3,7 @@ use axum::{
     extract::Path,
     http::StatusCode,
     Json,
-    response::{IntoResponse, Redirect, Html},
+    response::{IntoResponse, Redirect},
 };
 use serde::{Deserialize, Serialize};
 

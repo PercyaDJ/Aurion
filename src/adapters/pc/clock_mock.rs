@@ -7,7 +7,7 @@ use crate::ports::clock::ClockPort;
 pub struct ClockMock {
     start_time: DateTime<Utc>,
     offset: Mutex<Duration>,
-    speed_factor: f64,
+    _speed_factor: f64,
 }
 
 impl ClockMock {
@@ -16,7 +16,7 @@ impl ClockMock {
         Self {
             start_time,
             offset: Mutex::new(Duration::zero()),
-            speed_factor: 1.0,
+            _speed_factor: 1.0,
         }
     }
 
@@ -25,7 +25,7 @@ impl ClockMock {
         Self {
             start_time,
             offset: Mutex::new(Duration::zero()),
-            speed_factor,
+            _speed_factor: speed_factor,
         }
     }
 

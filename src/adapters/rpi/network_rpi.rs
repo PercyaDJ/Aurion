@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::process::Command;
-use tracing::{info, error};
+use tracing::info;
 
 use crate::ports::network::{NetworkApPort, NetworkError};
 

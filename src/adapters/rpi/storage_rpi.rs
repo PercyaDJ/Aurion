@@ -10,14 +10,14 @@ use crate::ports::storage::{StorageError, StoragePort};
 /// file I/O to the mounted filesystem.
 pub struct StorageRpi {
     mount_point: String,
-    device: Option<String>,
+    _device: Option<String>,
 }
 
 impl StorageRpi {
     pub fn new(mount_point: String) -> Self {
         Self {
             mount_point,
-            device: None,
+            _device: None,
         }
     }
 
