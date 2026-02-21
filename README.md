@@ -22,7 +22,15 @@ Aurion est une application Rust qui transforme un Raspberry Pi 4 équipé d'une 
 
 # 3. Premier démarrage : mise à jour + clone
 sudo apt update && sudo apt upgrade -y
-git clone https://github.com/PercyaDJ/Aurion.git ~/Aurion
+sudo apt install -y git
+
+# Repo privé : générer un Personal Access Token (PAT) sur GitHub
+#   1. GitHub.com → Cliquer sur votre avatar → Settings
+#   2. En bas à gauche → Developer settings
+#   3. Personal access tokens → Tokens (classic) → Generate new token (classic)
+#   4. Note : "Aurion RPi" — Expiration : No expiration — Cocher : repo
+#   5. Generate token → Copier le token (ghp_...)
+git clone https://<TON_TOKEN>@github.com/PercyaDJ/Aurion.git ~/Aurion
 
 # 4. Bootstrap (hardening OS + automount USB)
 sudo bash ~/Aurion/scripts/bootstrap.sh

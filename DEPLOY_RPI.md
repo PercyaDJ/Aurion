@@ -30,8 +30,13 @@ sudo raspi-config
 
 ## Étape 2 — Cloner le repo
 
+Le repo étant privé, il faut un **Personal Access Token** GitHub :
+1. Sur GitHub : **Settings → Developer settings → Personal access tokens → Tokens (classic)**
+2. Cliquer **Generate new token** → cocher `repo` → copier le token
+
 ```bash
-git clone https://github.com/PercyaDJ/Aurion.git ~/Aurion
+sudo apt install -y git
+git clone https://<TON_TOKEN>@github.com/PercyaDJ/Aurion.git ~/Aurion
 cd ~/Aurion
 ```
 
