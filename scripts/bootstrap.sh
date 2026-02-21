@@ -115,21 +115,21 @@ disable_apt_auto() {
 }
 
 detect_usb_candidates() {
-  # Print candidates: DEV|FSTYPE|UUID|LABEL|SIZE|MOUNTPOINTS
-  lsblk -P -o NAME,TRAN,FSTYPE,UUID,LABEL,SIZE,MOUNTPOINTS \
-    | awk '
-      {
-        # Parse key="value" pairs
-        for (i=1;i<=NF;i++){
-          split($i,a,"="); gsub(/"/,"",a[2]);
-          k=a[1]; v=a[2]; data[k]=v;
-        }
-        if (data["TRAN"]=="usb" && (data["FSTYPE"]=="vfat" || data["FSTYPE"]=="exfat") && data["UUID"]!="") {
-          dev="/dev/" data["NAME"];
-          printf "%s|%s|%s|%s|%s|%s\n", dev, data["FSTYPE"], data["UUID"], data["LABEL"], data["SIZE"], data["MOUNTPOINTS"];
-        }
-        delete data;
-      }'
+  # Step 1: Find USB disk devices (TRAN is only on parent, not partitions)
+  local usb_disks
+  usb_disks=$(lsblk -dnpo NAME,TRAN 2>/dev/null | awk '$2=="usb"{print $1}')
+
+  [[ -z "$usb_disks" ]] && return
+
+  # Step 2: For each USB disk, find vfat/exfat partitions with a UUID
+  while read -r disk; do
+    lsblk -lnpo NAME,FSTYPE,UUID,LABEL,SIZE,MOUNTPOINT "$disk" 2>/dev/null \
+      | while read -r name fstype uuid label size mnt; do
+          if [[ "$fstype" == "vfat" || "$fstype" == "exfat" ]] && [[ -n "$uuid" ]]; then
+            echo "${name}|${fstype}|${uuid}|${label:-"-"}|${size}|${mnt:-"-"}"
+          fi
+        done
+  done <<< "$usb_disks"
 }
 
 choose_usb() {
