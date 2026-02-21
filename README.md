@@ -19,6 +19,8 @@ Aurion est une application Rust qui transforme un Raspberry Pi 4 équipé d'une 
 ```bash
 # 1. Flash Raspberry Pi OS Lite sur la carte SD
 # 2. Insérer la SD + clé USB dans la RPi, démarrer
+# 2.5 ssh-keygen -R [IP_ADDRESS]
+# 2.6 ssh aurion@[IP_ADDRESS]
 
 # 3. Premier démarrage : mise à jour + clone
 sudo apt update && sudo apt upgrade -y
