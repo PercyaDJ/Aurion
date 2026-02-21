@@ -114,95 +114,44 @@ disable_apt_auto() {
   systemctl mask apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
 }
 
-detect_usb_candidates() {
-  # Step 1: Find USB disk device names (TRAN is only on parent disk)
-  local usb_disks
-  usb_disks=$(lsblk -dnpo NAME,TRAN 2>/dev/null | awk '$2=="usb"{print $1}')
-  [[ -z "$usb_disks" ]] && return
-
-  # Step 2: For each USB disk, find partitions and get info via blkid
-  while read -r disk; do
-    for part in $(lsblk -lnpo NAME "$disk" 2>/dev/null); do
-      [[ "$part" == "$disk" ]] && continue
-
-      # blkid -s FIELD -o value returns just the value, no parsing needed
-      local fstype uuid label psize
-      fstype=$(blkid -s TYPE -o value "$part" 2>/dev/null || true)
-      uuid=$(blkid -s UUID -o value "$part" 2>/dev/null || true)
-      label=$(blkid -s LABEL -o value "$part" 2>/dev/null || true)
-      psize=$(lsblk -dnpo SIZE "$part" 2>/dev/null || echo "?")
-
-      if [[ "$fstype" == "vfat" || "$fstype" == "exfat" ]] && [[ -n "$uuid" ]]; then
-        echo "${part}|${fstype}|${uuid}|${label:-"-"}|${psize}|-"
-      fi
-    done
-  done <<< "$usb_disks"
-}
-
-choose_usb() {
-  info "Detecting USB capture drive (vfat/exfat, UUID required)"
-  mapfile -t cands < <(detect_usb_candidates || true)
-
-  if [[ "${#cands[@]}" -eq 0 ]]; then
-    warn "No USB vfat/exfat drive detected."
-    echo ""
-    echo "➡️  Plug your USB capture drive now, then press Enter to retry."
-    read -r || true
-    mapfile -t cands < <(detect_usb_candidates || true)
-  fi
-
-  if [[ "${#cands[@]}" -eq 0 ]]; then
-    warn "Still no USB drive detected. Skipping USB automount setup."
-    return 1
-  fi
-
-  if [[ "${#cands[@]}" -eq 1 ]]; then
-    echo "${cands[0]}"
-    return 0
-  fi
-
-  echo "Multiple USB candidates found. Choose the capture drive:"
-  local i=1
-  for c in "${cands[@]}"; do
-    IFS="|" read -r dev fstype uuid label size mnts <<<"$c"
-    echo "  [$i] $dev  fstype=$fstype  uuid=$uuid  label=${label:-"-"}  size=$size  mounted=${mnts:-"-"}"
-    i=$((i+1))
-  done
-
-  local choice=""
-  while true; do
-    read -r -p "Enter choice [1-${#cands[@]}]: " choice || true
-    [[ "$choice" =~ ^[0-9]+$ ]] || { echo "Invalid number."; continue; }
-    (( choice>=1 && choice<=${#cands[@]} )) || { echo "Out of range."; continue; }
-    echo "${cands[$((choice-1))]}"
-    return 0
-  done
-}
-
 setup_capture_automount() {
   info "Setting up /mnt/capture automount"
   mkdir -p /mnt/capture
 
-  if choose=$(choose_usb); then
-    IFS="|" read -r dev fstype uuid label size mnts <<<"$choose"
-    info "Selected: $dev (UUID=$uuid, FSTYPE=$fstype)"
-  else
-    warn "USB setup skipped."
+  # Find USB vfat/exfat partition directly (no subshells, no pipes)
+  local target_dev="" target_uuid="" target_fstype=""
+
+  local disk part ft uu
+  for disk in $(lsblk -dnpo NAME,TRAN | awk '$2=="usb"{print $1}'); do
+    for part in $(lsblk -lnpo NAME "$disk"); do
+      [[ "$part" == "$disk" ]] && continue
+      ft=$(blkid -s TYPE -o value "$part" 2>/dev/null) || true
+      uu=$(blkid -s UUID -o value "$part" 2>/dev/null) || true
+      if [[ "$ft" == "vfat" || "$ft" == "exfat" ]] && [[ -n "$uu" ]]; then
+        target_dev="$part"
+        target_uuid="$uu"
+        target_fstype="$ft"
+        break 2
+      fi
+    done
+  done
+
+  if [[ -z "$target_uuid" ]]; then
+    warn "No USB vfat/exfat drive detected."
+    echo "  Plug your USB capture drive and re-run this script."
     return 0
   fi
 
-  backup_file /etc/fstab
+  info "Found USB: $target_dev (UUID=$target_uuid, FSTYPE=$target_fstype)"
 
-  # Remove any existing /mnt/capture line, then append ours.
+  backup_file /etc/fstab
   sed -i -E '\|/mnt/capture|d' /etc/fstab
-  echo "UUID=${uuid}  /mnt/capture  ${fstype}  defaults,noatime,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0" >> /etc/fstab
+  echo "UUID=${target_uuid}  /mnt/capture  ${target_fstype}  defaults,noatime,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0" >> /etc/fstab
 
   systemctl daemon-reload
   mount -a || true
-
-  # Trigger mount to confirm
   ls /mnt/capture >/dev/null 2>&1 || true
-  info "USB automount configured on /mnt/capture (UUID=$uuid)."
+  info "USB automount configured on /mnt/capture (UUID=$target_uuid)."
 }
 
 create_aurion_flush() {
