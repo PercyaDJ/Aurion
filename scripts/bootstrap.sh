@@ -120,25 +120,20 @@ detect_usb_candidates() {
   usb_disks=$(lsblk -dnpo NAME,TRAN 2>/dev/null | awk '$2=="usb"{print $1}')
   [[ -z "$usb_disks" ]] && return
 
-  # Step 2: For each USB disk, list partitions and query blkid for reliable info
+  # Step 2: For each USB disk, find partitions and get info via blkid
   while read -r disk; do
     for part in $(lsblk -lnpo NAME "$disk" 2>/dev/null); do
-      [[ "$part" == "$disk" ]] && continue  # Skip parent device
+      [[ "$part" == "$disk" ]] && continue
 
-      # blkid -o export gives clean KEY=VALUE pairs, one per line
-      local btype="" buuid="" blabel=""
-      while IFS='=' read -r key val; do
-        case "$key" in
-          TYPE)  btype="$val" ;;
-          UUID)  buuid="$val" ;;
-          LABEL) blabel="$val" ;;
-        esac
-      done < <(blkid -o export "$part" 2>/dev/null)
+      # blkid -s FIELD -o value returns just the value, no parsing needed
+      local fstype uuid label psize
+      fstype=$(blkid -s TYPE -o value "$part" 2>/dev/null || true)
+      uuid=$(blkid -s UUID -o value "$part" 2>/dev/null || true)
+      label=$(blkid -s LABEL -o value "$part" 2>/dev/null || true)
+      psize=$(lsblk -dnpo SIZE "$part" 2>/dev/null || echo "?")
 
-      if [[ "$btype" == "vfat" || "$btype" == "exfat" ]] && [[ -n "$buuid" ]]; then
-        local psize
-        psize=$(lsblk -dnpo SIZE "$part" 2>/dev/null || echo "?")
-        echo "${part}|${btype}|${buuid}|${blabel:-"-"}|${psize}|-"
+      if [[ "$fstype" == "vfat" || "$fstype" == "exfat" ]] && [[ -n "$uuid" ]]; then
+        echo "${part}|${fstype}|${uuid}|${label:-"-"}|${psize}|-"
       fi
     done
   done <<< "$usb_disks"
