@@ -1,17 +1,17 @@
 use std::path::PathBuf;
 use chrono::{TimeZone, Utc, NaiveTime};
 
-use aurora_cam::core::config::AppConfig;
-use aurora_cam::core::detection::AuroraDetector;
-use aurora_cam::core::exposure::ExposureController;
-use aurora_cam::core::models::{Phase, TimeRange};
-use aurora_cam::core::state_machine::{Event, StateMachine};
-use aurora_cam::adapters::pc::{CameraMock, ClockMock, StorageMock, NetworkMock, SystemMock};
-use aurora_cam::ports::camera::CameraPort;
-use aurora_cam::ports::storage::StoragePort;
-use aurora_cam::ports::clock::ClockPort;
-use aurora_cam::ports::network::NetworkApPort;
-use aurora_cam::ports::system::SystemPort;
+use aurion::core::config::AppConfig;
+use aurion::core::detection::AuroraDetector;
+use aurion::core::exposure::ExposureController;
+use aurion::core::models::{Phase, TimeRange};
+use aurion::core::state_machine::{Event, StateMachine};
+use aurion::adapters::pc::{CameraMock, ClockMock, StorageMock, NetworkMock, SystemMock};
+use aurion::ports::camera::CameraPort;
+use aurion::ports::storage::StoragePort;
+use aurion::ports::clock::ClockPort;
+use aurion::ports::network::NetworkApPort;
+use aurion::ports::system::SystemPort;
 
 /// Helper: run the Watch loop until a phase change or frame limit.
 /// Returns the final phase.
@@ -229,7 +229,7 @@ async fn test_storage_full_safe_mode() {
     );
 
     // Nearly full → should be Critical (< 5%)
-    assert_eq!(status, aurora_cam::core::models::StorageStatus::Critical);
+    assert_eq!(status, aurion::core::models::StorageStatus::Critical);
 
     // Boot → Watch, then storage critical
     sm.transition(Event::BootComplete).unwrap();
@@ -343,7 +343,7 @@ async fn test_full_lifecycle() {
 
     // ARM
     assert_eq!(sm.phase(), Phase::Arm);
-    network.start_ap("AuroraCam", "test", 6).await.unwrap();
+    network.start_ap("Aurion", "test", 6).await.unwrap();
     assert!(network.is_ap_active());
 
     // DISCONNECT
@@ -355,7 +355,7 @@ async fn test_full_lifecycle() {
 
     // CALIBRATION
     assert_eq!(sm.phase(), Phase::Calibration);
-    let exp = aurora_cam::core::models::ExposureSettings::new(800, 5_000_000);
+    let exp = aurion::core::models::ExposureSettings::new(800, 5_000_000);
     let frame = camera.capture_jpg(&exp).await.unwrap();
     assert!(frame.width > 0);
     sm.transition(Event::CalibrationDone).unwrap();

@@ -1,25 +1,29 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraCam — Réglages avancés</title>
+    <title>Aurion — Réglages avancés</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
 </head>
+
 <body>
     <nav class="navbar">
-        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <div class="navbar-brand"><span class="icon">🌌</span><span>Aurion</span></div>
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
     <nav class="side-menu" id="sideMenu">
-        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
+        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
         <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
         <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
         <a href="/settings_advanced.html" class="active"><span class="menu-icon">🔧</span> Réglages avancés</a>
         <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
         <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
         <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
     </nav>
 
@@ -38,7 +42,7 @@
                     <span class="range-value" id="roiVal">65%</span>
                 </div>
                 <input type="range" id="roiPercent" min="50" max="99" step="1" value="65"
-                       oninput="updateVal('roiVal', this.value + '%')">
+                    oninput="updateVal('roiVal', this.value + '%')">
                 <span class="form-hint">Exclure le sol en bas de l'image. 65% = ignore les 35% inférieurs</span>
             </div>
 
@@ -48,7 +52,7 @@
                     <span class="range-value" id="greenVal">15.0</span>
                 </div>
                 <input type="range" id="greenThreshold" min="5" max="50" step="0.5" value="15"
-                       oninput="updateVal('greenVal', parseFloat(this.value).toFixed(1))">
+                    oninput="updateVal('greenVal', parseFloat(this.value).toFixed(1))">
             </div>
 
             <div class="range-group">
@@ -57,7 +61,7 @@
                     <span class="range-value" id="lumVal">30.0</span>
                 </div>
                 <input type="range" id="lumThreshold" min="10" max="100" step="1" value="30"
-                       oninput="updateVal('lumVal', parseFloat(this.value).toFixed(1))">
+                    oninput="updateVal('lumVal', parseFloat(this.value).toFixed(1))">
             </div>
 
             <div class="range-group">
@@ -66,7 +70,7 @@
                     <span class="range-value" id="varVal">10.0</span>
                 </div>
                 <input type="range" id="varThreshold" min="1" max="50" step="0.5" value="10"
-                       oninput="updateVal('varVal', parseFloat(this.value).toFixed(1))">
+                    oninput="updateVal('varVal', parseFloat(this.value).toFixed(1))">
             </div>
 
             <div class="form-group">
@@ -88,7 +92,7 @@
                     <span class="range-value" id="evVal">0.33</span>
                 </div>
                 <input type="range" id="evStepMax" min="0.1" max="1.0" step="0.01" value="0.33"
-                       oninput="updateVal('evVal', parseFloat(this.value).toFixed(2))">
+                    oninput="updateVal('evVal', parseFloat(this.value).toFixed(2))">
                 <span class="form-hint">Variation d'exposition max entre deux frames (anti-yoyo)</span>
             </div>
 
@@ -110,7 +114,7 @@
                     <span class="range-value" id="previewVal">30s</span>
                 </div>
                 <input type="range" id="previewInterval" min="5" max="120" step="5" value="30"
-                       oninput="updateVal('previewVal', this.value + 's')">
+                    oninput="updateVal('previewVal', this.value + 's')">
             </div>
         </div>
 
@@ -139,7 +143,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">SSID</label>
-                <input type="text" class="form-input" id="wifiSsid" value="AuroraCam">
+                <input type="text" class="form-input" id="wifiSsid" value="Aurion">
             </div>
             <div class="form-group">
                 <label class="form-label">Mot de passe</label>
@@ -151,7 +155,8 @@
             💾 Sauvegarder
         </button>
 
-        <div id="saveStatus" style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
+        <div id="saveStatus"
+            style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
             ✅ Configuration sauvegardée
         </div>
     </div>
@@ -236,4 +241,5 @@
         loadConfig();
     </script>
 </body>
+
 </html>

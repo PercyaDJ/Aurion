@@ -66,6 +66,11 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/disconnect", post(api::disconnect))
         .route("/api/storage", get(api::get_storage))
         .route("/api/logs", get(api::get_logs))
+        // Gallery (Recovery mode)
+        .route("/api/gallery", get(api::get_gallery))
+        .route("/api/gallery/stats", get(api::get_gallery_stats))
+        .route("/api/gallery/{filename}", get(api::get_gallery_image))
+        .route("/api/gallery/thumbnail/{filename}", get(api::get_gallery_thumbnail))
         // Static file serving
         .fallback_service(ServeDir::new("src/web/static"))
         .with_state(state);

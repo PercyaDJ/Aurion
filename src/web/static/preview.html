@@ -1,25 +1,29 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraCam — Preview</title>
+    <title>Aurion — Preview</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
 </head>
+
 <body>
     <nav class="navbar">
-        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <div class="navbar-brand"><span class="icon">🌌</span><span>Aurion</span></div>
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
     <nav class="side-menu" id="sideMenu">
-        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
+        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
         <a href="/preview.html" class="active"><span class="menu-icon">📷</span> Preview</a>
         <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
         <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
         <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
         <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
         <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
     </nav>
 
@@ -103,4 +107,5 @@
         setInterval(refreshPreview, 30000);
     </script>
 </body>
+
 </html>

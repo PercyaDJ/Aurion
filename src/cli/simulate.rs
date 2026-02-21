@@ -16,7 +16,7 @@ use crate::ports::system::SystemPort;
 
 /// Run a full night simulation using PC mocks.
 pub async fn run_simulation() -> anyhow::Result<()> {
-    info!("=== AuroraCam Simulation ===");
+    info!("=== Aurion Simulation ===");
     info!("Simulating a complete night cycle...\n");
 
     // Load or create default config

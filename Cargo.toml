@@ -1,9 +1,9 @@
 [package]
-name = "aurora-cam"
+name = "aurion"
 version = "0.1.0"
 edition = "2021"
-description = "Autonomous aurora capture camera for Raspberry Pi"
-authors = ["AuroraCam"]
+description = "Aurion — Autonomous aurora capture camera for Raspberry Pi"
+authors = ["Aurion"]
 
 [features]
 default = []

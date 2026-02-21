@@ -1,215 +1,145 @@
-# Déploiement AuroraCam sur Raspberry Pi
+# Déploiement Aurion sur Raspberry Pi
 
-## Prérequis matériel
+Guide détaillé pour déployer Aurion sur une Raspberry Pi 4.
 
-- Raspberry Pi 4 Model B (4 Go RAM)
-- Caméra RPi HQ (IMX477) connectée au port CSI
-- Clé USB 128 Go formatée en ext4 ou exFAT
-- Carte microSD avec Raspberry Pi OS Lite (64-bit Bookworm)
-- Connexion réseau (Ethernet ou Wi-Fi temporaire) pour l'installation
+## Pré-requis
 
----
+### Matériel
+- Raspberry Pi 4 (4 Go RAM recommandé)
+- Carte SD (16 Go minimum)
+- Clé USB formatée en **vfat** ou **exfat** (pour les captures)
+- RPi HQ Camera (IMX477) connectée au port CSI
+- Alimentation USB-C 5V/3A stable
 
-## Étape 1 — Cloner le repo
-
-```bash
-cd ~
-git clone https://github.com/PercyaDJ/Aurion.git
-cd Aurion
-```
+### Logiciel
+- [Raspberry Pi OS Lite (64-bit)](https://www.raspberrypi.com/software/) flashé sur la carte SD
+- Accès SSH ou clavier/écran pour le premier démarrage
 
 ---
 
-## Étape 2 — Installer Rust
+## Étape 1 — Premier démarrage
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source ~/.cargo/env
-rustc --version
-```
-
----
-
-## Étape 3 — Installer les dépendances système
-
-```bash
+# Mise à jour système
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y \
-  build-essential \
-  pkg-config \
-  libssl-dev \
-  libcamera-apps \
-  hostapd \
-  dnsmasq
+
+# Activer la caméra (si pas fait dans le Pi Imager)
+sudo raspi-config
+# → Interface Options → Camera → Enable → Reboot
 ```
 
-> **Note :** `libcamera-apps` fournit `libcamera-still` pour la capture RAW/JPG.
-
----
-
-## Étape 4 — Activer la caméra
+## Étape 2 — Cloner le repo
 
 ```bash
-# Vérifier que la caméra est détectée
-libcamera-hello --list-cameras
+git clone https://github.com/PercyaDJ/Aurion.git ~/Aurion
+cd ~/Aurion
+```
 
-# Si aucune caméra n'apparaît :
-sudo raspi-config
-# → Interface Options → Camera → Enable
-# Puis rebooter
+## Étape 3 — Bootstrap
+
+Le script `bootstrap.sh` harden le système pour une utilisation terrain :
+
+```bash
+sudo bash scripts/bootstrap.sh
+```
+
+**Ce que fait le bootstrap :**
+- ✅ Log2ram (logs en RAM, préserve la carte SD)
+- ✅ `/tmp` en tmpfs
+- ✅ Root filesystem en `noatime,commit=60`
+- ✅ Journald volatile (50 Mo max en RAM)
+- ✅ Désactivation des mises à jour automatiques APT
+- ✅ Détection automatique de la clé USB (UUID) + automount `/mnt/capture`
+- ✅ Timer `aurion-flush` (sync disque toutes les 2 min)
+- ✅ Timer `aurion-power-watch` (arrêt propre si undervoltage)
+- ❓ Désactivation optionnelle de zram (prompt interactif)
+
+> **Important** : Insérez la clé USB **avant** de lancer le bootstrap.
+> Le script la détecte automatiquement et configure le montage permanent.
+
+```bash
+# Reboot obligatoire après le bootstrap
 sudo reboot
 ```
 
----
-
-## Étape 5 — Préparer le point de montage USB
+## Étape 4 — Installation
 
 ```bash
-sudo mkdir -p /mnt/usb
-
-# Identifier la clé USB
-lsblk
-
-# Montage manuel (adapter sda1 si besoin)
-sudo mount /dev/sda1 /mnt/usb
-
-# Vérifier
-df -h /mnt/usb
+bash ~/Aurion/scripts/install.sh
 ```
 
-### Montage automatique au boot (optionnel)
+**Ce que fait l'install :**
+1. Installe Rust via rustup
+2. Installe les dépendances : `build-essential`, `libssl-dev`, `libcamera-apps`, `hostapd`, `dnsmasq`
+3. Compile le projet : `cargo build --release --features rpi` (~15-30 min)
+4. Configure hostapd/dnsmasq (désactivés au boot, gérés par l'app)
+5. Configure sudoers (commandes hardware sans mot de passe)
+6. Crée et active le service systemd `aurion.service`
+7. Génère `config/aurion.json` depuis les valeurs par défaut
+
+## Étape 5 — Démarrer
 
 ```bash
-# Récupérer l'UUID de la clé
-sudo blkid /dev/sda1
+# Démarrer le service
+sudo systemctl start aurion
 
-# Ajouter dans /etc/fstab (adapter l'UUID et le type)
-echo "UUID=VOTRE-UUID /mnt/usb ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+# Vérifier le statut
+sudo systemctl status aurion
 ```
 
 ---
 
-## Étape 6 — Compiler le projet
+## Commandes utiles
+
+```bash
+sudo systemctl start aurion      # Démarrer
+sudo systemctl stop aurion       # Arrêter
+sudo systemctl restart aurion    # Redémarrer
+sudo systemctl status aurion     # Statut
+sudo journalctl -u aurion -f     # Logs en temps réel
+```
+
+## Test manuel (sans service)
 
 ```bash
 cd ~/Aurion
-cargo build --release --features rpi
-```
-
-> ⏱ La première compilation sur RPi 4 peut prendre **15–30 minutes**.
-> Le binaire sera dans `target/release/aurora-cam`.
-
----
-
-## Étape 7 — Configurer hostapd et dnsmasq
-
-### hostapd
-
-```bash
-sudo systemctl unmask hostapd
-sudo systemctl disable hostapd
-# Le logiciel gère le démarrage/arrêt de hostapd lui-même
-```
-
-### dnsmasq
-
-```bash
-sudo systemctl disable dnsmasq
-# Idem, géré par le logiciel
-```
-
-### Permettre l'exécution sans mot de passe sudo
-
-```bash
-sudo visudo
-# Ajouter à la fin :
-# pi ALL=(ALL) NOPASSWD: /usr/bin/hostapd, /usr/bin/killall, /sbin/shutdown, /bin/mount, /bin/umount, /bin/ip, /usr/bin/dnsmasq
-```
-
-> Adapter `pi` au nom de votre utilisateur.
-
----
-
-## Étape 8 — Test rapide
-
-```bash
-cd ~/Aurion
-
-# Tester la simulation (sans hardware)
-./target/release/aurora-cam simulate
-
-# Tester le serveur web
-./target/release/aurora-cam serve --port 8080
-# Ouvrir http://<IP-DU-PI>:8080 depuis un navigateur
+./target/release/aurion serve --port 8080
+# Ouvrir http://<IP_RPI>:8080 dans un navigateur
 ```
 
 ---
 
-## Étape 9 — Créer un service systemd
+## Utilisation terrain
 
-```bash
-sudo tee /etc/systemd/system/aurora-cam.service > /dev/null << 'EOF'
-[Unit]
-Description=AuroraCam - Autonomous Aurora Capture
-After=network.target
+1. Brancher la Raspberry Pi (alimentation USB-C)
+2. Le service `aurion` démarre automatiquement
+3. Connecter un smartphone au Wi-Fi **Aurion** (mot de passe : `aurora2024`)
+4. Le portail captif s'ouvre automatiquement avec l'interface Aurion
+5. Choisir le mode :
+   - 🌙 **Capture** : configurer les paramètres, cliquer "Déconnexion" → la capture nocturne démarre
+   - 📸 **Récupération** : parcourir la galerie, télécharger les images
 
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/Aurion
-ExecStart=/home/pi/Aurion/target/release/aurora-cam serve
-Restart=on-failure
-RestartSec=5
-Environment=RUST_LOG=info
+### Portail captif
 
-[Install]
-WantedBy=multi-user.target
-EOF
+Aurion redirige **toutes** les requêtes DNS vers le Pi (via dnsmasq) et répond
+aux URLs de détection captive portal de chaque OS :
 
-sudo systemctl daemon-reload
-sudo systemctl enable aurora-cam
-sudo systemctl start aurora-cam
-```
-
-> Adapter `pi` et les chemins si votre utilisateur est différent.
-
-### Commandes utiles
-
-```bash
-sudo systemctl status aurora-cam    # Vérifier le statut
-sudo journalctl -u aurora-cam -f    # Voir les logs en temps réel
-sudo systemctl restart aurora-cam   # Redémarrer
-sudo systemctl stop aurora-cam      # Arrêter
-```
+| OS | URL testée | Réponse |
+|---|---|---|
+| iOS/macOS | `/hotspot-detect.html` | Redirect → Dashboard |
+| Android | `/generate_204` | Redirect → Dashboard |
+| Windows | `/connecttest.txt` | Redirect → Dashboard |
+| Firefox | `/canonical.html` | Redirect → Dashboard |
 
 ---
 
-## Étape 10 — Connexion sur le terrain
-
-1. Alimenter le Raspberry Pi
-2. Le service `aurora-cam` démarre automatiquement
-3. Se connecter au réseau Wi-Fi **AuroraCam** (mot de passe : `aurora2024`)
-4. **L'interface s'ouvre automatiquement** grâce au portail captif ! 🎉
-5. Configurer les paramètres
-6. Cliquer **Déconnexion** → la capture démarre automatiquement
-
-> **Comment ça marche ?** Quand votre téléphone se connecte au Wi-Fi, il teste sa
-> connectivité en contactant des serveurs connus (Google, Apple, Microsoft...).
-> AuroraCam redirige *toutes* les requêtes DNS vers le Pi (via dnsmasq) et répond
-> aux URLs de test avec une redirection vers `http://192.168.4.1:8080/`.
-> Le téléphone détecte un "portail captif" et ouvre automatiquement l'interface.
->
-> Fonctionne sur : **iOS, Android, Windows, macOS, Firefox**
-
----
-
-## Résolution de problèmes
+## Troubleshooting
 
 | Problème | Solution |
-|---|---|
-| `libcamera-still` pas trouvé | `sudo apt install libcamera-apps` |
-| Caméra non détectée | Vérifier le câble CSI, `sudo raspi-config` → activer caméra |
-| Compilation échoue (mémoire) | Ajouter du swap : `sudo fallocate -l 2G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile` |
-| Wi-Fi AP ne démarre pas | Vérifier `sudo hostapd -dd /tmp/aurora_hostapd.conf` |
-| USB non montée | `lsblk` pour identifier le device, `sudo mount /dev/sdX1 /mnt/usb` |
-| Permission denied (shutdown) | Vérifier la config `visudo` (étape 7) |
+|----------|----------|
+| Service ne démarre pas | `sudo journalctl -u aurion -n 50` pour voir les erreurs |
+| Caméra non détectée | Vérifier le câble CSI, `libcamera-hello --list-cameras` |
+| Wi-Fi ne se crée pas | `sudo journalctl -u aurion -f`, vérifier hostapd |
+| USB non montée | `lsblk` pour vérifier, `sudo mount -a` pour forcer le montage |
+| Compilation échoue (RAM) | Le script crée un swap temporaire de 2 Go automatiquement |
+| Portail captif ne s'ouvre pas | Se connecter manuellement à `http://192.168.4.1:8080` |

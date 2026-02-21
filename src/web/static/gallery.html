@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aurion — Galerie</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .gallery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .gallery-count {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .gallery-item {
+            position: relative;
+            aspect-ratio: 4/3;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .gallery-item:hover {
+            border-color: var(--accent);
+            transform: scale(1.02);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .gallery-item .raw-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            flex-direction: column;
+            gap: 0.25rem;
+            background: linear-gradient(135deg, var(--bg-card), var(--bg-input));
+        }
+
+        .gallery-item .raw-placeholder .raw-icon {
+            font-size: 1.5rem;
+        }
+
+        .gallery-item .item-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 0.4rem 0.5rem;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Lightbox */
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 2000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .lightbox.active {
+            display: flex;
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 2rem;
+            cursor: pointer;
+            z-index: 2001;
+        }
+
+        .lightbox img {
+            max-width: 95%;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .lightbox-info {
+            margin-top: 1rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .lightbox-actions {
+            margin-top: 0.75rem;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .empty-state p {
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <span class="icon">🌌</span>
+            <span>Aurion</span>
+        </div>
+        <button class="burger-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
+    </nav>
+
+    <!-- Side Menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
+        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html" class="active"><span class="menu-icon">📸</span> Galerie</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="gallery-header">
+            <h1>📸 Galerie</h1>
+            <span class="gallery-count" id="galleryCount">Chargement...</span>
+        </div>
+
+        <div id="galleryContent">
+            <div class="empty-state">
+                <div class="empty-icon">⏳</div>
+                <p>Chargement de la galerie...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+        <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+        <img id="lightboxImg" src="" alt="Preview">
+        <div class="lightbox-info" id="lightboxInfo"></div>
+        <div class="lightbox-actions">
+            <a class="btn btn-primary btn-sm" id="lightboxDownload" href="#" download>
+                ⬇️ Télécharger
+            </a>
+        </div>
+    </div>
+
+    <script>
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        async function loadGallery() {
+            try {
+                const res = await fetch('/api/gallery');
+                const data = await res.json();
+                const container = document.getElementById('galleryContent');
+                const countEl = document.getElementById('galleryCount');
+
+                if (data.images.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">📭</div>
+                            <p>Aucune image capturée.<br>Lancez une session de capture pour commencer.</p>
+                        </div>`;
+                    countEl.textContent = '0 images';
+                    return;
+                }
+
+                countEl.textContent = `${data.total_count} images — ${data.total_size_mb.toFixed(1)} Mo`;
+
+                let html = '<div class="gallery-grid">';
+                for (const img of data.images) {
+                    const ext = img.filename.split('.').pop().toLowerCase();
+                    const isRaw = ext === 'dng' || ext === 'raw';
+
+                    if (isRaw) {
+                        html += `
+                            <div class="gallery-item" onclick="openLightbox('${img.filename}', '${img.size_display}', '${img.modified}', true)">
+                                <div class="raw-placeholder">
+                                    <span class="raw-icon">🎞️</span>
+                                    <span>RAW</span>
+                                </div>
+                                <div class="item-info">${img.filename}</div>
+                            </div>`;
+                    } else {
+                        html += `
+                            <div class="gallery-item" onclick="openLightbox('${img.filename}', '${img.size_display}', '${img.modified}', false)">
+                                <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div class="raw-placeholder" style="display:none;">
+                                    <span class="raw-icon">🖼️</span>
+                                </div>
+                                <div class="item-info">${img.filename}</div>
+                            </div>`;
+                    }
+                }
+                html += '</div>';
+                container.innerHTML = html;
+
+            } catch (e) {
+                console.error('Gallery load failed:', e);
+                document.getElementById('galleryContent').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⚠️</div>
+                        <p>Impossible de charger la galerie.<br>Vérifiez que la clé USB est montée.</p>
+                    </div>`;
+            }
+        }
+
+        function openLightbox(filename, size, modified, isRaw) {
+            const lightbox = document.getElementById('lightbox');
+            const img = document.getElementById('lightboxImg');
+            const info = document.getElementById('lightboxInfo');
+            const download = document.getElementById('lightboxDownload');
+
+            if (isRaw) {
+                img.src = '';
+                img.style.display = 'none';
+            } else {
+                img.src = `/api/gallery/thumbnail/${filename}`;
+                img.style.display = 'block';
+            }
+
+            info.innerHTML = `<strong>${filename}</strong><br>${size} — ${modified}`;
+            download.href = `/api/gallery/${filename}`;
+            download.download = filename;
+
+            lightbox.classList.add('active');
+        }
+
+        function closeLightbox(event) {
+            if (event && event.target !== event.currentTarget && !event.target.classList.contains('lightbox-close')) return;
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        // ESC to close
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        loadGallery();
+    </script>
+</body>
+
+</html>

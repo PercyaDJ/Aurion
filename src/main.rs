@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "aurora-cam", about = "Autonomous aurora capture camera")]
+#[command(name = "aurion", about = "Aurion — Autonomous aurora capture camera")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -33,16 +33,16 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Serve { port } => {
-            tracing::info!("Starting AuroraCam web server on port {}", port);
-            let config = aurora_cam::core::config::AppConfig::load(
-                &aurora_cam::core::config::AppConfig::default_path(),
+            tracing::info!("Starting Aurion web server on port {}", port);
+            let config = aurion::core::config::AppConfig::load(
+                &aurion::core::config::AppConfig::default_path(),
             )
             .unwrap_or_default();
-            let state = aurora_cam::web::AppState::new(config);
-            aurora_cam::web::start_server(state, port).await?;
+            let state = aurion::web::AppState::new(config);
+            aurion::web::start_server(state, port).await?;
         }
         Commands::Simulate => {
-            aurora_cam::cli::simulate::run_simulation().await?;
+            aurion::cli::simulate::run_simulation().await?;
         }
     }
 

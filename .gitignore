@@ -5,7 +5,7 @@
 /output/
 
 # Config files generated at runtime
-/config/aurora-cam.json
+/config/aurion.json
 /config/presets/
 
 # IDE

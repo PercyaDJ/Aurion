@@ -133,7 +133,7 @@ impl AppConfig {
 
     /// Get the config file path (next to the executable or at a known location).
     pub fn default_path() -> PathBuf {
-        PathBuf::from("config/aurora-cam.json")
+        PathBuf::from("config/aurion.json")
     }
 
     /// Get the presets directory path.
@@ -170,12 +170,12 @@ impl Default for AppConfig {
                 end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
             },
             storage: StorageConfig {
-                mount_point: "/mnt/usb".into(),
+                mount_point: "/mnt/capture".into(),
                 warning_percent: 15,
                 critical_percent: 5,
             },
             network: NetworkConfig {
-                ssid: "AuroraCam".into(),
+                ssid: "Aurion".into(),
                 password: "aurora2024".into(),
                 channel: 6,
             },

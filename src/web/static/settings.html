@@ -1,25 +1,29 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraCam — Réglages rapides</title>
+    <title>Aurion — Réglages rapides</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
 </head>
+
 <body>
     <nav class="navbar">
-        <div class="navbar-brand"><span class="icon">🌌</span><span>AuroraCam</span></div>
+        <div class="navbar-brand"><span class="icon">🌌</span><span>Aurion</span></div>
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
     <nav class="side-menu" id="sideMenu">
-        <a href="/index.html"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
+        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
         <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
         <a href="/settings.html" class="active"><span class="menu-icon">⚙️</span> Réglages rapides</a>
         <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
         <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
         <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
         <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
     </nav>
 
@@ -38,7 +42,7 @@
                     <span class="range-value" id="isoMinVal">100</span>
                 </div>
                 <input type="range" id="isoMin" min="100" max="6400" step="100" value="100"
-                       oninput="updateVal('isoMinVal', this.value)">
+                    oninput="updateVal('isoMinVal', this.value)">
             </div>
 
             <div class="range-group">
@@ -47,7 +51,7 @@
                     <span class="range-value" id="isoMaxVal">3200</span>
                 </div>
                 <input type="range" id="isoMax" min="100" max="6400" step="100" value="3200"
-                       oninput="updateVal('isoMaxVal', this.value)">
+                    oninput="updateVal('isoMaxVal', this.value)">
             </div>
 
             <div class="range-group">
@@ -56,7 +60,7 @@
                     <span class="range-value" id="shutterMinVal">1</span>
                 </div>
                 <input type="range" id="shutterMin" min="1" max="60" step="1" value="1"
-                       oninput="updateVal('shutterMinVal', this.value + 's')">
+                    oninput="updateVal('shutterMinVal', this.value + 's')">
             </div>
 
             <div class="range-group">
@@ -65,7 +69,7 @@
                     <span class="range-value" id="shutterMaxVal">30</span>
                 </div>
                 <input type="range" id="shutterMax" min="1" max="60" step="1" value="30"
-                       oninput="updateVal('shutterMaxVal', this.value + 's')">
+                    oninput="updateVal('shutterMaxVal', this.value + 's')">
             </div>
         </div>
 
@@ -96,7 +100,7 @@
                     <span class="range-value" id="intervalVal">60s</span>
                 </div>
                 <input type="range" id="watchInterval" min="10" max="300" step="5" value="60"
-                       oninput="updateVal('intervalVal', this.value + 's')">
+                    oninput="updateVal('intervalVal', this.value + 's')">
                 <span class="form-hint">Intervalle entre les captures en phase Watch</span>
             </div>
         </div>
@@ -122,7 +126,8 @@
             💾 Sauvegarder
         </button>
 
-        <div id="saveStatus" style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
+        <div id="saveStatus"
+            style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
             ✅ Configuration sauvegardée
         </div>
     </div>
@@ -195,4 +200,5 @@
         loadConfig();
     </script>
 </body>
+
 </html>

@@ -24,12 +24,12 @@
     "end": "06:00:00"
   },
   "storage": {
-    "mount_point": "/mnt/usb",
+    "mount_point": "/mnt/capture",
     "warning_percent": 15,
     "critical_percent": 5
   },
   "network": {
-    "ssid": "AuroraCam",
+    "ssid": "Aurion",
     "password": "aurora2024",
     "channel": 6
   },

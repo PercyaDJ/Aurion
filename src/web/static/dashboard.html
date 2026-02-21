@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aurion — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <span class="icon">🌌</span>
+            <span>Aurion</span>
+        </div>
+        <button class="burger-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
+    </nav>
+
+    <!-- Side Menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <nav class="side-menu" id="sideMenu">
+        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
+        <a href="/dashboard.html" class="active"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
+        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
+        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
+        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
+        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
+        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Phase Status -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">État du système</span>
+                <span class="badge badge-phase pulse" id="phaseBadge">ARM</span>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Heure</span>
+                    <span class="info-value" id="currentTime">--:--:--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Date</span>
+                    <span class="info-value" id="currentDate">--/--/----</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Plage horaire</span>
+                    <span class="info-value" id="timeRange">21:00 → 06:00</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Format sortie</span>
+                    <span class="info-value" id="outputFormat">RAW (DNG)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Storage -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Stockage</span>
+                <span class="badge badge-ok" id="storageBadge">OK</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill ok" id="storageBar" style="width: 70%"></div>
+            </div>
+            <div class="info-value" id="storageSummary" style="font-size: 0.9rem;">
+                Chargement...
+            </div>
+        </div>
+
+        <!-- Warnings -->
+        <div id="warningsContainer"></div>
+
+        <!-- Disconnect -->
+        <div class="disconnect-section">
+            <button class="btn btn-danger btn-block" onclick="requestDisconnect()" id="disconnectBtn">
+                🔌 Déconnexion — Lancer la capture
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ─── Menu Toggle ─────────────────────────────────
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        // ─── Status Polling ──────────────────────────────
+        async function updateStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                document.getElementById('phaseBadge').textContent = data.phase;
+                document.getElementById('currentTime').textContent = data.time;
+                document.getElementById('currentDate').textContent = data.date;
+
+                // Warnings
+                const container = document.getElementById('warningsContainer');
+                container.innerHTML = '';
+                data.warnings.forEach(w => {
+                    container.innerHTML += `
+                        <div class="warning-box warning">
+                            <span class="warning-icon">⚠️</span>
+                            <span>${w}</span>
+                        </div>`;
+                });
+            } catch (e) {
+                console.error('Status update failed:', e);
+            }
+        }
+
+        async function updateStorage() {
+            try {
+                const res = await fetch('/api/storage');
+                const data = await res.json();
+
+                document.getElementById('storageSummary').textContent = data.summary;
+                const bar = document.getElementById('storageBar');
+                bar.style.width = data.free_percent + '%';
+
+                const badge = document.getElementById('storageBadge');
+                bar.className = 'progress-fill ' + data.status.toLowerCase();
+                badge.textContent = data.status;
+                badge.className = 'badge badge-' + data.status.toLowerCase();
+            } catch (e) {
+                console.error('Storage update failed:', e);
+            }
+        }
+
+        async function requestDisconnect() {
+            if (!confirm('Êtes-vous sûr de vouloir déconnecter ? La capture démarrera automatiquement.')) return;
+            const btn = document.getElementById('disconnectBtn');
+            btn.disabled = true;
+            btn.textContent = 'Déconnexion en cours...';
+            try {
+                await fetch('/api/disconnect', { method: 'POST' });
+            } catch (e) {
+                console.error('Disconnect failed:', e);
+            }
+        }
+
+        // Initial load + polling
+        updateStatus();
+        updateStorage();
+        setInterval(updateStatus, 3000);
+        setInterval(updateStorage, 10000);
+    </script>
+</body>
+
+</html>

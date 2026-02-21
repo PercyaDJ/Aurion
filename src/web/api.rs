@@ -271,9 +271,223 @@ pub async fn get_logs(State(state): State<AppState>) -> Json<LogsResponse> {
     })
 }
 
+// ─── Gallery (Recovery Mode) ──────────────────────────────
+
+#[derive(Serialize)]
+pub struct GalleryResponse {
+    pub images: Vec<GalleryImage>,
+    pub total_count: usize,
+    pub total_size_mb: f64,
+}
+
+#[derive(Serialize)]
+pub struct GalleryImage {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub size_display: String,
+    pub modified: String,
+}
+
+/// List all captured images from the storage mount point.
+pub async fn get_gallery(State(state): State<AppState>) -> Json<GalleryResponse> {
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+
+    let mut images = Vec::new();
+    let mut total_size: u64 = 0;
+
+    if let Ok(entries) = std::fs::read_dir(mount_point) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !["jpg", "jpeg", "png", "dng", "raw"].contains(&ext.as_str()) {
+                continue;
+            }
+
+            if let Ok(metadata) = entry.metadata() {
+                let size = metadata.len();
+                total_size += size;
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|t| {
+                        let dt: chrono::DateTime<chrono::Utc> = t.into();
+                        Some(dt.format("%d/%m/%Y %H:%M").to_string())
+                    })
+                    .unwrap_or_else(|| "--".into());
+
+                let size_display = if size > 1_048_576 {
+                    format!("{:.1} Mo", size as f64 / 1_048_576.0)
+                } else {
+                    format!("{:.0} Ko", size as f64 / 1024.0)
+                };
+
+                images.push(GalleryImage {
+                    filename: path.file_name().unwrap().to_string_lossy().to_string(),
+                    size_bytes: size,
+                    size_display,
+                    modified,
+                });
+            }
+        }
+    }
+
+    // Sort by filename (which includes sequence number)
+    images.sort_by(|a, b| a.filename.cmp(&b.filename));
+
+    let total_count = images.len();
+    let total_size_mb = total_size as f64 / 1_048_576.0;
+
+    Json(GalleryResponse {
+        images,
+        total_count,
+        total_size_mb,
+    })
+}
+
+/// Serve a captured image file for download.
+pub async fn get_gallery_image(
+    State(state): State<AppState>,
+    Path(filename): Path<String>,
+) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let file_path = std::path::Path::new(&config.storage.mount_point).join(&filename);
+
+    // Security: prevent path traversal
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "Invalid filename").into_response();
+    }
+
+    match std::fs::read(&file_path) {
+        Ok(data) => {
+            let content_type = match file_path.extension().and_then(|e| e.to_str()) {
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("png") => "image/png",
+                Some("dng") => "image/x-adobe-dng",
+                _ => "application/octet-stream",
+            };
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", content_type),
+                    (
+                        "content-disposition",
+                        &format!("attachment; filename=\"{}\"", filename),
+                    ),
+                ],
+                data,
+            )
+                .into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Serve a thumbnail (small JPG preview) of a captured image.
+pub async fn get_gallery_thumbnail(
+    State(state): State<AppState>,
+    Path(filename): Path<String>,
+) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let file_path = std::path::Path::new(&config.storage.mount_point).join(&filename);
+
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "Invalid filename").into_response();
+    }
+
+    // For DNG/RAW files, we can't generate thumbnails easily → return a placeholder
+    let ext = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext == "dng" || ext == "raw" {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+
+    match image::open(&file_path) {
+        Ok(img) => {
+            let thumb = img.thumbnail(320, 240);
+            let mut buffer = Vec::new();
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            if thumb
+                .write_to(&mut cursor, image::ImageFormat::Jpeg)
+                .is_ok()
+            {
+                (StatusCode::OK, [("content-type", "image/jpeg")], buffer).into_response()
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Gallery stats for the home screen.
+#[derive(Serialize)]
+pub struct GalleryStats {
+    pub total_images: usize,
+    pub total_size_mb: f64,
+    pub last_session_date: Option<String>,
+}
+
+pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GalleryStats> {
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+
+    let mut total_images: usize = 0;
+    let mut total_size: u64 = 0;
+    let mut latest_modified: Option<std::time::SystemTime> = None;
+
+    if let Ok(entries) = std::fs::read_dir(mount_point) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if !["jpg", "jpeg", "png", "dng", "raw"].contains(&ext.as_str()) {
+                continue;
+            }
+            if let Ok(metadata) = entry.metadata() {
+                total_images += 1;
+                total_size += metadata.len();
+                if let Ok(modified) = metadata.modified() {
+                    if latest_modified.map_or(true, |prev| modified > prev) {
+                        latest_modified = Some(modified);
+                    }
+                }
+            }
+        }
+    }
+
+    let last_session_date = latest_modified.map(|t| {
+        let dt: chrono::DateTime<chrono::Utc> = t.into();
+        dt.format("%d/%m/%Y").to_string()
+    });
+
+    Json(GalleryStats {
+        total_images,
+        total_size_mb: total_size as f64 / 1_048_576.0,
+        last_session_date,
+    })
+}
+
+
 // ─── Captive Portal Detection ─────────────────────────────
 //
-// When a device connects to the AuroraCam Wi-Fi, the OS tries to
+// When a device connects to the Aurion Wi-Fi, the OS tries to
 // reach known URLs to check internet connectivity. If it gets a
 // redirect instead of the expected response, it opens a captive
 // portal browser window automatically.

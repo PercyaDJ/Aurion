@@ -221,7 +221,7 @@ mod tests {
         let info = StorageInfo {
             total_bytes: 128_000_000_000,
             free_bytes: 29_000_000_000,
-            mount_point: "/mnt/usb".into(),
+            mount_point: "/mnt/capture".into(),
         };
         assert!(info.display_summary().contains("Go"));
         assert!(info.free_percent() > 20.0);
@@ -233,14 +233,14 @@ mod tests {
         let info = StorageInfo {
             total_bytes: 100,
             free_bytes: 10,
-            mount_point: "/mnt/usb".into(),
+            mount_point: "/mnt/capture".into(),
         };
         assert_eq!(info.status(15.0, 5.0), StorageStatus::Warning);
 
         let critical = StorageInfo {
             total_bytes: 100,
             free_bytes: 3,
-            mount_point: "/mnt/usb".into(),
+            mount_point: "/mnt/capture".into(),
         };
         assert_eq!(critical.status(15.0, 5.0), StorageStatus::Critical);
     }

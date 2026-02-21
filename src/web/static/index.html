@@ -1,19 +1,152 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraCam — Dashboard</title>
+    <title>Aurion — Accueil</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 2rem 1rem 1rem;
+        }
+
+        .hero-icon {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .hero-title {
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, var(--aurora-green), var(--accent));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-sub {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .mode-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .mode-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1.25rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.25s ease;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .mode-card:hover {
+            border-color: var(--accent);
+            box-shadow: 0 0 30px var(--accent-glow);
+            transform: translateY(-2px);
+        }
+
+        .mode-card:active {
+            transform: translateY(0);
+        }
+
+        .mode-icon {
+            font-size: 2rem;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+
+        .mode-icon.capture {
+            background: linear-gradient(135deg, rgba(108, 92, 231, 0.2), rgba(46, 204, 113, 0.2));
+        }
+
+        .mode-icon.recovery {
+            background: linear-gradient(135deg, rgba(240, 165, 0, 0.2), rgba(231, 76, 60, 0.2));
+        }
+
+        .mode-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .mode-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .mode-desc {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 2rem;
+            padding: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--aurora-green);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .phase-indicator {
+            margin-top: 1.5rem;
+            text-align: center;
+        }
+    </style>
 </head>
+
 <body>
     <!-- Navbar -->
     <nav class="navbar">
         <div class="navbar-brand">
             <span class="icon">🌌</span>
-            <span>AuroraCam</span>
+            <span>Aurion</span>
         </div>
         <button class="burger-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </nav>
@@ -21,135 +154,103 @@
     <!-- Side Menu -->
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
     <nav class="side-menu" id="sideMenu">
-        <a href="/index.html" class="active"><span class="menu-icon">📊</span> Dashboard</a>
+        <a href="/index.html" class="active"><span class="menu-icon">🏠</span> Accueil</a>
         <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
         <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
         <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
         <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
         <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
+        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
         <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
     </nav>
 
     <!-- Main Content -->
     <div class="main-content">
-        <!-- Phase Status -->
-        <div class="card fade-in">
-            <div class="card-header">
-                <span class="card-title">État du système</span>
-                <span class="badge badge-phase pulse" id="phaseBadge">ARM</span>
+        <!-- Hero -->
+        <div class="hero fade-in">
+            <div class="hero-icon">🌌</div>
+            <div class="hero-title">Aurion</div>
+            <div class="hero-sub">Caméra autonome de capture d'aurores</div>
+        </div>
+
+        <!-- Mode Cards -->
+        <div class="mode-cards">
+            <a href="/dashboard.html" class="mode-card fade-in">
+                <div class="mode-icon capture">🌙</div>
+                <div class="mode-info">
+                    <span class="mode-title">Mode Capture</span>
+                    <span class="mode-desc">Configurer les paramètres et lancer la capture nocturne. Réglages
+                        d'exposition, détection, presets.</span>
+                </div>
+            </a>
+
+            <a href="/gallery.html" class="mode-card fade-in">
+                <div class="mode-icon recovery">📸</div>
+                <div class="mode-info">
+                    <span class="mode-title">Mode Récupération</span>
+                    <span class="mode-desc">Voir et télécharger les images capturées. Parcourir la galerie, télécharger
+                        sur votre téléphone.</span>
+                </div>
+            </a>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-bar fade-in">
+            <div class="stat-item">
+                <div class="stat-value" id="statImages">—</div>
+                <div class="stat-label">Images</div>
             </div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="info-label">Heure</span>
-                    <span class="info-value" id="currentTime">--:--:--</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Date</span>
-                    <span class="info-value" id="currentDate">--/--/----</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Plage horaire</span>
-                    <span class="info-value" id="timeRange">21:00 → 06:00</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Format sortie</span>
-                    <span class="info-value" id="outputFormat">RAW (DNG)</span>
-                </div>
+            <div class="stat-item">
+                <div class="stat-value" id="statSize">—</div>
+                <div class="stat-label">Taille</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="statDate">—</div>
+                <div class="stat-label">Dernière session</div>
             </div>
         </div>
 
-        <!-- Storage -->
-        <div class="card fade-in">
-            <div class="card-header">
-                <span class="card-title">Stockage</span>
-                <span class="badge badge-ok" id="storageBadge">OK</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill ok" id="storageBar" style="width: 70%"></div>
-            </div>
-            <div class="info-value" id="storageSummary" style="font-size: 0.9rem;">
-                Chargement...
-            </div>
-        </div>
-
-        <!-- Warnings -->
-        <div id="warningsContainer"></div>
-
-        <!-- Disconnect -->
-        <div class="disconnect-section">
-            <button class="btn btn-danger btn-block" onclick="requestDisconnect()" id="disconnectBtn">
-                🔌 Déconnexion
-            </button>
+        <!-- Phase -->
+        <div class="phase-indicator fade-in">
+            <span class="badge badge-phase pulse" id="phaseBadge">—</span>
         </div>
     </div>
 
     <script>
-        // ─── Menu Toggle ─────────────────────────────────
         function toggleMenu() {
             document.getElementById('sideMenu').classList.toggle('open');
             document.getElementById('menuOverlay').classList.toggle('visible');
         }
 
-        // ─── Status Polling ──────────────────────────────
-        async function updateStatus() {
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/gallery/stats');
+                const data = await res.json();
+                document.getElementById('statImages').textContent = data.total_images;
+                document.getElementById('statSize').textContent =
+                    data.total_size_mb > 1024
+                        ? (data.total_size_mb / 1024).toFixed(1) + ' Go'
+                        : data.total_size_mb.toFixed(0) + ' Mo';
+                document.getElementById('statDate').textContent =
+                    data.last_session_date || 'Aucune';
+            } catch (e) {
+                console.error('Stats load failed:', e);
+            }
+        }
+
+        async function loadPhase() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-
                 document.getElementById('phaseBadge').textContent = data.phase;
-                document.getElementById('currentTime').textContent = data.time;
-                document.getElementById('currentDate').textContent = data.date;
-
-                // Warnings
-                const container = document.getElementById('warningsContainer');
-                container.innerHTML = '';
-                data.warnings.forEach(w => {
-                    container.innerHTML += `
-                        <div class="warning-box warning">
-                            <span class="warning-icon">⚠️</span>
-                            <span>${w}</span>
-                        </div>`;
-                });
             } catch (e) {
-                console.error('Status update failed:', e);
+                console.error('Status load failed:', e);
             }
         }
 
-        async function updateStorage() {
-            try {
-                const res = await fetch('/api/storage');
-                const data = await res.json();
-
-                document.getElementById('storageSummary').textContent = data.summary;
-                const bar = document.getElementById('storageBar');
-                bar.style.width = data.free_percent + '%';
-
-                const badge = document.getElementById('storageBadge');
-                bar.className = 'progress-fill ' + data.status.toLowerCase();
-                badge.textContent = data.status;
-                badge.className = 'badge badge-' + data.status.toLowerCase();
-            } catch (e) {
-                console.error('Storage update failed:', e);
-            }
-        }
-
-        async function requestDisconnect() {
-            if (!confirm('Êtes-vous sûr de vouloir déconnecter ? La capture démarrera automatiquement.')) return;
-            const btn = document.getElementById('disconnectBtn');
-            btn.disabled = true;
-            btn.textContent = 'Déconnexion en cours...';
-            try {
-                await fetch('/api/disconnect', { method: 'POST' });
-            } catch (e) {
-                console.error('Disconnect failed:', e);
-            }
-        }
-
-        // Initial load + polling
-        updateStatus();
-        updateStorage();
-        setInterval(updateStatus, 3000);
-        setInterval(updateStorage, 10000);
+        loadStats();
+        loadPhase();
     </script>
 </body>
+
 </html>
