@@ -203,16 +203,24 @@
 
         // Tooltip system
         let activeTooltip = null;
+        let activeTooltipSource = null;
         function showTooltip(el, text) {
-            if (activeTooltip) { activeTooltip.remove(); activeTooltip = null; }
+            if (activeTooltip) {
+                activeTooltip.remove();
+                const wasSame = (activeTooltipSource === el);
+                activeTooltip = null;
+                activeTooltipSource = null;
+                if (wasSame) return;
+            }
             const bubble = document.createElement('div');
             bubble.className = 'tooltip-bubble';
             bubble.textContent = text;
-            bubble.onclick = (e) => { e.stopPropagation(); bubble.remove(); activeTooltip = null; };
+            bubble.onclick = (e) => { e.stopPropagation(); bubble.remove(); activeTooltip = null; activeTooltipSource = null; };
             el.parentElement.appendChild(bubble);
             activeTooltip = bubble;
+            activeTooltipSource = el;
             document.addEventListener('click', function handler() {
-                if (activeTooltip) { activeTooltip.remove(); activeTooltip = null; }
+                if (activeTooltip) { activeTooltip.remove(); activeTooltip = null; activeTooltipSource = null; }
                 document.removeEventListener('click', handler);
             }, { once: true });
         }
