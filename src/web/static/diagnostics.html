@@ -42,17 +42,62 @@
                     <span class="info-value" id="sysPhase">--</span>
                 </div>
                 <div class="info-item">
+                    <span class="info-label">Plateforme</span>
+                    <span class="info-value" id="sysPlatform">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Hostname</span>
+                    <span class="info-value" id="sysHostname">--</span>
+                </div>
+                <div class="info-item">
                     <span class="info-label">Uptime</span>
                     <span class="info-value" id="sysUptime">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Température CPU</span>
+                    <span class="info-value" id="sysCpuTemp">--</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Version</span>
                     <span class="info-value">0.1.0</span>
                 </div>
+            </div>
+        </div>
+
+        <!-- Date/Time Setting -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">⏰ Heure système</span>
+            </div>
+            <div class="info-grid" style="margin-bottom: 1rem;">
                 <div class="info-item">
-                    <span class="info-label">Plateforme</span>
-                    <span class="info-value" id="sysPlatform">PC (Mock)</span>
+                    <span class="info-label">Date actuelle</span>
+                    <span class="info-value" id="sysDate">--</span>
                 </div>
+                <div class="info-item">
+                    <span class="info-label">Heure actuelle</span>
+                    <span class="info-value" id="sysTime">--</span>
+                </div>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                ⚠️ Sans internet ni module RTC, l'heure se perd à chaque redémarrage.
+                Règle-la avant de lancer la détection.
+            </span>
+            <div class="form-group">
+                <label class="form-label">Régler la date et l'heure</label>
+                <input type="datetime-local" class="form-input" id="newDatetime">
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary" style="flex: 1;" onclick="syncFromPhone()">
+                    📱 Utiliser l'heure du téléphone
+                </button>
+                <button class="btn btn-outline" style="flex: 1;" onclick="applyTime()">
+                    ✅ Appliquer
+                </button>
+            </div>
+            <div id="timeStatus"
+                style="text-align:center; margin-top: 0.75rem; font-size: 0.85rem; color: var(--green); display: none;">
+                ✅ Heure réglée
             </div>
         </div>
 
@@ -99,11 +144,60 @@
 
         async function updateDiagnostics() {
             try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                document.getElementById('sysPhase').textContent = data.phase;
+                // Phase from status
+                const statusRes = await fetch('/api/status');
+                const status = await statusRes.json();
+                document.getElementById('sysPhase').textContent = status.phase;
+
+                // Real system info
+                const diagRes = await fetch('/api/diagnostics');
+                const diag = await diagRes.json();
+                document.getElementById('sysPlatform').textContent = diag.platform;
+                document.getElementById('sysHostname').textContent = diag.hostname;
+                document.getElementById('sysUptime').textContent = diag.uptime;
+                document.getElementById('sysDate').textContent = diag.system_date;
+                document.getElementById('sysTime').textContent = diag.system_time;
+                if (diag.cpu_temp !== null) {
+                    document.getElementById('sysCpuTemp').textContent = diag.cpu_temp + '°C';
+                } else {
+                    document.getElementById('sysCpuTemp').textContent = 'N/A';
+                }
             } catch (e) {
                 console.error('Diagnostics update failed:', e);
+            }
+        }
+
+        function syncFromPhone() {
+            const now = new Date();
+            // Format for datetime-local input: YYYY-MM-DDTHH:MM
+            const pad = n => String(n).padStart(2, '0');
+            const val = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' +
+                pad(now.getDate()) + 'T' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+            document.getElementById('newDatetime').value = val;
+            applyTime();
+        }
+
+        async function applyTime() {
+            const dt = document.getElementById('newDatetime').value;
+            if (!dt) { alert('Sélectionne une date et heure'); return; }
+
+            try {
+                const res = await fetch('/api/system/time', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ datetime: dt.replace('T', ' ') }),
+                });
+                if (res.ok) {
+                    const status = document.getElementById('timeStatus');
+                    status.style.display = 'block';
+                    setTimeout(() => status.style.display = 'none', 3000);
+                    updateDiagnostics();
+                } else {
+                    const err = await res.text();
+                    alert('Erreur: ' + err);
+                }
+            } catch (e) {
+                alert('Erreur: ' + e.message);
             }
         }
 

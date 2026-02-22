@@ -100,18 +100,22 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Capture a single preview image from the camera and store it.
+/// Uses current config exposure settings. Returns JPEG with metadata headers.
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
     let tmp_path = "/tmp/aurion_preview.jpg";
+    let config = state.config.read().await;
 
-    // Take a quick capture
+    // Use current exposure config for the preview
+    let shutter_us = config.exposure.shutter_min_us.to_string();
+    let iso_gain = (config.exposure.iso_min as f64 / 100.0).to_string();
+
     let result = std::process::Command::new("rpicam-still")
         .args([
             "--nopreview",
             "-o", tmp_path,
             "-t", "1",
-            "--shutter", "100000",  // 0.1s
-            "--width", "1024",
-            "--height", "768",
+            "--shutter", &shutter_us,
+            "--gain", &iso_gain,
         ])
         .output();
 
@@ -119,13 +123,26 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
         Ok(output) if output.status.success() => {
             match std::fs::read(tmp_path) {
                 Ok(data) => {
-                    // Store in AppState for GET /api/preview
                     let mut preview = state.latest_preview.write().await;
                     *preview = Some(data.clone());
-                    state.add_log("Preview capturée".into()).await;
+
+                    let shutter_display = if config.exposure.shutter_min_us >= 1_000_000 {
+                        format!("{}s", config.exposure.shutter_min_us / 1_000_000)
+                    } else {
+                        format!("1/{}s", 1_000_000 / config.exposure.shutter_min_us.max(1))
+                    };
+
+                    state.add_log(format!(
+                        "Preview: ISO {} / {}", config.exposure.iso_min, shutter_display
+                    )).await;
+
                     (
                         StatusCode::OK,
-                        [("content-type", "image/jpeg")],
+                        [
+                            ("content-type", "image/jpeg".to_string()),
+                            ("x-aurion-iso", config.exposure.iso_min.to_string()),
+                            ("x-aurion-shutter-us", config.exposure.shutter_min_us.to_string()),
+                        ],
                         data,
                     ).into_response()
                 }
@@ -613,6 +630,93 @@ pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GallerySta
     })
 }
 
+
+// ─── Diagnostics ──────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct DiagnosticsResponse {
+    pub platform: String,
+    pub hostname: String,
+    pub uptime: String,
+    pub cpu_temp: Option<f64>,
+    pub system_time: String,
+    pub system_date: String,
+}
+
+pub async fn get_diagnostics(State(_state): State<AppState>) -> Json<DiagnosticsResponse> {
+    // Platform
+    let platform = if cfg!(feature = "rpi") {
+        "Raspberry Pi".to_string()
+    } else {
+        "PC (dev)".to_string()
+    };
+
+    // Hostname
+    let hostname = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "?".into());
+
+    // Uptime
+    let uptime = std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next().map(String::from))
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|secs| {
+            let h = secs as u64 / 3600;
+            let m = (secs as u64 % 3600) / 60;
+            format!("{}h {:02}min", h, m)
+        })
+        .unwrap_or_else(|| "--".into());
+
+    // CPU temperature
+    let cpu_temp = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .map(|t| (t / 1000.0 * 10.0).round() / 10.0);
+
+    let now = chrono::Local::now();
+
+    Json(DiagnosticsResponse {
+        platform,
+        hostname,
+        uptime,
+        cpu_temp,
+        system_time: now.format("%H:%M:%S").to_string(),
+        system_date: now.format("%d/%m/%Y").to_string(),
+    })
+}
+
+// ─── Set System Time ──────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct SetTimeRequest {
+    /// Format: "2026-02-22T10:00:00"
+    pub datetime: String,
+}
+
+pub async fn set_system_time(
+    State(state): State<AppState>,
+    Json(req): Json<SetTimeRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // Use sudo date to set system time (sudoers must allow /bin/date)
+    let result = std::process::Command::new("sudo")
+        .args(["date", "-s", &req.datetime])
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            state.add_log(format!("Heure système réglée: {}", req.datetime)).await;
+            Ok(StatusCode::OK)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur: {}", stderr)))
+        }
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur: {}", e))),
+    }
+}
 
 // ─── Captive Portal Detection ─────────────────────────────
 //

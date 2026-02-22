@@ -67,6 +67,8 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/disconnect", post(api::disconnect))
         .route("/api/storage", get(api::get_storage))
         .route("/api/logs", get(api::get_logs))
+        .route("/api/diagnostics", get(api::get_diagnostics))
+        .route("/api/system/time", post(api::set_system_time))
         // Gallery (Recovery mode)
         .route("/api/gallery", get(api::get_gallery))
         .route("/api/gallery/stats", get(api::get_gallery_stats))

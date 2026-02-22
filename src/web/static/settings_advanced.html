@@ -39,7 +39,7 @@
             <div class="range-group">
                 <div class="range-header">
                     <span class="form-label">Zone d'analyse (ROI) — % haut de l'image analysé <span class="tooltip-icon"
-                            onclick="showTooltip(this, 'Pourcentage de l\'image analysé en partant du haut. 65% = les 35% du bas (sol, horizon) sont ignorés.')">❓</span></span>
+                            onclick="event.stopPropagation(); showTooltip(this, 'Pourcentage de l\'image analysé en partant du haut. 65% = les 35% du bas (sol, horizon) sont ignorés.')">❓</span></span>
                     <span class="range-value" id="roiVal">65%</span>
                 </div>
                 <input type="range" id="roiPercent" min="50" max="99" step="1" value="65"
@@ -50,7 +50,7 @@
             <div class="range-group">
                 <div class="range-header">
                     <span class="form-label">Seuil dominance verte <span class="tooltip-icon"
-                            onclick="showTooltip(this, 'Intensité minimum de vert nécessaire pour considérer un pixel comme \'aurore\'. Plus bas = plus sensible mais plus de faux positifs.')">❓</span></span>
+                            onclick="event.stopPropagation(); showTooltip(this, 'Intensité minimum de vert nécessaire pour considérer un pixel comme \'aurore\'. Plus bas = plus sensible mais plus de faux positifs.')">❓</span></span>
                     <span class="range-value" id="greenVal">15.0</span>
                 </div>
                 <input type="range" id="greenThreshold" min="5" max="50" step="0.5" value="15"
@@ -60,7 +60,7 @@
             <div class="range-group">
                 <div class="range-header">
                     <span class="form-label">Seuil luminosité <span class="tooltip-icon"
-                            onclick="showTooltip(this, 'Luminosité minimum d\'un pixel pour être pris en compte. Filtre le bruit de fond du capteur.')">❓</span></span>
+                            onclick="event.stopPropagation(); showTooltip(this, 'Luminosité minimum d\'un pixel pour être pris en compte. Filtre le bruit de fond du capteur.')">❓</span></span>
                     <span class="range-value" id="lumVal">30.0</span>
                 </div>
                 <input type="range" id="lumThreshold" min="10" max="100" step="1" value="30"
@@ -70,7 +70,7 @@
             <div class="range-group">
                 <div class="range-header">
                     <span class="form-label">Seuil variation temporelle <span class="tooltip-icon"
-                            onclick="showTooltip(this, 'Changement minimum entre 2 photos pour confirmer un mouvement (aurore vs bruit statique).')">❓</span></span>
+                            onclick="event.stopPropagation(); showTooltip(this, 'Changement minimum entre 2 photos pour confirmer un mouvement (aurore vs bruit statique).')">❓</span></span>
                     <span class="range-value" id="varVal">10.0</span>
                 </div>
                 <input type="range" id="varThreshold" min="1" max="50" step="0.5" value="10"
@@ -79,7 +79,7 @@
 
             <div class="form-group">
                 <label class="form-label">Détections consécutives requises <span class="tooltip-icon"
-                        onclick="showTooltip(this, 'Nombre de photos positives d\'affilée avant de lancer la capture intensive. 2 = évite les faux déclenchements.')">❓</span></label>
+                        onclick="event.stopPropagation(); showTooltip(this, 'Nombre de photos positives d\'affilée avant de lancer la capture intensive. 2 = évite les faux déclenchements.')">❓</span></label>
                 <input type="number" class="form-input" id="consecutiveRequired" min="1" max="10" value="2">
                 <span class="form-hint">Nombre de détections positives consécutives avant de passer en mode
                     RUN</span>
@@ -95,7 +95,7 @@
             <div class="range-group">
                 <div class="range-header">
                     <span class="form-label">Pas EV maximum (par frame en RUN) <span class="tooltip-icon"
-                            onclick="showTooltip(this, 'Limite la variation d\'exposition entre 2 photos. Anti-yoyo : empêche les sauts de luminosité brusques.')">❓</span></span>
+                            onclick="event.stopPropagation(); showTooltip(this, 'Limite la variation d\'exposition entre 2 photos. Anti-yoyo : empêche les sauts de luminosité brusques.')">❓</span></span>
                     <span class="range-value" id="evVal">0.33</span>
                 </div>
                 <input type="range" id="evStepMax" min="0.1" max="1.0" step="0.01" value="0.33"
@@ -105,7 +105,7 @@
 
             <div class="form-group">
                 <label class="form-label">Longueur focale (mm) <span class="tooltip-icon"
-                        onclick="showTooltip(this, 'Distance focale de votre objectif. Sert au calcul de la règle 500 : au-delà de 500/focale secondes, les étoiles filent.')">❓</span></label>
+                        onclick="event.stopPropagation(); showTooltip(this, 'Distance focale de votre objectif. Sert au calcul de la règle 500 : au-delà de 500/focale secondes, les étoiles filent.')">❓</span></label>
                 <input type="number" class="form-input" id="focalLength" min="1" max="50" step="0.1" value="2.7">
                 <span class="form-hint">Pour le calcul de la règle 500 (étoiles filées)</span>
             </div>
@@ -155,7 +155,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Mot de passe <span class="tooltip-icon"
-                        onclick="showTooltip(this, 'Mot de passe pour se connecter au hotspot Wi-Fi de la caméra. Min 8 caractères.')">❓</span></label>
+                        onclick="event.stopPropagation(); showTooltip(this, 'Mot de passe pour se connecter au hotspot Wi-Fi de la caméra. Min 8 caractères.')">❓</span></label>
                 <div class="password-wrapper">
                     <input type="password" class="form-input" id="wifiPassword" value="aurora2024">
                     <button type="button" class="password-toggle" onclick="togglePassword()"

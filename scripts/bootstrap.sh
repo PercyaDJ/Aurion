@@ -50,9 +50,9 @@ ask_yes_no() {
 }
 
 ensure_packages() {
-  info "Installing packages: log2ram, util-linux"
+  info "Installing packages: log2ram, util-linux, exfat support"
   apt update
-  apt install -y --no-install-recommends log2ram util-linux
+  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfat-utils
 }
 
 enable_log2ram() {

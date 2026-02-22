@@ -91,9 +91,23 @@
             try {
                 const res = await fetch('/api/preview/capture', { method: 'POST' });
                 if (res.ok) {
+                    // Read metadata from headers
+                    const iso = res.headers.get('x-aurion-iso') || '?';
+                    const shutterUs = parseInt(res.headers.get('x-aurion-shutter-us') || '0');
+                    let shutterDisplay = '';
+                    if (shutterUs >= 1000000) {
+                        shutterDisplay = (shutterUs / 1000000) + 's';
+                    } else if (shutterUs > 0) {
+                        shutterDisplay = '1/' + Math.round(1000000 / shutterUs) + 's';
+                    }
+
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     const img = document.getElementById('previewImg');
+                    img.onload = function () {
+                        document.getElementById('resolution').textContent =
+                            img.naturalWidth + '×' + img.naturalHeight;
+                    };
                     img.src = url;
                     img.style.display = 'block';
                     document.getElementById('placeholder').style.display = 'none';
@@ -104,7 +118,8 @@
                         now.toLocaleTimeString('fr-FR');
                     document.getElementById('previewTime').textContent =
                         now.toLocaleTimeString('fr-FR');
-                    document.getElementById('resolution').textContent = '1024×768';
+                    document.getElementById('previewExposure').textContent =
+                        'ISO ' + iso + ' / ' + shutterDisplay;
                 } else {
                     const err = await res.text();
                     document.getElementById('placeholder').textContent = '❌ ' + err;

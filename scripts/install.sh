@@ -56,7 +56,8 @@ install_dependencies() {
     libssl-dev \
     rpicam-apps \
     hostapd \
-    dnsmasq
+    dnsmasq \
+    nftables
   info "System dependencies installed."
 }
 
@@ -117,7 +118,7 @@ configure_sudoers() {
   local sudoers_file="/etc/sudoers.d/aurion"
   cat <<EOF | sudo tee "$sudoers_file" > /dev/null
 # Aurion — passwordless access to hardware control commands
-${AURION_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostapd, /usr/bin/killall, /sbin/shutdown, /bin/mount, /bin/umount, /bin/ip, /usr/bin/dnsmasq, /usr/sbin/nft
+${AURION_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostapd, /usr/bin/killall, /sbin/shutdown, /bin/mount, /bin/umount, /bin/ip, /usr/bin/dnsmasq, /usr/sbin/nft, /bin/date
 EOF
   sudo chmod 440 "$sudoers_file"
   # Validate syntax
