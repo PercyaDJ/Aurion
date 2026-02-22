@@ -31,12 +31,12 @@
         <div class="card fade-in">
             <div class="card-header">
                 <span class="card-title">Preview en direct</span>
-                <span class="badge badge-ok" id="refreshBadge">Auto 30s</span>
+                <span class="badge badge-ok" id="refreshBadge">Manuel</span>
             </div>
             <div class="preview-container" id="previewContainer">
                 <img id="previewImg" src="" alt="Preview" style="display:none;">
                 <div class="preview-placeholder" id="placeholder">
-                    📷 En attente de la première capture...
+                    📷 Appuie sur le bouton ci-dessous pour capturer
                 </div>
                 <div class="preview-overlay" id="previewOverlay" style="display:none;">
                     <span id="previewTime">--:--:--</span>
@@ -56,7 +56,7 @@
                 </div>
                 <div class="info-item">
                     <span class="info-label">Prochaine capture</span>
-                    <span class="info-value" id="nextCapture">--:--:--</span>
+                    <span class="info-value" id="nextCapture">Manuel</span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Phase</span>
@@ -70,7 +70,7 @@
         </div>
 
         <button class="btn btn-primary btn-block" onclick="refreshPreview()">
-            🔄 Rafraîchir maintenant
+            📷 Capturer une preview
         </button>
     </div>
 
@@ -80,9 +80,16 @@
             document.getElementById('menuOverlay').classList.toggle('visible');
         }
 
+        let capturing = false;
+
         async function refreshPreview() {
+            if (capturing) return;
+            capturing = true;
+            const btn = document.querySelector('.btn-primary');
+            btn.textContent = '⏳ Capture en cours...';
+            btn.disabled = true;
             try {
-                const res = await fetch('/api/preview');
+                const res = await fetch('/api/preview/capture', { method: 'POST' });
                 if (res.ok) {
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
@@ -97,14 +104,38 @@
                         now.toLocaleTimeString('fr-FR');
                     document.getElementById('previewTime').textContent =
                         now.toLocaleTimeString('fr-FR');
+                    document.getElementById('resolution').textContent = '1024×768';
+                } else {
+                    const err = await res.text();
+                    document.getElementById('placeholder').textContent = '❌ ' + err;
+                    document.getElementById('placeholder').style.display = 'block';
                 }
             } catch (e) {
-                console.error('Preview refresh failed:', e);
+                document.getElementById('placeholder').textContent = '❌ Erreur: ' + e.message;
+                document.getElementById('placeholder').style.display = 'block';
             }
+            btn.textContent = '📷 Capturer une preview';
+            btn.disabled = false;
+            capturing = false;
         }
 
-        refreshPreview();
-        setInterval(refreshPreview, 30000);
+        // Load last preview if available (no auto-capture)
+        async function loadExisting() {
+            try {
+                const res = await fetch('/api/preview');
+                if (res.ok) {
+                    const blob = await res.blob();
+                    if (blob.size > 0) {
+                        const img = document.getElementById('previewImg');
+                        img.src = URL.createObjectURL(blob);
+                        img.style.display = 'block';
+                        document.getElementById('placeholder').style.display = 'none';
+                        document.getElementById('previewOverlay').style.display = 'flex';
+                    }
+                }
+            } catch (e) { }
+        }
+        loadExisting();
     </script>
 </body>
 

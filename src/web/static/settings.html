@@ -38,7 +38,8 @@
 
             <div class="range-group">
                 <div class="range-header">
-                    <span class="form-label">ISO minimum</span>
+                    <span class="form-label">ISO minimum <span class="tooltip-icon"
+                            onclick="showTooltip(this, 'Sensibilité minimum du capteur. Valeur basse = moins de bruit, mais image plus sombre.')">❓</span></span>
                     <span class="range-value" id="isoMinVal">100</span>
                 </div>
                 <input type="range" id="isoMin" min="100" max="6400" step="100" value="100"
@@ -47,29 +48,39 @@
 
             <div class="range-group">
                 <div class="range-header">
-                    <span class="form-label">ISO maximum</span>
+                    <span class="form-label">ISO maximum <span class="tooltip-icon"
+                            onclick="showTooltip(this, 'Sensibilité maximum. Au-dessus de 1600, le bruit augmente. 3200 est un bon compromis.')">❓</span></span>
                     <span class="range-value" id="isoMaxVal">3200</span>
                 </div>
                 <input type="range" id="isoMax" min="100" max="6400" step="100" value="3200"
                     oninput="updateVal('isoMaxVal', this.value)">
             </div>
 
-            <div class="range-group">
-                <div class="range-header">
-                    <span class="form-label">Temps de pose min (s)</span>
-                    <span class="range-value" id="shutterMinVal">1</span>
+            <div class="form-group">
+                <label class="form-label">Temps de pose min (s) <span class="tooltip-icon"
+                        onclick="showTooltip(this, 'Durée minimale d\'exposition. 0.1s pour le jour, 1s+ pour la nuit.')">❓</span></label>
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setShutter('shutterMinInput', 0.1)">0.1s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMinInput', 0.5)">0.5s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMinInput', 1)">1s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMinInput', 5)">5s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMinInput', 10)">10s</button>
                 </div>
-                <input type="range" id="shutterMin" min="1" max="60" step="1" value="1"
-                    oninput="updateVal('shutterMinVal', this.value + 's')">
+                <input type="number" class="form-input" id="shutterMinInput" min="0.1" max="60" step="0.1" value="1">
             </div>
 
-            <div class="range-group">
-                <div class="range-header">
-                    <span class="form-label">Temps de pose max (s)</span>
-                    <span class="range-value" id="shutterMaxVal">30</span>
+            <div class="form-group">
+                <label class="form-label">Temps de pose max (s) <span class="tooltip-icon"
+                        onclick="showTooltip(this, 'Durée maximale d\'exposition. Au-delà de la règle 500/focale, les étoiles deviennent des traits.')">❓</span></label>
+                <div class="preset-buttons">
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 1)">1s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 5)">5s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 10)">10s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 15)">15s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 30)">30s</button>
+                    <button class="preset-btn" onclick="setShutter('shutterMaxInput', 60)">60s</button>
                 </div>
-                <input type="range" id="shutterMax" min="1" max="60" step="1" value="30"
-                    oninput="updateVal('shutterMaxVal', this.value + 's')">
+                <input type="number" class="form-input" id="shutterMaxInput" min="0.1" max="60" step="0.1" value="30">
             </div>
         </div>
 
@@ -85,7 +96,11 @@
                     <option value="Jpg">JPG uniquement</option>
                     <option value="RawAndJpg">RAW + JPG</option>
                 </select>
-                <span class="form-hint">RAW DNG recommandé pour l'astrophotographie</span>
+                <span class="form-hint">
+                    <span class="tooltip-icon"
+                        onclick="showTooltip(this, 'RAW DNG = qualité max pour post-traitement (fichiers lourds ~25 Mo). JPG = léger (~3 Mo). RAW+JPG = les deux.')">❓</span>
+                    RAW DNG recommandé pour l'astrophotographie
+                </span>
             </div>
         </div>
 
@@ -96,7 +111,8 @@
             </div>
             <div class="range-group">
                 <div class="range-header">
-                    <span class="form-label">Intervalle</span>
+                    <span class="form-label">Intervalle <span class="tooltip-icon"
+                            onclick="showTooltip(this, 'Temps entre chaque photo de surveillance. 60s = 1 photo/minute en mode veille.')">❓</span></span>
                     <span class="range-value" id="intervalVal">60s</span>
                 </div>
                 <input type="range" id="watchInterval" min="10" max="300" step="5" value="60"
@@ -105,19 +121,44 @@
             </div>
         </div>
 
-        <!-- Time Range -->
+        <!-- Time Range / Timer -->
         <div class="card fade-in">
             <div class="card-header">
-                <span class="card-title">Plage horaire d'observation</span>
+                <span class="card-title">Mode d'observation <span class="tooltip-icon"
+                        onclick="showTooltip(this, 'Plage horaire : surveille entre 2 heures fixes. Minuteur : surveille pendant une durée puis s\'éteint.')">❓</span></span>
             </div>
-            <div class="info-grid">
-                <div class="form-group">
-                    <label class="form-label">Début</label>
-                    <input type="time" class="form-input" id="timeStart" value="21:00">
+
+            <div class="mode-toggle">
+                <button class="mode-btn active" id="modeRange" onclick="setMode('range')">🕐 Plage horaire</button>
+                <button class="mode-btn" id="modeTimer" onclick="setMode('timer')">⏱️ Minuteur</button>
+            </div>
+
+            <div id="rangeSection">
+                <div class="info-grid">
+                    <div class="form-group">
+                        <label class="form-label">Début</label>
+                        <input type="time" class="form-input" id="timeStart" value="21:00">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Fin</label>
+                        <input type="time" class="form-input" id="timeEnd" value="06:00">
+                    </div>
                 </div>
+            </div>
+
+            <div id="timerSection" style="display: none;">
                 <div class="form-group">
-                    <label class="form-label">Fin</label>
-                    <input type="time" class="form-input" id="timeEnd" value="06:00">
+                    <label class="form-label">Durée de surveillance (heures)</label>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" onclick="document.getElementById('timerHours').value=2">2h</button>
+                        <button class="preset-btn" onclick="document.getElementById('timerHours').value=6">6h</button>
+                        <button class="preset-btn" onclick="document.getElementById('timerHours').value=10">10h</button>
+                        <button class="preset-btn" onclick="document.getElementById('timerHours').value=14">14h</button>
+                        <button class="preset-btn" onclick="document.getElementById('timerHours').value=24">24h</button>
+                    </div>
+                    <input type="number" class="form-input" id="timerHours" min="0.5" max="48" step="0.5" value="14">
+                    <span class="form-hint">La caméra démarre immédiatement et s'éteint proprement après cette
+                        durée</span>
                 </div>
             </div>
         </div>
@@ -142,6 +183,33 @@
             document.getElementById(id).textContent = val;
         }
 
+        function setShutter(inputId, val) {
+            document.getElementById(inputId).value = val;
+        }
+
+        function setMode(mode) {
+            document.getElementById('modeRange').classList.toggle('active', mode === 'range');
+            document.getElementById('modeTimer').classList.toggle('active', mode === 'timer');
+            document.getElementById('rangeSection').style.display = mode === 'range' ? 'block' : 'none';
+            document.getElementById('timerSection').style.display = mode === 'timer' ? 'block' : 'none';
+        }
+
+        // Tooltip system
+        let activeTooltip = null;
+        function showTooltip(el, text) {
+            if (activeTooltip) { activeTooltip.remove(); activeTooltip = null; }
+            const bubble = document.createElement('div');
+            bubble.className = 'tooltip-bubble';
+            bubble.textContent = text;
+            bubble.onclick = (e) => { e.stopPropagation(); bubble.remove(); activeTooltip = null; };
+            el.parentElement.appendChild(bubble);
+            activeTooltip = bubble;
+            document.addEventListener('click', function handler() {
+                if (activeTooltip) { activeTooltip.remove(); activeTooltip = null; }
+                document.removeEventListener('click', handler);
+            }, { once: true });
+        }
+
         async function loadConfig() {
             try {
                 const res = await fetch('/api/config');
@@ -152,18 +220,24 @@
                 document.getElementById('isoMax').value = cfg.exposure.iso_max;
                 document.getElementById('isoMaxVal').textContent = cfg.exposure.iso_max;
 
-                const shutterMinS = Math.round(cfg.exposure.shutter_min_us / 1000000);
-                const shutterMaxS = Math.round(cfg.exposure.shutter_max_us / 1000000);
-                document.getElementById('shutterMin').value = shutterMinS;
-                document.getElementById('shutterMinVal').textContent = shutterMinS + 's';
-                document.getElementById('shutterMax').value = shutterMaxS;
-                document.getElementById('shutterMaxVal').textContent = shutterMaxS + 's';
+                const shutterMinS = cfg.exposure.shutter_min_us / 1000000;
+                const shutterMaxS = cfg.exposure.shutter_max_us / 1000000;
+                document.getElementById('shutterMinInput').value = shutterMinS;
+                document.getElementById('shutterMaxInput').value = shutterMaxS;
 
                 document.getElementById('outputFormat').value = cfg.capture.output_format;
                 document.getElementById('watchInterval').value = cfg.capture.watch_interval_secs;
                 document.getElementById('intervalVal').textContent = cfg.capture.watch_interval_secs + 's';
                 document.getElementById('timeStart').value = cfg.time_range.start.substring(0, 5);
                 document.getElementById('timeEnd').value = cfg.time_range.end.substring(0, 5);
+
+                // Timer mode
+                if (cfg.time_range.duration_hours) {
+                    document.getElementById('timerHours').value = cfg.time_range.duration_hours;
+                    setMode('timer');
+                } else {
+                    setMode('range');
+                }
             } catch (e) {
                 console.error('Load config failed:', e);
             }
@@ -176,12 +250,16 @@
 
                 cfg.exposure.iso_min = parseInt(document.getElementById('isoMin').value);
                 cfg.exposure.iso_max = parseInt(document.getElementById('isoMax').value);
-                cfg.exposure.shutter_min_us = parseInt(document.getElementById('shutterMin').value) * 1000000;
-                cfg.exposure.shutter_max_us = parseInt(document.getElementById('shutterMax').value) * 1000000;
+                cfg.exposure.shutter_min_us = Math.round(parseFloat(document.getElementById('shutterMinInput').value) * 1000000);
+                cfg.exposure.shutter_max_us = Math.round(parseFloat(document.getElementById('shutterMaxInput').value) * 1000000);
                 cfg.capture.output_format = document.getElementById('outputFormat').value;
                 cfg.capture.watch_interval_secs = parseInt(document.getElementById('watchInterval').value);
                 cfg.time_range.start = document.getElementById('timeStart').value + ':00';
                 cfg.time_range.end = document.getElementById('timeEnd').value + ':00';
+
+                // Timer mode
+                const isTimer = document.getElementById('modeTimer').classList.contains('active');
+                cfg.time_range.duration_hours = isTimer ? parseFloat(document.getElementById('timerHours').value) : null;
 
                 await fetch('/api/config', {
                     method: 'POST',

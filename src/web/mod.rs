@@ -58,6 +58,7 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         // API routes
         .route("/api/status", get(api::get_status))
         .route("/api/preview", get(api::get_preview))
+        .route("/api/preview/capture", post(api::capture_preview))
         .route("/api/config", get(api::get_config))
         .route("/api/config", post(api::update_config))
         .route("/api/presets", get(api::get_presets))

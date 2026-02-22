@@ -99,6 +99,56 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// Capture a single preview image from the camera and store it.
+pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
+    let tmp_path = "/tmp/aurion_preview.jpg";
+
+    // Take a quick capture
+    let result = std::process::Command::new("rpicam-still")
+        .args([
+            "--nopreview",
+            "-o", tmp_path,
+            "-t", "1",
+            "--shutter", "100000",  // 0.1s
+            "--width", "1024",
+            "--height", "768",
+        ])
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            match std::fs::read(tmp_path) {
+                Ok(data) => {
+                    // Store in AppState for GET /api/preview
+                    let mut preview = state.latest_preview.write().await;
+                    *preview = Some(data.clone());
+                    state.add_log("Preview capturée".into()).await;
+                    (
+                        StatusCode::OK,
+                        [("content-type", "image/jpeg")],
+                        data,
+                    ).into_response()
+                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Lecture échouée: {}", e),
+                ).into_response(),
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("rpicam-still échouée: {}", stderr),
+            ).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("rpicam-still non trouvé: {}", e),
+        ).into_response(),
+    }
+}
+
 // ─── Config ────────────────────────────────────────────────
 
 pub async fn get_config(State(state): State<AppState>) -> Json<AppConfig> {

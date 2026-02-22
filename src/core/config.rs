@@ -47,6 +47,9 @@ pub struct CaptureConfig {
 pub struct TimeRangeConfig {
     pub start: NaiveTime,
     pub end: NaiveTime,
+    /// If set, use timer mode: detect for N hours then shutdown. Overrides start/end.
+    #[serde(default)]
+    pub duration_hours: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +171,7 @@ impl Default for AppConfig {
             time_range: TimeRangeConfig {
                 start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
                 end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+                duration_hours: None,
             },
             storage: StorageConfig {
                 mount_point: "/mnt/capture".into(),
