@@ -33,10 +33,17 @@
                 <span class="card-title">Preview en direct</span>
                 <span class="badge badge-ok" id="refreshBadge">Manuel</span>
             </div>
-            <div class="preview-container" id="previewContainer">
-                <img id="previewImg" src="" alt="Preview" style="display:none;">
+            <div class="preview-container" id="previewContainer" style="position:relative;">
+                <img id="previewImg" src="" alt="Preview" style="display:none; width:100%;">
                 <div class="preview-placeholder" id="placeholder">
                     📷 Appuie sur le bouton ci-dessous pour capturer
+                </div>
+                <!-- ROI overlay -->
+                <div id="roiOverlay" style="display:none; position:absolute; left:0; right:0; bottom:0;
+                    background: rgba(255,60,60,0.25); border-top: 2px dashed rgba(255,100,100,0.8);
+                    pointer-events:none; z-index:5;">
+                    <span style="position:absolute; top:4px; right:8px; font-size:0.7rem;
+                        color:rgba(255,150,150,0.9); font-weight:600;">Zone exclue (ROI)</span>
                 </div>
                 <div class="preview-overlay" id="previewOverlay" style="display:none;">
                     <span id="previewTime">--:--:--</span>
@@ -69,9 +76,14 @@
             </div>
         </div>
 
-        <button class="btn btn-primary btn-block" onclick="refreshPreview()">
-            📷 Capturer une preview
-        </button>
+        <div style="display:flex; gap:0.5rem;">
+            <button class="btn btn-primary" style="flex:1;" onclick="refreshPreview()">
+                📷 Capturer
+            </button>
+            <button class="btn btn-outline" id="roiToggle" onclick="toggleRoi()">
+                📐 ROI
+            </button>
+        </div>
     </div>
 
     <script>
@@ -107,6 +119,7 @@
                     img.onload = function () {
                         document.getElementById('resolution').textContent =
                             img.naturalWidth + '×' + img.naturalHeight;
+                        updateRoiOverlay();
                     };
                     img.src = url;
                     img.style.display = 'block';
@@ -150,6 +163,38 @@
                 }
             } catch (e) { }
         }
+        let roiPercent = 65;
+        let roiVisible = false;
+
+        async function loadRoi() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+                roiPercent = cfg.detection.roi_percent || 65;
+            } catch (e) { }
+        }
+
+        function updateRoiOverlay() {
+            const overlay = document.getElementById('roiOverlay');
+            const img = document.getElementById('previewImg');
+            if (!roiVisible || img.style.display === 'none') {
+                overlay.style.display = 'none';
+                return;
+            }
+            const excludedPercent = 100 - roiPercent;
+            overlay.style.display = 'block';
+            overlay.style.height = excludedPercent + '%';
+        }
+
+        function toggleRoi() {
+            roiVisible = !roiVisible;
+            const btn = document.getElementById('roiToggle');
+            btn.classList.toggle('btn-outline', !roiVisible);
+            btn.classList.toggle('btn-primary', roiVisible);
+            updateRoiOverlay();
+        }
+
+        loadRoi();
         loadExisting();
     </script>
 </body>
