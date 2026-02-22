@@ -41,11 +41,45 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         warnings.push("Règle 500 dépassée : risque d'étoiles filées".into());
     }
 
+    // Read real storage stats
+    let storage_info = {
+        let mount_point = &config.storage.mount_point;
+        match std::process::Command::new("df")
+            .args(["--output=size,avail", "-B1", mount_point])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let lines: Vec<&str> = stdout.lines().collect();
+                lines.get(1).and_then(|line| {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let total: u64 = parts[0].parse().ok()?;
+                        let avail: u64 = parts[1].parse().ok()?;
+                        let total_gb = total as f64 / 1_073_741_824.0;
+                        let free_gb = avail as f64 / 1_073_741_824.0;
+                        let pct = if total > 0 { avail as f64 / total as f64 * 100.0 } else { 0.0 };
+                        Some(StorageResponse {
+                            total_gb: (total_gb * 10.0).round() / 10.0,
+                            free_gb: (free_gb * 10.0).round() / 10.0,
+                            free_percent: (pct * 10.0).round() / 10.0,
+                            status: if pct > 10.0 { "Ok".into() } else { "Low".into() },
+                            summary: format!("{:.0} % libre ({:.1} Go / {:.1} Go)", pct, free_gb, total_gb),
+                        })
+                    } else {
+                        None
+                    }
+                })
+            }
+            _ => None,
+        }
+    };
+
     Json(StatusResponse {
         phase: phase.to_string(),
         time: now.format("%H:%M:%S").to_string(),
         date: now.format("%d/%m/%Y").to_string(),
-        storage: None, // Will be filled when storage adapter is wired
+        storage: storage_info,
         warnings,
     })
 }
@@ -246,15 +280,60 @@ pub struct StorageResponse {
     pub summary: String,
 }
 
-pub async fn get_storage(State(_state): State<AppState>) -> Json<StorageResponse> {
-    // Placeholder — will be connected to StoragePort
-    Json(StorageResponse {
-        total_gb: 128.0,
-        free_gb: 90.0,
-        free_percent: 70.3,
-        status: "Ok".into(),
-        summary: "70 % libre (90 Go / 128 Go)".into(),
-    })
+pub async fn get_storage(State(state): State<AppState>) -> Json<StorageResponse> {
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+
+    // Read real disk stats from the configured mount point via df
+    let storage = match std::process::Command::new("df")
+        .args(["--output=size,avail", "-B1", mount_point])
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // df output: header line + data line (values in bytes with -B1)
+            let lines: Vec<&str> = stdout.lines().collect();
+            if let Some(data_line) = lines.get(1) {
+                let parts: Vec<&str> = data_line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let total_bytes: u64 = parts[0].parse().unwrap_or(0);
+                    let avail_bytes: u64 = parts[1].parse().unwrap_or(0);
+                    let total_gb = total_bytes as f64 / 1_073_741_824.0;
+                    let free_gb = avail_bytes as f64 / 1_073_741_824.0;
+                    let free_percent = if total_bytes > 0 {
+                        (avail_bytes as f64 / total_bytes as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    StorageResponse {
+                        total_gb: (total_gb * 10.0).round() / 10.0,
+                        free_gb: (free_gb * 10.0).round() / 10.0,
+                        free_percent: (free_percent * 10.0).round() / 10.0,
+                        status: if free_percent > 10.0 { "Ok".into() } else { "Low".into() },
+                        summary: format!("{:.0} % libre ({:.1} Go / {:.1} Go)", free_percent, free_gb, total_gb),
+                    }
+                } else {
+                    default_storage_error("Lecture df échouée")
+                }
+            } else {
+                default_storage_error("Lecture df échouée")
+            }
+        }
+        _ => default_storage_error(&format!("{} non monté", mount_point)),
+    };
+
+    Json(storage)
+}
+
+fn default_storage_error(msg: &str) -> StorageResponse {
+    StorageResponse {
+        total_gb: 0.0,
+        free_gb: 0.0,
+        free_percent: 0.0,
+        status: "Error".into(),
+        summary: msg.into(),
+    }
 }
 
 // ─── Logs ──────────────────────────────────────────────────
