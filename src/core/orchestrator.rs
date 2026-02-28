@@ -144,7 +144,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
             // Check time limit
             let now = chrono::Local::now();
-            let should_stop = if let Some(dl) = deadline {
+            let should_stop = if let Some(_dl) = deadline {
                 // Timer mode: check elapsed duration
                 let elapsed = now.signed_duration_since(loop_start);
                 let max_duration = config.time_range.duration_hours.unwrap_or(0.0);
