@@ -101,6 +101,68 @@
             </div>
         </div>
 
+        <!-- Shutdown -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">⏻ Arrêt système</span>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                Éteint proprement la Raspberry Pi. Sync les fichiers avant de couper.
+            </span>
+            <button class="btn btn-outline btn-block" style="color: var(--red); border-color: var(--red);"
+                onclick="confirmShutdown()">
+                ⏻ Éteindre la caméra
+            </button>
+            <div id="shutdownConfirm" style="display: none; margin-top: 0.75rem; text-align: center;">
+                <span style="color: var(--red); font-weight: 600;">⚠️ Confirmer l'arrêt ?</span>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                    <button class="btn btn-outline" style="flex:1; color: var(--red); border-color: var(--red);"
+                        onclick="doShutdown()">Oui, éteindre</button>
+                    <button class="btn btn-outline" style="flex:1;" onclick="cancelShutdown()">Annuler</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wi-Fi Client (Maintenance) -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">📶 Connexion Wi-Fi (maintenance)</span>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                Connecte la RPi à un réseau Wi-Fi existant pour accès SSH et mises à jour.
+                Le hotspot sera coupé. Au redémarrage, le hotspot reviendra automatiquement.
+            </span>
+            <div class="info-grid" style="margin-bottom: 0.75rem;">
+                <div class="info-item">
+                    <span class="info-label">Mode actuel</span>
+                    <span class="info-value" id="wifiMode">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">IP</span>
+                    <span class="info-value" id="wifiIp">--</span>
+                </div>
+            </div>
+            <button class="btn btn-outline btn-block" onclick="scanWifi()" id="scanBtn">
+                🔍 Scanner les réseaux
+            </button>
+            <div id="wifiList" style="display: none; margin-top: 0.75rem;">
+                <div id="wifiNetworks"></div>
+            </div>
+            <div id="wifiConnectForm" style="display: none; margin-top: 0.75rem;">
+                <div class="form-group">
+                    <label class="form-label" id="wifiSelectedLabel">Réseau: --</label>
+                    <div class="password-wrapper">
+                        <input type="password" class="form-input" id="wifiPassword" placeholder="Mot de passe Wi-Fi">
+                        <button type="button" class="password-toggle" onclick="toggleWifiPwd()"
+                            title="Afficher/masquer">👁️</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-block" onclick="connectWifi()">📶 Connecter</button>
+            </div>
+            <div id="wifiStatus" style="display: none; margin-top: 0.75rem; text-align: center; font-size: 0.85rem;">
+            </div>
+        </div>
+
         <!-- Logs -->
         <div class="card fade-in">
             <div class="card-header">
@@ -209,8 +271,114 @@
 
         refreshLogs();
         updateDiagnostics();
+        updateWifiStatus();
         setInterval(refreshLogs, 5000);
         setInterval(updateDiagnostics, 3000);
+
+        // Shutdown
+        function confirmShutdown() {
+            document.getElementById('shutdownConfirm').style.display = 'block';
+        }
+        function cancelShutdown() {
+            document.getElementById('shutdownConfirm').style.display = 'none';
+        }
+        async function doShutdown() {
+            try {
+                await fetch('/api/system/shutdown', { method: 'POST' });
+                document.getElementById('shutdownConfirm').innerHTML =
+                    '<span style="color: var(--green);">✅ Arrêt en cours… Vous pouvez débrancher dans 10 secondes.</span>';
+            } catch (e) {
+                alert('Erreur: ' + e.message);
+            }
+        }
+
+        // Wi-Fi Client
+        let selectedSsid = '';
+
+        async function updateWifiStatus() {
+            try {
+                const res = await fetch('/api/wifi/status');
+                const data = await res.json();
+                const modeEl = document.getElementById('wifiMode');
+                const ipEl = document.getElementById('wifiIp');
+                if (data.mode === 'hotspot') {
+                    modeEl.textContent = '📡 Hotspot';
+                    modeEl.style.color = 'var(--green)';
+                } else if (data.mode === 'client') {
+                    modeEl.textContent = '📶 ' + (data.ssid || 'Client');
+                    modeEl.style.color = 'var(--blue)';
+                } else {
+                    modeEl.textContent = '❌ Déconnecté';
+                    modeEl.style.color = 'var(--red)';
+                }
+                ipEl.textContent = data.ip_address || '--';
+            } catch (e) { /* ignore */ }
+        }
+
+        async function scanWifi() {
+            const btn = document.getElementById('scanBtn');
+            btn.textContent = '⏳ Scan en cours…';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/wifi/scan');
+                const data = await res.json();
+                const list = document.getElementById('wifiList');
+                const container = document.getElementById('wifiNetworks');
+                if (data.networks.length === 0) {
+                    container.innerHTML = '<span class="form-hint">Aucun réseau trouvé</span>';
+                } else {
+                    container.innerHTML = data.networks.map(n =>
+                        `<button class="btn btn-outline btn-block" style="margin-bottom:0.25rem; text-align:left;" onclick="selectWifi('${escapeHtml(n.ssid)}')">
+                            <span>${escapeHtml(n.ssid)}</span>
+                            <span style="float:right; color:var(--text-muted);">${n.signal}dBm · ${n.security}</span>
+                        </button>`
+                    ).join('');
+                }
+                list.style.display = 'block';
+            } catch (e) {
+                alert('Scan échoué: ' + e.message);
+            }
+            btn.textContent = '🔍 Scanner les réseaux';
+            btn.disabled = false;
+        }
+
+        function selectWifi(ssid) {
+            selectedSsid = ssid;
+            document.getElementById('wifiSelectedLabel').textContent = 'Réseau: ' + ssid;
+            document.getElementById('wifiConnectForm').style.display = 'block';
+            document.getElementById('wifiPassword').focus();
+        }
+
+        function toggleWifiPwd() {
+            const input = document.getElementById('wifiPassword');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        async function connectWifi() {
+            const password = document.getElementById('wifiPassword').value;
+            if (!password) { alert('Entrez le mot de passe'); return; }
+            const statusEl = document.getElementById('wifiStatus');
+            statusEl.style.display = 'block';
+            statusEl.style.color = 'var(--text-muted)';
+            statusEl.textContent = '⏳ Connexion en cours… (le hotspot va se couper)';
+            try {
+                const res = await fetch('/api/wifi/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: selectedSsid, password }),
+                });
+                const data = await res.json();
+                statusEl.style.color = data.success ? 'var(--green)' : 'var(--red)';
+                statusEl.innerHTML = data.message;
+                if (data.ip_address) {
+                    statusEl.innerHTML += '<br><strong>Accès SSH: ssh pi@' + data.ip_address + '</strong>';
+                }
+                updateWifiStatus();
+            } catch (e) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '❌ Connexion perdue (le hotspot a été coupé). Connectez-vous au réseau Wi-Fi pour accéder à la RPi.';
+            }
+        }
     </script>
 </body>
 

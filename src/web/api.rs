@@ -718,6 +718,240 @@ pub async fn set_system_time(
     }
 }
 
+// ─── System Shutdown ──────────────────────────────────────
+
+pub async fn system_shutdown(State(state): State<AppState>) -> StatusCode {
+    state.add_log("⏻ Arrêt système demandé…".into()).await;
+
+    // Sync filesystem first
+    let _ = std::process::Command::new("sync").output();
+
+    // Schedule shutdown in 3 seconds (gives time for HTTP response)
+    let _ = std::process::Command::new("sudo")
+        .args(["shutdown", "-h", "+0"])
+        .spawn();
+
+    StatusCode::OK
+}
+
+// ─── Wi-Fi Client (maintenance mode) ─────────────────────
+
+#[derive(Serialize)]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub signal: i32,
+    pub security: String,
+}
+
+#[derive(Serialize)]
+pub struct WifiScanResponse {
+    pub networks: Vec<WifiNetwork>,
+}
+
+pub async fn wifi_scan() -> Json<WifiScanResponse> {
+    let mut networks = Vec::new();
+
+    // Try iwlist first (works without NetworkManager)
+    if let Ok(output) = std::process::Command::new("sudo")
+        .args(["iwlist", "wlan0", "scan"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut current_ssid = String::new();
+        let mut current_signal: i32 = 0;
+        let mut current_security = String::from("Open");
+
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("Cell ") {
+                // Save previous
+                if !current_ssid.is_empty() {
+                    networks.push(WifiNetwork {
+                        ssid: current_ssid.clone(),
+                        signal: current_signal,
+                        security: current_security.clone(),
+                    });
+                }
+                current_ssid.clear();
+                current_signal = 0;
+                current_security = "Open".into();
+            } else if trimmed.starts_with("ESSID:") {
+                current_ssid = trimmed
+                    .trim_start_matches("ESSID:")
+                    .trim_matches('"')
+                    .to_string();
+            } else if trimmed.starts_with("Signal level=") || trimmed.contains("Signal level=") {
+                if let Some(pos) = trimmed.find("Signal level=") {
+                    let rest = &trimmed[pos + 13..];
+                    current_signal = rest.split_whitespace()
+                        .next()
+                        .and_then(|s| s.trim_end_matches("dBm").parse().ok())
+                        .unwrap_or(0);
+                }
+            } else if trimmed.contains("WPA") || trimmed.contains("WPA2") {
+                current_security = "WPA2".into();
+            }
+        }
+        // Push last
+        if !current_ssid.is_empty() {
+            networks.push(WifiNetwork {
+                ssid: current_ssid,
+                signal: current_signal,
+                security: current_security,
+            });
+        }
+    }
+
+    // Deduplicate by SSID, keep strongest signal
+    networks.sort_by(|a, b| a.ssid.cmp(&b.ssid).then(b.signal.cmp(&a.signal)));
+    networks.dedup_by(|a, b| a.ssid == b.ssid);
+    // Sort by signal strength (strongest first, closer to 0 is better for negative dBm)
+    networks.sort_by(|a, b| b.signal.cmp(&a.signal));
+
+    Json(WifiScanResponse { networks })
+}
+
+#[derive(Deserialize)]
+pub struct WifiConnectRequest {
+    pub ssid: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct WifiConnectResponse {
+    pub success: bool,
+    pub message: String,
+    pub ip_address: Option<String>,
+}
+
+pub async fn wifi_connect(
+    State(state): State<AppState>,
+    Json(req): Json<WifiConnectRequest>,
+) -> Json<WifiConnectResponse> {
+    state.add_log(format!("📶 Connexion Wi-Fi: {}…", req.ssid)).await;
+
+    // Write wpa_supplicant config
+    let wpa_conf = format!(
+        "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n\
+         update_config=1\n\
+         country=FR\n\n\
+         network={{\n\
+             ssid=\"{}\"\n\
+             psk=\"{}\"\n\
+             key_mgmt=WPA-PSK\n\
+         }}\n",
+        req.ssid, req.password
+    );
+
+    if let Err(e) = std::fs::write("/tmp/aurion_wpa.conf", &wpa_conf) {
+        return Json(WifiConnectResponse {
+            success: false,
+            message: format!("Erreur écriture config: {}", e),
+            ip_address: None,
+        });
+    }
+
+    // Copy config and reconfigure
+    let _ = std::process::Command::new("sudo")
+        .args(["cp", "/tmp/aurion_wpa.conf", "/etc/wpa_supplicant/wpa_supplicant.conf"])
+        .output();
+
+    // Stop AP mode
+    let _ = std::process::Command::new("sudo").args(["killall", "hostapd"]).output();
+    let _ = std::process::Command::new("sudo").args(["killall", "dnsmasq"]).output();
+    let _ = std::process::Command::new("sudo").args(["ip", "addr", "flush", "dev", "wlan0"]).output();
+
+    // Start wpa_supplicant
+    let _ = std::process::Command::new("sudo")
+        .args(["wpa_supplicant", "-B", "-i", "wlan0", "-c", "/etc/wpa_supplicant/wpa_supplicant.conf"])
+        .output();
+
+    // Request DHCP
+    let _ = std::process::Command::new("sudo")
+        .args(["dhclient", "wlan0"])
+        .output();
+
+    // Wait a bit for IP assignment
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    // Get assigned IP
+    let ip = get_wlan_ip();
+
+    let success = ip.is_some();
+    let message = if success {
+        format!("✅ Connecté à {} — IP: {}", req.ssid, ip.as_deref().unwrap_or("?"))
+    } else {
+        format!("❌ Échec connexion à {}. Vérifiez le mot de passe.", req.ssid)
+    };
+
+    state.add_log(message.clone()).await;
+
+    Json(WifiConnectResponse {
+        success,
+        message,
+        ip_address: ip,
+    })
+}
+
+#[derive(Serialize)]
+pub struct WifiStatusResponse {
+    pub mode: String,
+    pub ssid: Option<String>,
+    pub ip_address: Option<String>,
+}
+
+pub async fn wifi_status() -> Json<WifiStatusResponse> {
+    // Check if hostapd is running (AP mode)
+    let ap_active = std::process::Command::new("pgrep")
+        .arg("hostapd")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if ap_active {
+        return Json(WifiStatusResponse {
+            mode: "hotspot".into(),
+            ssid: None,
+            ip_address: Some("192.168.4.1".into()),
+        });
+    }
+
+    // Check connected SSID
+    let ssid = std::process::Command::new("iwgetid")
+        .args(["-r"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let ip = get_wlan_ip();
+
+    Json(WifiStatusResponse {
+        mode: if ssid.is_some() { "client".into() } else { "disconnected".into() },
+        ssid,
+        ip_address: ip,
+    })
+}
+
+fn get_wlan_ip() -> Option<String> {
+    std::process::Command::new("ip")
+        .args(["-4", "addr", "show", "wlan0"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("inet ") {
+                    return trimmed.split_whitespace()
+                        .nth(1)
+                        .map(|s| s.split('/').next().unwrap_or(s).to_string());
+                }
+            }
+            None
+        })
+}
+
 // ─── Captive Portal Detection ─────────────────────────────
 //
 // When a device connects to the Aurion Wi-Fi, the OS tries to

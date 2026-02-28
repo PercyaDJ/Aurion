@@ -118,7 +118,7 @@ configure_sudoers() {
   local sudoers_file="/etc/sudoers.d/aurion"
   cat <<EOF | sudo tee "$sudoers_file" > /dev/null
 # Aurion — passwordless access to hardware control commands
-${AURION_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostapd, /usr/bin/killall, /sbin/shutdown, /bin/mount, /bin/umount, /bin/ip, /usr/bin/dnsmasq, /usr/sbin/nft, /bin/date
+${AURION_USER} ALL=(ALL) NOPASSWD: /usr/bin/hostapd, /usr/bin/killall, /sbin/shutdown, /bin/mount, /bin/umount, /bin/ip, /usr/bin/dnsmasq, /usr/sbin/nft, /bin/date, /sbin/iwlist, /sbin/wpa_supplicant, /sbin/wpa_cli, /sbin/dhclient, /usr/bin/cp
 EOF
   sudo chmod 440 "$sudoers_file"
   # Validate syntax
@@ -142,10 +142,13 @@ After=mnt-capture.automount
 Type=simple
 User=${AURION_USER}
 WorkingDirectory=${AURION_DIR}
-ExecStart=${AURION_BIN} serve
-Restart=on-failure
-RestartSec=5
+ExecStart=${AURION_BIN} run
+Restart=always
+RestartSec=10
+WatchdogSec=300
 Environment=RUST_LOG=info
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

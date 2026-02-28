@@ -50,15 +50,16 @@ impl CameraRpi {
         let gain = exposure.iso as f64 / 100.0;
         cmd.arg("--gain").arg(format!("{:.1}", gain));
 
-        // Disable auto-exposure and AWB
-        cmd.arg("--awb").arg("auto");
+        // Disable auto-exposure, use fixed greyworld WB for night sky
+        cmd.arg("--awb").arg("greyworld");
         cmd.arg("--ev").arg("0");
 
         if raw {
             cmd.arg("--raw");
         }
 
-        // Timeout 0 = immediate capture (no preview delay)
+        // Immediate capture (no preview delay)
+        cmd.arg("--immediate");
         cmd.arg("-t").arg("1");
 
         cmd

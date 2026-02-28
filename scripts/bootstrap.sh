@@ -10,11 +10,18 @@ set -euo pipefail
 # - Disables apt-daily auto timers (mask)
 # - Configures USB capture automount (vfat/exfat) on /mnt/capture
 # - Creates aurion-flush + aurion-power-watch timers
-# - Optionally disables zram (interactive prompt)
+# - Installs git and libclang-dev for Rust compilation
+# - Optionally disables zram (interactive prompt, skip with --yes)
 #
 # Usage:
-#   sudo bash scripts/bootstrap.sh
+#   sudo bash scripts/bootstrap.sh          # interactive
+#   sudo bash scripts/bootstrap.sh --yes    # non-interactive (skip prompts)
 # ─────────────────────────────────────────────────────────────
+
+AUTO_YES=false
+if [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]]; then
+  AUTO_YES=true
+fi
 
 info() { echo -e "\n[+] $*\n"; }
 warn() { echo -e "\n[!] $*\n"; }
@@ -50,9 +57,9 @@ ask_yes_no() {
 }
 
 ensure_packages() {
-  info "Installing packages: log2ram, util-linux, exfat support"
+  info "Installing packages: log2ram, util-linux, exfat support, git, build deps"
   apt update
-  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfat-utils
+  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfat-utils git libclang-dev
 }
 
 enable_log2ram() {
@@ -233,6 +240,12 @@ EOF
 maybe_disable_zram_interactive() {
   if ! swapon --show | grep -q zram; then
     info "No zram swap detected."
+    return 0
+  fi
+
+  # Non-interactive: keep zram
+  if $AUTO_YES; then
+    info "Keeping zram enabled (non-interactive mode)."
     return 0
   fi
 
