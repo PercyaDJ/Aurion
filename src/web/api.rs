@@ -105,9 +105,11 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 /// only used during the autonomous night capture loop.
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
     let tmp_path = "/tmp/aurion_preview.jpg";
+    let meta_path = "/tmp/aurion_preview_meta.txt";
 
     // Let rpicam-still handle AEC/AWB automatically
     // -t 2000 = give camera 2 seconds to auto-converge before capturing
+    // --metadata = output capture metadata to a file
     let result = std::process::Command::new("rpicam-still")
         .args([
             "--nopreview",
@@ -115,14 +117,14 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             "-t", "2000",
             "--width", "1024",
             "--height", "768",
+            "--metadata", meta_path,
         ])
         .output();
 
     match result {
         Ok(output) if output.status.success() => {
-            // Read EXIF-like info from rpicam-still stderr
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let (iso, shutter_us) = parse_rpicam_metadata(&stderr);
+            // Read metadata from file
+            let (iso, shutter_us) = parse_rpicam_metadata_file(meta_path);
 
             match std::fs::read(tmp_path) {
                 Ok(data) => {
@@ -171,34 +173,29 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
     }
 }
 
-/// Parse ISO and shutter from rpicam-still stderr output.
-/// rpicam-still logs lines like: "Exp: 33333 AG: 1.0 DG: 1.2"
-fn parse_rpicam_metadata(stderr: &str) -> (u32, u64) {
+/// Parse ISO and shutter from rpicam-still metadata file.
+/// The metadata file contains key=value pairs like:
+///   ExposureTime=33333
+///   AnalogueGain=1.000000
+///   DigitalGain=1.123456
+fn parse_rpicam_metadata_file(path: &str) -> (u32, u64) {
     let mut iso = 0u32;
     let mut shutter_us = 0u64;
 
-    for line in stderr.lines() {
-        // Look for exposure info in the log
-        if line.contains("Exp:") {
-            if let Some(exp_pos) = line.find("Exp:") {
-                let rest = &line[exp_pos + 4..];
-                shutter_us = rest.trim().split_whitespace()
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-            }
-        }
-        if line.contains("AG:") {
-            if let Some(ag_pos) = line.find("AG:") {
-                let rest = &line[ag_pos + 3..];
-                let gain: f64 = rest.trim().split_whitespace()
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(1.0);
+    if let Ok(content) = std::fs::read_to_string(path) {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(val) = trimmed.strip_prefix("ExposureTime=") {
+                shutter_us = val.trim().parse().unwrap_or(0);
+            } else if let Some(val) = trimmed.strip_prefix("AnalogueGain=") {
+                let gain: f64 = val.trim().parse().unwrap_or(1.0);
                 iso = (gain * 100.0) as u32;
             }
         }
     }
+
+    // Log for debugging
+    tracing::info!("Preview metadata: ISO={} shutter={}µs", iso, shutter_us);
 
     (iso, shutter_us)
 }
