@@ -115,8 +115,6 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             "--nopreview",
             "-o", tmp_path,
             "-t", "2000",
-            "--width", "1024",
-            "--height", "768",
             "--metadata", meta_path,
         ])
         .output();
@@ -174,10 +172,10 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
 }
 
 /// Parse ISO and shutter from rpicam-still metadata file.
-/// The metadata file contains key=value pairs like:
-///   ExposureTime=33333
-///   AnalogueGain=1.000000
-///   DigitalGain=1.123456
+/// rpicam-still outputs lines like:
+///   ExposureTime : 33333
+///   AnalogueGain : 1.000000
+/// (colon-space separated, NOT equals sign)
 fn parse_rpicam_metadata_file(path: &str) -> (u32, u64) {
     let mut iso = 0u32;
     let mut shutter_us = 0u64;
@@ -185,16 +183,28 @@ fn parse_rpicam_metadata_file(path: &str) -> (u32, u64) {
     if let Ok(content) = std::fs::read_to_string(path) {
         for line in content.lines() {
             let trimmed = line.trim();
-            if let Some(val) = trimmed.strip_prefix("ExposureTime=") {
-                shutter_us = val.trim().parse().unwrap_or(0);
-            } else if let Some(val) = trimmed.strip_prefix("AnalogueGain=") {
-                let gain: f64 = val.trim().parse().unwrap_or(1.0);
-                iso = (gain * 100.0) as u32;
+            // Handle both "Key : Value" and "Key=Value" formats
+            let (key, val) = if let Some(pos) = trimmed.find(" : ") {
+                (&trimmed[..pos], trimmed[pos + 3..].trim())
+            } else if let Some(pos) = trimmed.find('=') {
+                (&trimmed[..pos], trimmed[pos + 1..].trim())
+            } else {
+                continue;
+            };
+
+            match key.trim() {
+                "ExposureTime" => {
+                    shutter_us = val.parse().unwrap_or(0);
+                }
+                "AnalogueGain" => {
+                    let gain: f64 = val.parse().unwrap_or(1.0);
+                    iso = (gain * 100.0) as u32;
+                }
+                _ => {}
             }
         }
     }
 
-    // Log for debugging
     tracing::info!("Preview metadata: ISO={} shutter={}µs", iso, shutter_us);
 
     (iso, shutter_us)
