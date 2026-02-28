@@ -110,6 +110,23 @@
                 </span>
             </div>
         </div>
+        <!-- Capture Mode Toggle -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Mode de capture <span class="tooltip-icon"
+                        onclick="event.stopPropagation(); showTooltip(this, 'SAFE = capture toute la nuit, la détection tague les frames en fond. FILTER = seule la détection d\'aurore déclenche la capture.')">❓</span></span>
+            </div>
+            <div class="mode-toggle">
+                <button class="mode-btn active" id="modeSafe" onclick="setCaptureMode('safe')">🛡️ SAFE</button>
+                <button class="mode-btn" id="modeFilter" onclick="setCaptureMode('filter')">🔍 FILTER</button>
+            </div>
+            <div id="safeHint" class="form-hint" style="margin-top: 0.5rem;">
+                Capture toute la nuit. La détection tourne en fond et écrit des tags dans event.json.
+            </div>
+            <div id="filterHint" class="form-hint" style="margin-top: 0.5rem; display: none;">
+                La détection d'aurore déclenche la capture après N détections consécutives.
+            </div>
+        </div>
 
         <!-- Capture Interval -->
         <div class="card fade-in">
@@ -201,6 +218,13 @@
             document.getElementById('timerSection').style.display = mode === 'timer' ? 'block' : 'none';
         }
 
+        function setCaptureMode(mode) {
+            document.getElementById('modeSafe').classList.toggle('active', mode === 'safe');
+            document.getElementById('modeFilter').classList.toggle('active', mode === 'filter');
+            document.getElementById('safeHint').style.display = mode === 'safe' ? 'block' : 'none';
+            document.getElementById('filterHint').style.display = mode === 'filter' ? 'block' : 'none';
+        }
+
         // Tooltip system
         let activeTooltip = null;
         let activeTooltipSource = null;
@@ -253,6 +277,9 @@
                 } else {
                     setMode('range');
                 }
+
+                // Capture mode toggle
+                setCaptureMode(cfg.detection.detection_capture_enabled ? 'filter' : 'safe');
             } catch (e) {
                 console.error('Load config failed:', e);
             }
@@ -275,6 +302,9 @@
                 // Timer mode
                 const isTimer = document.getElementById('modeTimer').classList.contains('active');
                 cfg.time_range.duration_hours = isTimer ? parseFloat(document.getElementById('timerHours').value) : null;
+
+                // Capture mode
+                cfg.detection.detection_capture_enabled = document.getElementById('modeFilter').classList.contains('active');
 
                 await fetch('/api/config', {
                     method: 'POST',

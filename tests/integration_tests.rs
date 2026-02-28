@@ -68,14 +68,8 @@ async fn test_night_without_aurora_never_run() {
     let mut sm = StateMachine::new(config.detection.consecutive_required);
 
     // Use very high thresholds so synthetic frames never trigger detection
-    let mut detector = AuroraDetector::new(65, 200.0, 200.0, 200.0);
-    let mut exposure_ctrl = ExposureController::new(
-        config.exposure.iso_min,
-        config.exposure.iso_max,
-        config.exposure.shutter_min_us,
-        config.exposure.shutter_max_us,
-        config.exposure.ev_step_max,
-    );
+    let mut detector = AuroraDetector::new(65, 200.0, 200.0, 200.0, 200.0, 1.0, 1.0, 0.7, false, 240.0);
+    let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     // Start at 21:00, end at 06:00 → 9-hour night
     let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 21, 0, 0).unwrap();
@@ -121,14 +115,8 @@ async fn test_persistent_aurora_triggers_run() {
     let mut sm = StateMachine::new(2); // 2 consecutive detections needed
 
     // Use very low thresholds so synthetic aurora frames always trigger
-    let mut detector = AuroraDetector::new(65, 1.0, 1.0, 0.0);
-    let mut exposure_ctrl = ExposureController::new(
-        config.exposure.iso_min,
-        config.exposure.iso_max,
-        config.exposure.shutter_min_us,
-        config.exposure.shutter_max_us,
-        config.exposure.ev_step_max,
-    );
+    let mut detector = AuroraDetector::new(65, 1.0, 1.0, 1.0, 1.0, 0.1, 0.1, 0.05, false, 240.0);
+    let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 23, 0, 0).unwrap();
     let clock = ClockMock::new(start_time);
@@ -171,7 +159,7 @@ async fn test_false_positives_no_run() {
     let mut sm = StateMachine::new(2);
 
     // Standard thresholds — headlights should not trigger
-    let mut detector = AuroraDetector::new(65, 15.0, 30.0, 10.0);
+    let mut detector = AuroraDetector::new(65, 15.0, 10.0, 8.0, 30.0, 1.0, 1.0, 0.7, true, 240.0);
 
     // Manually test with headlight-like data
     // Concentrated bright spot → spatial spread check should reject it
@@ -264,14 +252,8 @@ async fn test_end_of_time_range_shutdown() {
     let camera = CameraMock::synthetic();
 
     // High thresholds → no detection
-    let mut detector = AuroraDetector::new(65, 200.0, 200.0, 200.0);
-    let mut exposure_ctrl = ExposureController::new(
-        config.exposure.iso_min,
-        config.exposure.iso_max,
-        config.exposure.shutter_min_us,
-        config.exposure.shutter_max_us,
-        config.exposure.ev_step_max,
-    );
+    let mut detector = AuroraDetector::new(65, 200.0, 200.0, 200.0, 200.0, 1.0, 1.0, 0.7, false, 240.0);
+    let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     let time_range = TimeRange {
         start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),

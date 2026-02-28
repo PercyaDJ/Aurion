@@ -7,6 +7,8 @@ pub enum Event {
     UserDisconnect,
     DisconnectTimerExpired,
     CalibrationDone,
+    /// SAFE mode: skip Watch, go directly to Run (capture all night)
+    SafeModeCapture,
     AuroraDetected,
     NoAuroraDetected,
     TimeRangeEnded,
@@ -58,8 +60,11 @@ impl StateMachine {
             // Disconnect → Calibration
             (Phase::Disconnect, Event::DisconnectTimerExpired) => Phase::Calibration,
 
-            // Calibration → Watch
+            // Calibration → Watch (FILTER mode)
             (Phase::Calibration, Event::CalibrationDone) => Phase::Watch,
+
+            // Calibration → Run (SAFE mode: skip Watch, capture all night)
+            (Phase::Calibration, Event::SafeModeCapture) => Phase::Run,
 
             // Watch → Run (after N consecutive detections)
             (Phase::Watch, Event::AuroraDetected) => {

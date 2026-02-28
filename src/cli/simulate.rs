@@ -32,19 +32,8 @@ pub async fn run_simulation() -> anyhow::Result<()> {
 
     // Initialize state machine
     let mut sm = StateMachine::new(config.detection.consecutive_required);
-    let mut detector = AuroraDetector::new(
-        config.detection.roi_top_percent,
-        config.detection.green_threshold,
-        config.detection.luminosity_threshold,
-        config.detection.variation_threshold,
-    );
-    let mut exposure_ctrl = ExposureController::new(
-        config.exposure.iso_min,
-        config.exposure.iso_max,
-        config.exposure.shutter_min_us,
-        config.exposure.shutter_max_us,
-        config.exposure.ev_step_max,
-    );
+    let mut detector = AuroraDetector::from_config(&config.detection);
+    let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     let time_range = TimeRange {
         start: config.time_range.start,
@@ -84,7 +73,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
     let exposure = exposure_ctrl.current();
     let frame = camera.capture_jpg(&exposure).await?;
     let histogram = compute_histogram(&frame.data);
-    let calibrated = exposure_ctrl.calibrate(&histogram);
+    let calibrated = exposure_ctrl.update(&histogram, Phase::Calibration);
     info!(
         "[CALIBRATION] Result: ISO {} / Shutter {} µs",
         calibrated.iso, calibrated.shutter_us
@@ -118,12 +107,13 @@ pub async fn run_simulation() -> anyhow::Result<()> {
         let result = detector.analyze(&frame.data, frame.width, frame.height);
 
         info!(
-            "[WATCH] Frame #{} @ {} | green={:.1} lum={:.1} var={:.1} → {}",
+            "[WATCH] Frame #{} @ {} | green={:.1} red={:.1} lum={:.1} score={:.2} → {}",
             frame_count,
             clock.now().format("%H:%M:%S"),
             result.green_score,
+            result.red_score,
             result.luminosity,
-            result.variation,
+            result.aurora_score,
             if result.detected { "DETECTED" } else { "clear" }
         );
 
@@ -168,7 +158,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
 
             // Auto-adjust exposure
             let histogram = compute_histogram(&frame.data);
-            exposure_ctrl.adjust_frame(&histogram);
+            exposure_ctrl.update(&histogram, Phase::Run);
 
             // Save frame
             let filename = format!("aurora_{:04}.jpg", run_frames);

@@ -145,25 +145,74 @@ pub enum StorageStatus {
 
 // ─── Detection ─────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuroraColor {
+    None,
+    Green,
+    Red,
+    Violet,
+    Unknown,
+}
+
+impl fmt::Display for AuroraColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AuroraColor::None => write!(f, "none"),
+            AuroraColor::Green => write!(f, "green"),
+            AuroraColor::Red => write!(f, "red"),
+            AuroraColor::Violet => write!(f, "violet"),
+            AuroraColor::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionResult {
     pub detected: bool,
+    pub aurora_score: f64,
+    pub aurora_color: AuroraColor,
     pub green_score: f64,
+    pub red_score: f64,
+    pub violet_score: f64,
+    pub area_percent: f64,
     pub luminosity: f64,
-    pub variation: f64,
     pub confidence: f64,
+    pub moon_masked: bool,
 }
 
 impl DetectionResult {
     pub fn negative() -> Self {
         Self {
             detected: false,
+            aurora_score: 0.0,
+            aurora_color: AuroraColor::None,
             green_score: 0.0,
+            red_score: 0.0,
+            violet_score: 0.0,
+            area_percent: 0.0,
             luminosity: 0.0,
-            variation: 0.0,
             confidence: 0.0,
+            moon_masked: false,
         }
     }
+}
+
+// ─── Session Event (NDJSON logging) ─────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub timestamp: String,
+    pub phase: String,
+    pub capture_mode: String,
+    pub exposure_us: u64,
+    pub iso: u32,
+    pub format: String,
+    pub roi_excluded_percent: u32,
+    pub aurora_score: f64,
+    pub aurora_detected: bool,
+    pub aurora_color: String,
+    pub consecutive_hits: u32,
+    pub moon_mask_active: bool,
 }
 
 // ─── Time Range ────────────────────────────────────────────

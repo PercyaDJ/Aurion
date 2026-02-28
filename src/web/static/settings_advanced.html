@@ -84,6 +84,56 @@
                 <span class="form-hint">Nombre de détections positives consécutives avant de passer en mode
                     RUN</span>
             </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Seuil dominance rouge <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Intensité minimum de rouge pour détecter une aurore rouge/violette. Utile pour les aurores faibles.')">❓</span></span>
+                    <span class="range-value" id="redVal">10.0</span>
+                </div>
+                <input type="range" id="redThreshold" min="3" max="50" step="0.5" value="10"
+                    oninput="updateVal('redVal', parseFloat(this.value).toFixed(1))">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Seuil dominance bleu/violet <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Intensité minimum de bleu pour les aurores violettes.')">❓</span></span>
+                    <span class="range-value" id="blueVal">8.0</span>
+                </div>
+                <input type="range" id="blueThreshold" min="3" max="50" step="0.5" value="8"
+                    oninput="updateVal('blueVal', parseFloat(this.value).toFixed(1))">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Aire minimum (% ROI) <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Pourcentage minimum de pixels au-dessus du seuil couleur pour considérer une aurore. Évite les faux positifs ponctuels.')">❓</span></span>
+                    <span class="range-value" id="areaVal">1.0%</span>
+                </div>
+                <input type="range" id="areaMin" min="0.1" max="10" step="0.1" value="1"
+                    oninput="updateVal('areaVal', parseFloat(this.value).toFixed(1) + '%')">
+            </div>
+
+            <div class="info-grid">
+                <div class="form-group">
+                    <label class="form-label">Hystérésis ON <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Score aurora pour déclencher la détection. Plus haut = moins de faux positifs.')">❓</span></label>
+                    <input type="number" class="form-input" id="hystOn" min="0.1" max="5" step="0.1" value="1.0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Hystérésis OFF</label>
+                    <input type="number" class="form-input" id="hystOff" min="0.1" max="5" step="0.1" value="0.7">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:0.5rem;">
+                    <input type="checkbox" id="moonMask" checked>
+                    <span class="form-label" style="margin:0;">Masque lune automatique <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Détecte et exclut les zones très lumineuses (lune) de l\'analyse pour éviter les faux positifs.')">❓</span></span>
+                </label>
+            </div>
         </div>
 
         <!-- Exposure Fine-tuning -->
@@ -108,6 +158,26 @@
                         onclick="event.stopPropagation(); showTooltip(this, 'Distance focale de votre objectif. Sert au calcul de la règle 500 : au-delà de 500/focale secondes, les étoiles filent.')">❓</span></label>
                 <input type="number" class="form-input" id="focalLength" min="1" max="50" step="0.1" value="2.7">
                 <span class="form-hint">Pour le calcul de la règle 500 (étoiles filées)</span>
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Luminosité cible (percentile) <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Valeur de luminosité visée par l\'auto-exposition. Plus haut = image plus claire.')">❓</span></span>
+                    <span class="range-value" id="targetBrightVal">60</span>
+                </div>
+                <input type="range" id="targetBrightness" min="20" max="120" step="5" value="60"
+                    oninput="updateVal('targetBrightVal', this.value)">
+            </div>
+
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Rejet saturation <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Ignorer les pixels au-dessus de cette valeur (0-255) pour le calcul d\'exposition. Évite que la lune ou des reflets faussent la mesure.')">❓</span></span>
+                    <span class="range-value" id="satRejectVal">250</span>
+                </div>
+                <input type="range" id="satReject" min="200" max="255" step="1" value="250"
+                    oninput="updateVal('satRejectVal', this.value)">
             </div>
         </div>
 
@@ -245,6 +315,36 @@
 
                 document.getElementById('wifiSsid').value = cfg.network.ssid;
                 document.getElementById('wifiPassword').value = cfg.network.password;
+
+                // New detection params
+                if (cfg.detection.red_threshold !== undefined) {
+                    document.getElementById('redThreshold').value = cfg.detection.red_threshold;
+                    document.getElementById('redVal').textContent = cfg.detection.red_threshold.toFixed(1);
+                }
+                if (cfg.detection.blue_threshold !== undefined) {
+                    document.getElementById('blueThreshold').value = cfg.detection.blue_threshold;
+                    document.getElementById('blueVal').textContent = cfg.detection.blue_threshold.toFixed(1);
+                }
+                if (cfg.detection.area_min_percent !== undefined) {
+                    document.getElementById('areaMin').value = cfg.detection.area_min_percent;
+                    document.getElementById('areaVal').textContent = cfg.detection.area_min_percent.toFixed(1) + '%';
+                }
+                if (cfg.detection.hysteresis_on !== undefined) {
+                    document.getElementById('hystOn').value = cfg.detection.hysteresis_on;
+                    document.getElementById('hystOff').value = cfg.detection.hysteresis_off;
+                }
+                if (cfg.detection.moon_mask_enabled !== undefined) {
+                    document.getElementById('moonMask').checked = cfg.detection.moon_mask_enabled;
+                }
+                // New exposure params
+                if (cfg.exposure.target_brightness !== undefined) {
+                    document.getElementById('targetBrightness').value = cfg.exposure.target_brightness;
+                    document.getElementById('targetBrightVal').textContent = cfg.exposure.target_brightness;
+                }
+                if (cfg.exposure.saturation_reject !== undefined) {
+                    document.getElementById('satReject').value = cfg.exposure.saturation_reject;
+                    document.getElementById('satRejectVal').textContent = cfg.exposure.saturation_reject;
+                }
             } catch (e) {
                 console.error('Load config failed:', e);
             }
@@ -270,6 +370,17 @@
 
                 cfg.network.ssid = document.getElementById('wifiSsid').value;
                 cfg.network.password = document.getElementById('wifiPassword').value;
+
+                // New detection params
+                cfg.detection.red_threshold = parseFloat(document.getElementById('redThreshold').value);
+                cfg.detection.blue_threshold = parseFloat(document.getElementById('blueThreshold').value);
+                cfg.detection.area_min_percent = parseFloat(document.getElementById('areaMin').value);
+                cfg.detection.hysteresis_on = parseFloat(document.getElementById('hystOn').value);
+                cfg.detection.hysteresis_off = parseFloat(document.getElementById('hystOff').value);
+                cfg.detection.moon_mask_enabled = document.getElementById('moonMask').checked;
+                // New exposure params
+                cfg.exposure.target_brightness = parseFloat(document.getElementById('targetBrightness').value);
+                cfg.exposure.saturation_reject = parseFloat(document.getElementById('satReject').value);
 
                 await fetch('/api/config', {
                     method: 'POST',

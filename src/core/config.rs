@@ -24,7 +24,44 @@ pub struct ExposureConfig {
     pub shutter_min_us: u64,
     pub shutter_max_us: u64,
     pub ev_step_max: f64,
+    /// EMA alpha for Detect/Calibration phase (default 0.08)
+    #[serde(default = "default_detect_alpha")]
+    pub detect_alpha: f64,
+    /// Max +% change per frame in Detect (default 0.15)
+    #[serde(default = "default_detect_rate_up")]
+    pub detect_rate_up: f64,
+    /// Max -% change per frame in Detect (default 0.20)
+    #[serde(default = "default_detect_rate_down")]
+    pub detect_rate_down: f64,
+    /// EMA alpha for Capture/Run phase (default 0.03)
+    #[serde(default = "default_capture_alpha")]
+    pub capture_alpha: f64,
+    /// Max +% change per frame in Capture (default 0.03)
+    #[serde(default = "default_capture_rate_up")]
+    pub capture_rate_up: f64,
+    /// Max -% change per frame in Capture (default 0.05)
+    #[serde(default = "default_capture_rate_down")]
+    pub capture_rate_down: f64,
+    /// Histogram percentile for metering (default 0.80 = P80)
+    #[serde(default = "default_target_percentile")]
+    pub target_percentile: f64,
+    /// Target brightness value at that percentile (default 60.0)
+    #[serde(default = "default_target_brightness")]
+    pub target_brightness: f64,
+    /// Reject pixels above this value (0-255) from metering (default 250.0)
+    #[serde(default = "default_saturation_reject")]
+    pub saturation_reject: f64,
 }
+
+fn default_detect_alpha() -> f64 { 0.08 }
+fn default_detect_rate_up() -> f64 { 0.15 }
+fn default_detect_rate_down() -> f64 { 0.20 }
+fn default_capture_alpha() -> f64 { 0.03 }
+fn default_capture_rate_up() -> f64 { 0.03 }
+fn default_capture_rate_down() -> f64 { 0.05 }
+fn default_target_percentile() -> f64 { 0.80 }
+fn default_target_brightness() -> f64 { 60.0 }
+fn default_saturation_reject() -> f64 { 250.0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectionConfig {
@@ -33,7 +70,39 @@ pub struct DetectionConfig {
     pub luminosity_threshold: f64,
     pub variation_threshold: f64,
     pub consecutive_required: u32,
+    /// FILTER=true (detect triggers capture), SAFE=false (capture all, detect tags only)
+    #[serde(default)]
+    pub detection_capture_enabled: bool,
+    /// Min % of ROI pixels above color threshold to consider aurora (default 1.0)
+    #[serde(default = "default_area_min")]
+    pub area_min_percent: f64,
+    /// Aurora score threshold to trigger detection ON (default 1.0)
+    #[serde(default = "default_hysteresis_on")]
+    pub hysteresis_on: f64,
+    /// Aurora score threshold to release detection OFF (default 0.7)
+    #[serde(default = "default_hysteresis_off")]
+    pub hysteresis_off: f64,
+    /// Red channel dominance threshold (default 10.0)
+    #[serde(default = "default_red_threshold")]
+    pub red_threshold: f64,
+    /// Blue/violet channel threshold (default 8.0)
+    #[serde(default = "default_blue_threshold")]
+    pub blue_threshold: f64,
+    /// Enable automatic moon masking (default true)
+    #[serde(default = "default_moon_mask_enabled")]
+    pub moon_mask_enabled: bool,
+    /// Pixel luminance above which it is considered "moon" (default 240.0)
+    #[serde(default = "default_moon_lum")]
+    pub moon_luminance_threshold: f64,
 }
+
+fn default_area_min() -> f64 { 1.0 }
+fn default_hysteresis_on() -> f64 { 1.0 }
+fn default_hysteresis_off() -> f64 { 0.7 }
+fn default_red_threshold() -> f64 { 10.0 }
+fn default_blue_threshold() -> f64 { 8.0 }
+fn default_moon_mask_enabled() -> bool { true }
+fn default_moon_lum() -> f64 { 240.0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureConfig {
@@ -154,6 +223,15 @@ impl Default for AppConfig {
                 shutter_min_us: 1_000_000,
                 shutter_max_us: 30_000_000,
                 ev_step_max: 0.33,
+                detect_alpha: 0.08,
+                detect_rate_up: 0.15,
+                detect_rate_down: 0.20,
+                capture_alpha: 0.03,
+                capture_rate_up: 0.03,
+                capture_rate_down: 0.05,
+                target_percentile: 0.80,
+                target_brightness: 60.0,
+                saturation_reject: 250.0,
             },
             detection: DetectionConfig {
                 roi_top_percent: 65,
@@ -161,6 +239,14 @@ impl Default for AppConfig {
                 luminosity_threshold: 30.0,
                 variation_threshold: 10.0,
                 consecutive_required: 2,
+                detection_capture_enabled: false, // SAFE by default
+                area_min_percent: 1.0,
+                hysteresis_on: 1.0,
+                hysteresis_off: 0.7,
+                red_threshold: 10.0,
+                blue_threshold: 8.0,
+                moon_mask_enabled: true,
+                moon_luminance_threshold: 240.0,
             },
             capture: CaptureConfig {
                 watch_interval_secs: 60,
