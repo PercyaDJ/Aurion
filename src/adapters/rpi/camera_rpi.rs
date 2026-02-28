@@ -50,8 +50,8 @@ impl CameraRpi {
         let gain = exposure.iso as f64 / 100.0;
         cmd.arg("--gain").arg(format!("{:.1}", gain));
 
-        // Disable auto-exposure, use fixed greyworld WB for night sky
-        cmd.arg("--awb").arg("greyworld");
+        // Fixed white balance for night sky (neutral-cool, no AWB hunting)
+        cmd.arg("--awbgains").arg("1.5,1.2");
         cmd.arg("--ev").arg("0");
 
         if raw {

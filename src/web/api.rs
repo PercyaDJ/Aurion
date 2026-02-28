@@ -123,7 +123,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
                 "--immediate",
                 "--shutter", &shutter_us,
                 "--gain", &iso_gain,
-                "--awb", "greyworld",
+                                "--awbgains", "1.5,1.2",
                 "--width", "1024",
                 "--height", "768",
             ])
@@ -169,7 +169,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             "--immediate",
             "--shutter", &shutter_us,
             "--gain", &iso_gain,
-            "--awb", "greyworld",
+                            "--awbgains", "1.5,1.2",
         ])
         .output();
 
