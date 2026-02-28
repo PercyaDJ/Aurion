@@ -149,9 +149,35 @@
             }
         }
 
+        // ─── Load real config values ─────────────────────
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+
+                // Time range display
+                const tr = document.getElementById('timeRange');
+                if (cfg.time_range.duration_hours) {
+                    tr.textContent = `⏱ ${cfg.time_range.duration_hours}h (minuteur)`;
+                } else {
+                    const start = cfg.time_range.start.substring(0, 5);
+                    const end = cfg.time_range.end.substring(0, 5);
+                    tr.textContent = `${start} → ${end}`;
+                }
+
+                // Output format
+                const fmt = cfg.capture.output_format;
+                const fmtLabels = { 'RawDng': 'RAW (DNG)', 'Jpg': 'JPG', 'RawAndJpg': 'RAW + JPG' };
+                document.getElementById('outputFormat').textContent = fmtLabels[fmt] || fmt;
+            } catch (e) {
+                console.error('Config load failed:', e);
+            }
+        }
+
         // Initial load + polling
         updateStatus();
         updateStorage();
+        loadConfig();
         setInterval(updateStatus, 3000);
         setInterval(updateStorage, 10000);
     </script>
