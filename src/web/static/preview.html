@@ -170,7 +170,8 @@
             try {
                 const res = await fetch('/api/config');
                 const cfg = await res.json();
-                roiPercent = cfg.detection.roi_percent || 65;
+                roiPercent = cfg.detection.roi_top_percent || 65;
+                updateRoiOverlay();
             } catch (e) { }
         }
 
@@ -191,7 +192,7 @@
             const btn = document.getElementById('roiToggle');
             btn.classList.toggle('btn-outline', !roiVisible);
             btn.classList.toggle('btn-primary', roiVisible);
-            updateRoiOverlay();
+            loadRoi(); // Reload config in case ROI was changed in advanced settings
         }
 
         loadRoi();

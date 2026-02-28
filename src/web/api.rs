@@ -99,103 +99,54 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-/// Capture a single preview image from the camera and store it.
-/// Runs a 3-iteration auto-exposure loop to find good settings,
-/// then captures the final image. Returns JPEG with metadata headers.
+/// Capture a single preview image from the camera.
+/// Uses rpicam-still's built-in auto-exposure and auto-white-balance
+/// for a natural-looking preview. The custom exposure algorithm is
+/// only used during the autonomous night capture loop.
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
     let tmp_path = "/tmp/aurion_preview.jpg";
-    let config = state.config.read().await.clone();
 
-    // Initialize exposure controller from config
-    let mut expo = crate::core::exposure::ExposureController::from_config(&config.exposure);
-
-    // Auto-exposure loop: capture → histogram → adjust (3 iterations)
-    for i in 0..3 {
-        let settings = expo.current();
-        let shutter_us = settings.shutter_us.to_string();
-        let iso_gain = (settings.iso as f64 / 100.0).to_string();
-
-        let result = std::process::Command::new("rpicam-still")
-            .args([
-                "--nopreview",
-                "-o", tmp_path,
-                "-t", "1",
-                "--immediate",
-                "--shutter", &shutter_us,
-                "--gain", &iso_gain,
-                                "--awbgains", "1.5,1.2",
-                "--width", "1024",
-                "--height", "768",
-            ])
-            .output();
-
-        match result {
-            Ok(output) if output.status.success() => {
-                // Decode JPEG to RGB for histogram
-                if let Ok(jpeg_data) = std::fs::read(tmp_path) {
-                    if let Ok(img) = image::load_from_memory(&jpeg_data) {
-                        let rgb = img.to_rgb8();
-                        let rgb_data = rgb.as_raw();
-                        let roi_data = crate::core::orchestrator::crop_roi(
-                            rgb_data, rgb.width(), rgb.height(),
-                            config.detection.roi_top_percent,
-                        );
-                        let hist = crate::core::exposure::compute_histogram(&roi_data);
-                        expo.update(&hist, crate::core::models::Phase::Calibration);
-                        tracing::info!(
-                            "Preview auto-expo {}/3: ISO {} / {}µs",
-                            i + 1, settings.iso, settings.shutter_us
-                        );
-                    }
-                }
-            }
-            _ => {
-                // If capture fails during calibration, continue with current settings
-                tracing::warn!("Preview auto-expo {}/3: capture failed, using current settings", i + 1);
-            }
-        }
-    }
-
-    // Final capture with converged exposure
-    let final_settings = expo.current();
-    let shutter_us = final_settings.shutter_us.to_string();
-    let iso_gain = (final_settings.iso as f64 / 100.0).to_string();
-
+    // Let rpicam-still handle AEC/AWB automatically
+    // -t 2000 = give camera 2 seconds to auto-converge before capturing
     let result = std::process::Command::new("rpicam-still")
         .args([
             "--nopreview",
             "-o", tmp_path,
-            "-t", "1",
-            "--immediate",
-            "--shutter", &shutter_us,
-            "--gain", &iso_gain,
-                            "--awbgains", "1.5,1.2",
+            "-t", "2000",
+            "--width", "1024",
+            "--height", "768",
         ])
         .output();
 
     match result {
         Ok(output) if output.status.success() => {
+            // Read EXIF-like info from rpicam-still stderr
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let (iso, shutter_us) = parse_rpicam_metadata(&stderr);
+
             match std::fs::read(tmp_path) {
                 Ok(data) => {
                     let mut preview = state.latest_preview.write().await;
                     *preview = Some(data.clone());
 
-                    let shutter_display = if final_settings.shutter_us >= 1_000_000 {
-                        format!("{}s", final_settings.shutter_us / 1_000_000)
+                    let shutter_display = if shutter_us >= 1_000_000 {
+                        format!("{}s", shutter_us / 1_000_000)
+                    } else if shutter_us > 0 {
+                        format!("1/{}s", 1_000_000 / shutter_us)
                     } else {
-                        format!("1/{}s", 1_000_000 / final_settings.shutter_us.max(1))
+                        "auto".to_string()
                     };
 
                     state.add_log(format!(
-                        "Preview auto-expo: ISO {} / {}", final_settings.iso, shutter_display
+                        "Preview: ISO {} / {}", iso, shutter_display
                     )).await;
 
                     (
                         StatusCode::OK,
                         [
                             ("content-type", "image/jpeg".to_string()),
-                            ("x-aurion-iso", final_settings.iso.to_string()),
-                            ("x-aurion-shutter-us", final_settings.shutter_us.to_string()),
+                            ("x-aurion-iso", iso.to_string()),
+                            ("x-aurion-shutter-us", shutter_us.to_string()),
                         ],
                         data,
                     ).into_response()
@@ -218,6 +169,38 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             format!("rpicam-still non trouvé: {}", e),
         ).into_response(),
     }
+}
+
+/// Parse ISO and shutter from rpicam-still stderr output.
+/// rpicam-still logs lines like: "Exp: 33333 AG: 1.0 DG: 1.2"
+fn parse_rpicam_metadata(stderr: &str) -> (u32, u64) {
+    let mut iso = 0u32;
+    let mut shutter_us = 0u64;
+
+    for line in stderr.lines() {
+        // Look for exposure info in the log
+        if line.contains("Exp:") {
+            if let Some(exp_pos) = line.find("Exp:") {
+                let rest = &line[exp_pos + 4..];
+                shutter_us = rest.trim().split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            }
+        }
+        if line.contains("AG:") {
+            if let Some(ag_pos) = line.find("AG:") {
+                let rest = &line[ag_pos + 3..];
+                let gain: f64 = rest.trim().split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1.0);
+                iso = (gain * 100.0) as u32;
+            }
+        }
+    }
+
+    (iso, shutter_us)
 }
 
 // ─── Config ────────────────────────────────────────────────
