@@ -841,6 +841,7 @@ pub async fn download_gallery_zip(
 
 #[derive(Serialize)]
 pub struct DiagnosticsResponse {
+    pub version: String,
     pub platform: String,
     pub hostname: String,
     pub uptime: String,
@@ -885,6 +886,7 @@ pub async fn get_diagnostics(State(_state): State<AppState>) -> Json<Diagnostics
     let now = chrono::Local::now();
 
     Json(DiagnosticsResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         platform,
         hostname,
         uptime,

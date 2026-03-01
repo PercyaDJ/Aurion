@@ -12,7 +12,8 @@
 
 <body>
     <nav class="navbar">
-        <div class="navbar-brand"><span class="icon">🌌</span><span>Aurion</span></div>
+        <div class="navbar-brand"><img src="/icons/icon-192.png" alt="Aurion"
+                style="width:28px;height:28px;vertical-align:middle;margin-right:6px;"><span>Aurion</span></div>
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
@@ -59,7 +60,7 @@
                 </div>
                 <div class="info-item">
                     <span class="info-label">Version</span>
-                    <span class="info-value">0.1.0</span>
+                    <span class="info-value" id="sysVersion">--</span>
                 </div>
             </div>
         </div>
@@ -224,6 +225,7 @@
                 } else {
                     document.getElementById('sysCpuTemp').textContent = 'N/A';
                 }
+                document.getElementById('sysVersion').textContent = 'v' + diag.version;
             } catch (e) {
                 console.error('Diagnostics update failed:', e);
             }
