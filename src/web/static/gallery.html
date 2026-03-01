@@ -13,12 +13,32 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
         }
 
         .gallery-count {
             font-size: 0.85rem;
             color: var(--text-secondary);
+        }
+
+        .gallery-toolbar {
+            display: none;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .gallery-toolbar.active {
+            display: flex;
+        }
+
+        .gallery-toolbar .selection-count {
+            font-size: 0.85rem;
+            color: var(--accent);
+            font-weight: 600;
         }
 
         .gallery-grid {
@@ -31,7 +51,7 @@
             position: relative;
             aspect-ratio: 4/3;
             background: var(--bg-input);
-            border: 1px solid var(--border);
+            border: 2px solid var(--border);
             border-radius: var(--radius-sm);
             overflow: hidden;
             cursor: pointer;
@@ -41,6 +61,35 @@
         .gallery-item:hover {
             border-color: var(--accent);
             transform: scale(1.02);
+        }
+
+        .gallery-item.selected {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent);
+        }
+
+        .gallery-item .select-checkbox {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            z-index: 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            color: transparent;
+            transition: all 0.15s ease;
+        }
+
+        .gallery-item.selected .select-checkbox {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
         }
 
         .gallery-item img {
@@ -146,6 +195,54 @@
             font-size: 0.9rem;
             line-height: 1.6;
         }
+
+        /* Delete confirmation modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 3000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            max-width: 320px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .modal-box h3 {
+            margin-bottom: 0.75rem;
+            color: var(--red);
+        }
+
+        .modal-box p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .modal-buttons .btn {
+            flex: 1;
+        }
     </style>
 </head>
 
@@ -180,6 +277,16 @@
             <span class="gallery-count" id="galleryCount">Chargement...</span>
         </div>
 
+        <!-- Toolbar (appears when selecting) -->
+        <div class="gallery-toolbar" id="toolbar">
+            <button class="btn btn-outline btn-sm" onclick="selectAll()">☑️ Tout sélectionner</button>
+            <button class="btn btn-outline btn-sm" onclick="deselectAll()">✖️ Désélectionner</button>
+            <span class="selection-count" id="selectionCount">0 sélectionné(s)</span>
+            <div style="flex:1;"></div>
+            <button class="btn btn-outline btn-sm" style="color:var(--red); border-color:var(--red);"
+                onclick="confirmDelete()">🗑️ Supprimer</button>
+        </div>
+
         <div id="galleryContent">
             <div class="empty-state">
                 <div class="empty-icon">⏳</div>
@@ -197,6 +304,23 @@
             <a class="btn btn-primary btn-sm" id="lightboxDownload" href="#" download>
                 ⬇️ Télécharger
             </a>
+            <button class="btn btn-outline btn-sm" style="color:var(--red); border-color:var(--red);"
+                id="lightboxDelete">
+                🗑️ Supprimer
+            </button>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div class="modal-overlay" id="deleteModal">
+        <div class="modal-box">
+            <h3>⚠️ Supprimer ?</h3>
+            <p id="deleteModalText">Supprimer les images sélectionnées ?</p>
+            <div class="modal-buttons">
+                <button class="btn btn-outline" onclick="closeDeleteModal()">Annuler</button>
+                <button class="btn btn-outline" style="color:var(--red); border-color:var(--red);"
+                    onclick="executeDelete()">Supprimer</button>
+            </div>
         </div>
     </div>
 
@@ -206,6 +330,10 @@
             document.getElementById('menuOverlay').classList.toggle('visible');
         }
 
+        let allImages = [];
+        let selectedFiles = new Set();
+        let selectMode = false;
+
         async function loadGallery() {
             try {
                 const res = await fetch('/api/gallery');
@@ -213,7 +341,9 @@
                 const container = document.getElementById('galleryContent');
                 const countEl = document.getElementById('galleryCount');
 
-                if (data.images.length === 0) {
+                allImages = data.images || [];
+
+                if (allImages.length === 0) {
                     container.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-icon">📭</div>
@@ -224,35 +354,7 @@
                 }
 
                 countEl.textContent = `${data.total_count} images — ${data.total_size_mb.toFixed(1)} Mo`;
-
-                let html = '<div class="gallery-grid">';
-                for (const img of data.images) {
-                    const ext = img.filename.split('.').pop().toLowerCase();
-                    const isRaw = ext === 'dng' || ext === 'raw';
-
-                    if (isRaw) {
-                        html += `
-                            <div class="gallery-item" onclick="openLightbox('${img.filename}', '${img.size_display}', '${img.modified}', true)">
-                                <div class="raw-placeholder">
-                                    <span class="raw-icon">🎞️</span>
-                                    <span>RAW</span>
-                                </div>
-                                <div class="item-info">${img.filename}</div>
-                            </div>`;
-                    } else {
-                        html += `
-                            <div class="gallery-item" onclick="openLightbox('${img.filename}', '${img.size_display}', '${img.modified}', false)">
-                                <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
-                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                <div class="raw-placeholder" style="display:none;">
-                                    <span class="raw-icon">🖼️</span>
-                                </div>
-                                <div class="item-info">${img.filename}</div>
-                            </div>`;
-                    }
-                }
-                html += '</div>';
-                container.innerHTML = html;
+                renderGrid();
 
             } catch (e) {
                 console.error('Gallery load failed:', e);
@@ -264,11 +366,161 @@
             }
         }
 
+        function renderGrid() {
+            let html = '<div class="gallery-grid">';
+            for (const img of allImages) {
+                const ext = img.filename.split('.').pop().toLowerCase();
+                const isRaw = ext === 'dng' || ext === 'raw';
+                const isSelected = selectedFiles.has(img.filename);
+                const selectedClass = isSelected ? ' selected' : '';
+
+                if (isRaw) {
+                    html += `
+                        <div class="gallery-item${selectedClass}" data-filename="${img.filename}"
+                             onclick="handleItemClick(event, '${img.filename}', '${img.size_display}', '${img.modified}', true)">
+                            <div class="select-checkbox">✓</div>
+                            <div class="raw-placeholder">
+                                <span class="raw-icon">🎞️</span>
+                                <span>RAW</span>
+                            </div>
+                            <div class="item-info">${img.filename}</div>
+                        </div>`;
+                } else {
+                    html += `
+                        <div class="gallery-item${selectedClass}" data-filename="${img.filename}"
+                             onclick="handleItemClick(event, '${img.filename}', '${img.size_display}', '${img.modified}', false)">
+                            <div class="select-checkbox">✓</div>
+                            <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="raw-placeholder" style="display:none;">
+                                <span class="raw-icon">🖼️</span>
+                            </div>
+                            <div class="item-info">${img.filename}</div>
+                        </div>`;
+                }
+            }
+            html += '</div>';
+            document.getElementById('galleryContent').innerHTML = html;
+        }
+
+        function handleItemClick(event, filename, size, modified, isRaw) {
+            if (selectMode) {
+                toggleSelect(filename);
+            } else {
+                openLightbox(filename, size, modified, isRaw);
+            }
+        }
+
+        function toggleSelect(filename) {
+            if (selectedFiles.has(filename)) {
+                selectedFiles.delete(filename);
+            } else {
+                selectedFiles.add(filename);
+            }
+            updateSelectionUI();
+        }
+
+        function enterSelectMode() {
+            selectMode = true;
+            document.getElementById('toolbar').classList.add('active');
+        }
+
+        function updateSelectionUI() {
+            if (selectedFiles.size === 0) {
+                selectMode = false;
+                document.getElementById('toolbar').classList.remove('active');
+            } else {
+                enterSelectMode();
+            }
+            document.getElementById('selectionCount').textContent = selectedFiles.size + ' sélectionné(s)';
+
+            // Update visuals
+            document.querySelectorAll('.gallery-item').forEach(el => {
+                const fn = el.dataset.filename;
+                if (selectedFiles.has(fn)) {
+                    el.classList.add('selected');
+                } else {
+                    el.classList.remove('selected');
+                }
+            });
+        }
+
+        function selectAll() {
+            allImages.forEach(img => selectedFiles.add(img.filename));
+            updateSelectionUI();
+        }
+
+        function deselectAll() {
+            selectedFiles.clear();
+            updateSelectionUI();
+        }
+
+        // Long press to enter select mode on mobile
+        let longPressTimer = null;
+        document.addEventListener('touchstart', e => {
+            const item = e.target.closest('.gallery-item');
+            if (!item) return;
+            longPressTimer = setTimeout(() => {
+                const fn = item.dataset.filename;
+                enterSelectMode();
+                toggleSelect(fn);
+            }, 500);
+        });
+        document.addEventListener('touchend', () => clearTimeout(longPressTimer));
+        document.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+
+        // Delete
+        let pendingDeleteFiles = [];
+
+        function confirmDelete() {
+            pendingDeleteFiles = Array.from(selectedFiles);
+            if (pendingDeleteFiles.length === 0) return;
+            document.getElementById('deleteModalText').textContent =
+                `Supprimer ${pendingDeleteFiles.length} image(s) ? Cette action est irréversible.`;
+            document.getElementById('deleteModal').classList.add('active');
+        }
+
+        function confirmDeleteSingle(filename) {
+            pendingDeleteFiles = [filename];
+            document.getElementById('deleteModalText').textContent =
+                `Supprimer "${filename}" ? Cette action est irréversible.`;
+            document.getElementById('deleteModal').classList.add('active');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').classList.remove('active');
+            pendingDeleteFiles = [];
+        }
+
+        async function executeDelete() {
+            closeDeleteModal();
+            try {
+                const res = await fetch('/api/gallery/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filenames: pendingDeleteFiles }),
+                });
+                const data = await res.json();
+                // Remove deleted from selection
+                pendingDeleteFiles.forEach(f => selectedFiles.delete(f));
+                updateSelectionUI();
+                // Reload gallery
+                loadGallery();
+            } catch (e) {
+                alert('Erreur suppression: ' + e.message);
+            }
+        }
+
+        // Lightbox
+        let currentLightboxFile = '';
+
         function openLightbox(filename, size, modified, isRaw) {
+            currentLightboxFile = filename;
             const lightbox = document.getElementById('lightbox');
             const img = document.getElementById('lightboxImg');
             const info = document.getElementById('lightboxInfo');
             const download = document.getElementById('lightboxDownload');
+            const deleteBtn = document.getElementById('lightboxDelete');
 
             if (isRaw) {
                 img.src = '';
@@ -281,6 +533,7 @@
             info.innerHTML = `<strong>${filename}</strong><br>${size} — ${modified}`;
             download.href = `/api/gallery/${filename}`;
             download.download = filename;
+            deleteBtn.onclick = () => { closeLightbox(); confirmDeleteSingle(filename); };
 
             lightbox.classList.add('active');
         }
@@ -292,7 +545,10 @@
 
         // ESC to close
         document.addEventListener('keydown', e => {
-            if (e.key === 'Escape') closeLightbox();
+            if (e.key === 'Escape') {
+                closeLightbox();
+                closeDeleteModal();
+            }
         });
 
         loadGallery();

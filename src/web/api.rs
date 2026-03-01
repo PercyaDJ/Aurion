@@ -100,53 +100,113 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Capture a single preview image from the camera.
-/// Uses rpicam-still's built-in auto-exposure and auto-white-balance
-/// for a natural-looking preview. The custom exposure algorithm is
-/// only used during the autonomous night capture loop.
+/// Uses manual exposure with iterative auto-adjustment (5 rounds):
+///   1. Start at midpoint of user's ISO/shutter range
+///   2. Capture → histogram → adjust shutter/ISO
+///   3. Repeat until properly exposed
+///   4. Return final image with metadata overlay
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
     let tmp_path = "/tmp/aurion_preview.jpg";
     let meta_path = "/tmp/aurion_preview_meta.txt";
+    let config = state.config.read().await.clone();
 
-    // Let rpicam-still handle AEC/AWB automatically
-    // -t 2000 = give camera 2 seconds to auto-converge before capturing
-    // --metadata = output capture metadata to a file
+    // Initialize exposure at geometric midpoint of user's range
+    let mid_iso = ((config.exposure.iso_min as f64) * (config.exposure.iso_max as f64)).sqrt() as u32;
+    let mid_shutter = ((config.exposure.shutter_min_us as f64) * (config.exposure.shutter_max_us as f64)).sqrt() as u64;
+
+    let mut expo = crate::core::exposure::ExposureController::from_config(&config.exposure);
+    expo.set(crate::core::models::ExposureSettings::new(mid_iso, mid_shutter));
+
+    // Auto-exposure loop: 5 iterations of capture → analyze → adjust
+    for i in 0..5 {
+        let settings = expo.current();
+        let shutter_us_str = settings.shutter_us.to_string();
+        let gain_str = format!("{:.1}", settings.iso as f64 / 100.0);
+
+        let result = std::process::Command::new("rpicam-still")
+            .args([
+                "--nopreview",
+                "-o", tmp_path,
+                "-t", "100",
+                "--shutter", &shutter_us_str,
+                "--gain", &gain_str,
+                "--awb", "auto",
+                "--metadata", meta_path,
+            ])
+            .output();
+
+        match result {
+            Ok(output) if output.status.success() => {
+                // Decode JPEG to RGB for histogram
+                if let Ok(jpeg_data) = std::fs::read(tmp_path) {
+                    if let Ok(img) = image::load_from_memory(&jpeg_data) {
+                        let rgb = img.to_rgb8();
+                        let rgb_data = rgb.as_raw();
+                        let roi_data = crate::core::orchestrator::crop_roi(
+                            rgb_data, rgb.width(), rgb.height(),
+                            config.detection.roi_top_percent,
+                        );
+                        let hist = crate::core::exposure::compute_histogram(&roi_data);
+                        let new_settings = expo.update(&hist, crate::core::models::Phase::Calibration);
+                        tracing::info!(
+                            "Preview auto-expo {}/5: ISO {} / {}µs → next ISO {} / {}µs",
+                            i + 1, settings.iso, settings.shutter_us,
+                            new_settings.iso, new_settings.shutter_us
+                        );
+                    }
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::warn!("Preview capture {}/5 failed: {}", i + 1, stderr);
+            }
+            Err(e) => {
+                tracing::warn!("Preview capture {}/5 error: {}", i + 1, e);
+            }
+        }
+    }
+
+    // Final capture with converged exposure
+    let final_settings = expo.current();
+    let shutter_us_str = final_settings.shutter_us.to_string();
+    let gain_str = format!("{:.1}", final_settings.iso as f64 / 100.0);
+
     let result = std::process::Command::new("rpicam-still")
         .args([
             "--nopreview",
             "-o", tmp_path,
-            "-t", "2000",
-            "--metadata", meta_path,
+            "-t", "100",
+            "--shutter", &shutter_us_str,
+            "--gain", &gain_str,
+            "--awb", "auto",
         ])
         .output();
 
     match result {
         Ok(output) if output.status.success() => {
-            // Read metadata from file
-            let (iso, shutter_us) = parse_rpicam_metadata_file(meta_path);
-
             match std::fs::read(tmp_path) {
                 Ok(data) => {
                     let mut preview = state.latest_preview.write().await;
                     *preview = Some(data.clone());
 
-                    let shutter_display = if shutter_us >= 1_000_000 {
-                        format!("{}s", shutter_us / 1_000_000)
-                    } else if shutter_us > 0 {
-                        format!("1/{}s", 1_000_000 / shutter_us)
+                    let shutter_display = if final_settings.shutter_us >= 1_000_000 {
+                        format!("{}s", final_settings.shutter_us / 1_000_000)
+                    } else if final_settings.shutter_us > 0 {
+                        format!("1/{}s", 1_000_000 / final_settings.shutter_us)
                     } else {
                         "auto".to_string()
                     };
 
                     state.add_log(format!(
-                        "Preview: ISO {} / {}", iso, shutter_display
+                        "Preview: ISO {} / {} (auto-expo 5 it.)", final_settings.iso, shutter_display
                     )).await;
 
                     (
                         StatusCode::OK,
                         [
                             ("content-type", "image/jpeg".to_string()),
-                            ("x-aurion-iso", iso.to_string()),
-                            ("x-aurion-shutter-us", shutter_us.to_string()),
+                            ("x-aurion-iso", final_settings.iso.to_string()),
+                            ("x-aurion-shutter-us", final_settings.shutter_us.to_string()),
                         ],
                         data,
                     ).into_response()
@@ -169,45 +229,6 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             format!("rpicam-still non trouvé: {}", e),
         ).into_response(),
     }
-}
-
-/// Parse ISO and shutter from rpicam-still metadata file.
-/// rpicam-still outputs lines like:
-///   ExposureTime : 33333
-///   AnalogueGain : 1.000000
-/// (colon-space separated, NOT equals sign)
-fn parse_rpicam_metadata_file(path: &str) -> (u32, u64) {
-    let mut iso = 0u32;
-    let mut shutter_us = 0u64;
-
-    if let Ok(content) = std::fs::read_to_string(path) {
-        for line in content.lines() {
-            let trimmed = line.trim();
-            // Handle both "Key : Value" and "Key=Value" formats
-            let (key, val) = if let Some(pos) = trimmed.find(" : ") {
-                (&trimmed[..pos], trimmed[pos + 3..].trim())
-            } else if let Some(pos) = trimmed.find('=') {
-                (&trimmed[..pos], trimmed[pos + 1..].trim())
-            } else {
-                continue;
-            };
-
-            match key.trim() {
-                "ExposureTime" => {
-                    shutter_us = val.parse().unwrap_or(0);
-                }
-                "AnalogueGain" => {
-                    let gain: f64 = val.parse().unwrap_or(1.0);
-                    iso = (gain * 100.0) as u32;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    tracing::info!("Preview metadata: ISO={} shutter={}µs", iso, shutter_us);
-
-    (iso, shutter_us)
 }
 
 // ─── Config ────────────────────────────────────────────────
@@ -674,6 +695,51 @@ pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GallerySta
     })
 }
 
+
+// ─── Gallery Delete ───────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct GalleryDeleteRequest {
+    pub filenames: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct GalleryDeleteResponse {
+    pub deleted: usize,
+    pub errors: Vec<String>,
+}
+
+pub async fn delete_gallery_images(
+    State(state): State<AppState>,
+    Json(req): Json<GalleryDeleteRequest>,
+) -> Json<GalleryDeleteResponse> {
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+    let mut deleted = 0;
+    let mut errors = Vec::new();
+
+    for filename in &req.filenames {
+        // Security: reject any path traversal
+        if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+            errors.push(format!("{}: nom de fichier invalide", filename));
+            continue;
+        }
+
+        let path = std::path::Path::new(mount_point).join(filename);
+        if path.exists() {
+            match std::fs::remove_file(&path) {
+                Ok(_) => deleted += 1,
+                Err(e) => errors.push(format!("{}: {}", filename, e)),
+            }
+        } else {
+            errors.push(format!("{}: fichier introuvable", filename));
+        }
+    }
+
+    state.add_log(format!("🗑️ {} image(s) supprimée(s)", deleted)).await;
+
+    Json(GalleryDeleteResponse { deleted, errors })
+}
 
 // ─── Diagnostics ──────────────────────────────────────────
 

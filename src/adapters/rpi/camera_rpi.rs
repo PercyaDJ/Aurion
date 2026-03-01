@@ -50,17 +50,16 @@ impl CameraRpi {
         let gain = exposure.iso as f64 / 100.0;
         cmd.arg("--gain").arg(format!("{:.1}", gain));
 
-        // Fixed white balance for night sky (neutral-cool, no AWB hunting)
-        cmd.arg("--awbgains").arg("1.5,1.2");
+        // Auto white balance (safe default)
+        cmd.arg("--awb").arg("auto");
         cmd.arg("--ev").arg("0");
 
         if raw {
             cmd.arg("--raw");
         }
 
-        // Immediate capture (no preview delay)
-        cmd.arg("--immediate");
-        cmd.arg("-t").arg("1");
+        // Minimal warmup time (ms) — just enough for the ISP pipeline
+        cmd.arg("-t").arg("100");
 
         cmd
     }

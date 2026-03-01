@@ -77,6 +77,7 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         // Gallery (Recovery mode)
         .route("/api/gallery", get(api::get_gallery))
         .route("/api/gallery/stats", get(api::get_gallery_stats))
+        .route("/api/gallery/delete", post(api::delete_gallery_images))
         .route("/api/gallery/{filename}", get(api::get_gallery_image))
         .route("/api/gallery/thumbnail/{filename}", get(api::get_gallery_thumbnail))
         // Static file serving
