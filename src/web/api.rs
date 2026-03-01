@@ -20,6 +20,7 @@ pub struct StatusResponse {
     pub date: String,
     pub storage: Option<StorageResponse>,
     pub warnings: Vec<String>,
+    pub usb_mounted: bool,
 }
 
 pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
@@ -75,12 +76,26 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         }
     };
 
+    // Check if USB storage is mounted
+    let mount_point = &config.storage.mount_point;
+    let usb_mounted = std::path::Path::new(mount_point).exists() && {
+        // Check if actually a mounted filesystem (not just the mount point directory)
+        match std::process::Command::new("mountpoint").arg("-q").arg(mount_point).status() {
+            Ok(status) => status.success(),
+            Err(_) => std::path::Path::new(mount_point).join(".").metadata().is_ok(),
+        }
+    };
+    if !usb_mounted {
+        warnings.push("⚠️ Clé USB non montée — les captures ne seront pas sauvegardées".into());
+    }
+
     Json(StatusResponse {
         phase: phase.to_string(),
         time: now.format("%H:%M:%S").to_string(),
         date: now.format("%d/%m/%Y").to_string(),
         storage: storage_info,
         warnings,
+        usb_mounted,
     })
 }
 
@@ -235,7 +250,16 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
 
 pub async fn get_config(State(state): State<AppState>) -> Json<AppConfig> {
     let config = state.config.read().await;
-    Json(config.clone())
+    let mut cfg = config.clone();
+    // Mask WiFi password for security
+    cfg.network.password = "********".to_string();
+    Json(cfg)
+}
+
+/// Returns the real WiFi password (only used by settings page).
+pub async fn get_wifi_password(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = state.config.read().await;
+    Json(serde_json::json!({ "password": config.network.password }))
 }
 
 #[derive(Deserialize)]
@@ -246,13 +270,17 @@ pub struct ConfigUpdate {
 
 pub async fn update_config(
     State(state): State<AppState>,
-    Json(update): Json<AppConfig>,
+    Json(mut update): Json<AppConfig>,
 ) -> Result<Json<AppConfig>, (StatusCode, String)> {
     if let Err(e) = update.validate() {
         return Err((StatusCode::BAD_REQUEST, e.to_string()));
     }
 
     let mut config = state.config.write().await;
+    // Preserve real WiFi password if the masked placeholder was sent
+    if update.network.password == "********" {
+        update.network.password = config.network.password.clone();
+    }
     *config = update;
 
     // Persist
@@ -739,6 +767,74 @@ pub async fn delete_gallery_images(
     state.add_log(format!("🗑️ {} image(s) supprimée(s)", deleted)).await;
 
     Json(GalleryDeleteResponse { deleted, errors })
+}
+
+// ─── Gallery ZIP Download ────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct GalleryZipRequest {
+    pub filenames: Vec<String>,
+}
+
+pub async fn download_gallery_zip(
+    State(state): State<AppState>,
+    Json(req): Json<GalleryZipRequest>,
+) -> impl IntoResponse {
+    use std::io::Write;
+
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+
+    let mut zip_buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut zip_buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        for filename in &req.filenames {
+            // Security: reject any path traversal
+            if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+                continue;
+            }
+            let path = std::path::Path::new(mount_point).join(filename);
+            if let Ok(data) = std::fs::read(&path) {
+                if zip.start_file(filename, options).is_ok() {
+                    let _ = zip.write_all(&data);
+                }
+            }
+        }
+
+        // Include session_events.jsonl if it exists
+        let sessions_dir = std::path::Path::new(mount_point).join("sessions");
+        if sessions_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().map_or(false, |e| e == "jsonl") {
+                        if let Ok(data) = std::fs::read(entry.path()) {
+                            let name = format!("sessions/{}", entry.file_name().to_string_lossy());
+                            if zip.start_file(&name, options).is_ok() {
+                                let _ = zip.write_all(&data);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = zip.finish();
+    }
+
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    let zip_name = format!("aurion_{}.zip", today);
+
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "application/zip".to_string()),
+            ("content-disposition", format!("attachment; filename=\"{}\"", zip_name)),
+        ],
+        zip_buf.into_inner(),
+    )
 }
 
 // ─── Diagnostics ──────────────────────────────────────────

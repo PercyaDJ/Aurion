@@ -61,6 +61,7 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/preview/capture", post(api::capture_preview))
         .route("/api/config", get(api::get_config))
         .route("/api/config", post(api::update_config))
+        .route("/api/config/wifi-password", get(api::get_wifi_password))
         .route("/api/presets", get(api::get_presets))
         .route("/api/presets", post(api::save_preset))
         .route("/api/presets/{name}/apply", post(api::apply_preset))
@@ -78,6 +79,7 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/gallery", get(api::get_gallery))
         .route("/api/gallery/stats", get(api::get_gallery_stats))
         .route("/api/gallery/delete", post(api::delete_gallery_images))
+        .route("/api/gallery/download-zip", post(api::download_gallery_zip))
         .route("/api/gallery/{filename}", get(api::get_gallery_image))
         .route("/api/gallery/thumbnail/{filename}", get(api::get_gallery_thumbnail))
         // Static file serving

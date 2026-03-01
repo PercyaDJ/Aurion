@@ -110,7 +110,11 @@ pub struct CaptureConfig {
     pub preview_interval_secs: u64,
     pub output_format: OutputFormat,
     pub focal_length_mm: f64,
+    #[serde(default = "default_capture_interval")]
+    pub capture_interval_secs: u32,
 }
+
+fn default_capture_interval() -> u32 { 10 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRangeConfig {
@@ -253,6 +257,7 @@ impl Default for AppConfig {
                 preview_interval_secs: 30,
                 output_format: OutputFormat::RawDng,
                 focal_length_mm: 2.7,
+                capture_interval_secs: 10,
             },
             time_range: TimeRangeConfig {
                 start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),

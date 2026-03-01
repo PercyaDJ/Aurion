@@ -145,6 +145,23 @@
             </div>
         </div>
 
+        <!-- Capture Interval (Run) -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Intervalle captures (timelapse)</span>
+            </div>
+            <div class="range-group">
+                <div class="range-header">
+                    <span class="form-label">Intervalle en Run <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, 'Temps entre chaque photo en mode Run/SAFE. 10s = photo toutes les 10s pour un timelapse fluide.')">❓</span></span>
+                    <span class="range-value" id="captureIntervalVal">10s</span>
+                </div>
+                <input type="range" id="captureInterval" min="5" max="120" step="5" value="10"
+                    oninput="updateVal('captureIntervalVal', this.value + 's')">
+                <span class="form-hint">Intervalle entre les captures en phase Run (timelapse)</span>
+            </div>
+        </div>
+
         <!-- Time Range / Timer -->
         <div class="card fade-in">
             <div class="card-header">
@@ -267,6 +284,13 @@
                 document.getElementById('outputFormat').value = cfg.capture.output_format;
                 document.getElementById('watchInterval').value = cfg.capture.watch_interval_secs;
                 document.getElementById('intervalVal').textContent = cfg.capture.watch_interval_secs + 's';
+
+                // Capture interval (timelapse)
+                if (cfg.capture.capture_interval_secs) {
+                    document.getElementById('captureInterval').value = cfg.capture.capture_interval_secs;
+                    document.getElementById('captureIntervalVal').textContent = cfg.capture.capture_interval_secs + 's';
+                }
+
                 document.getElementById('timeStart').value = cfg.time_range.start.substring(0, 5);
                 document.getElementById('timeEnd').value = cfg.time_range.end.substring(0, 5);
 
@@ -281,7 +305,7 @@
                 // Capture mode toggle
                 setCaptureMode(cfg.detection.detection_capture_enabled ? 'filter' : 'safe');
             } catch (e) {
-                console.error('Load config failed:', e);
+                showToast('Erreur chargement config', 'error');
             }
         }
 
@@ -296,6 +320,7 @@
                 cfg.exposure.shutter_max_us = Math.round(parseFloat(document.getElementById('shutterMaxInput').value) * 1000000);
                 cfg.capture.output_format = document.getElementById('outputFormat').value;
                 cfg.capture.watch_interval_secs = parseInt(document.getElementById('watchInterval').value);
+                cfg.capture.capture_interval_secs = parseInt(document.getElementById('captureInterval').value);
                 cfg.time_range.start = document.getElementById('timeStart').value + ':00';
                 cfg.time_range.end = document.getElementById('timeEnd').value + ':00';
 
@@ -312,16 +337,16 @@
                     body: JSON.stringify(cfg),
                 });
 
-                const status = document.getElementById('saveStatus');
-                status.style.display = 'block';
-                setTimeout(() => status.style.display = 'none', 3000);
+                showToast('Configuration sauvegardée ✅', 'success');
             } catch (e) {
-                console.error('Save failed:', e);
+                showToast('Erreur de sauvegarde', 'error');
             }
         }
 
         loadConfig();
     </script>
+    <script src="/js/toast.js"></script>
+
 </body>
 
 </html>

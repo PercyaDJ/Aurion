@@ -24,3 +24,4 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 tower = "0.4"
 async-trait = "0.1"
 anyhow = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }

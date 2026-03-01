@@ -283,6 +283,8 @@
             <button class="btn btn-outline btn-sm" onclick="deselectAll()">✖️ Désélectionner</button>
             <span class="selection-count" id="selectionCount">0 sélectionné(s)</span>
             <div style="flex:1;"></div>
+            <button class="btn btn-outline btn-sm" style="color:var(--green); border-color:var(--green);"
+                onclick="downloadSelected()">⬇️ Télécharger ZIP</button>
             <button class="btn btn-outline btn-sm" style="color:var(--red); border-color:var(--red);"
                 onclick="confirmDelete()">🗑️ Supprimer</button>
         </div>
@@ -507,7 +509,37 @@
                 // Reload gallery
                 loadGallery();
             } catch (e) {
-                alert('Erreur suppression: ' + e.message);
+                showToast('Erreur suppression: ' + e.message, 'error');
+            }
+        }
+
+        // Download selected as ZIP
+        async function downloadSelected() {
+            const files = Array.from(selectedFiles);
+            if (files.length === 0) {
+                showToast('Aucune image sélectionnée', 'info');
+                return;
+            }
+            showToast(`Téléchargement de ${files.length} image(s)...`, 'info');
+            try {
+                const res = await fetch('/api/gallery/download-zip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filenames: files }),
+                });
+                if (!res.ok) throw new Error('Erreur serveur');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const disposition = res.headers.get('content-disposition');
+                const match = disposition && disposition.match(/filename="(.+)"/);
+                a.download = match ? match[1] : 'aurion.zip';
+                a.href = url;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Téléchargement terminé ✅', 'success');
+            } catch (e) {
+                showToast('Erreur téléchargement: ' + e.message, 'error');
             }
         }
 
@@ -553,6 +585,8 @@
 
         loadGallery();
     </script>
+    <script src="/js/toast.js"></script>
+
 </body>
 
 </html>

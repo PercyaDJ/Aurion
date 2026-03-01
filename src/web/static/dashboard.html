@@ -109,13 +109,25 @@
                 container.innerHTML = '';
                 data.warnings.forEach(w => {
                     container.innerHTML += `
-                        <div class="warning-box warning">
+                        <div class="warning-box ${data.usb_mounted ? 'warning' : 'danger'}">
                             <span class="warning-icon">⚠️</span>
                             <span>${w}</span>
                         </div>`;
                 });
+
+                // Disable capture button if USB not mounted
+                const btn = document.getElementById('disconnectBtn');
+                if (!data.usb_mounted) {
+                    btn.disabled = true;
+                    btn.textContent = '⚠️ Clé USB non détectée';
+                    btn.style.opacity = '0.5';
+                } else if (btn.textContent.includes('USB')) {
+                    btn.disabled = false;
+                    btn.textContent = '🔌 Déconnexion — Lancer la capture';
+                    btn.style.opacity = '1';
+                }
             } catch (e) {
-                console.error('Status update failed:', e);
+                showToast('Erreur de connexion au serveur', 'error');
             }
         }
 
@@ -181,6 +193,7 @@
         setInterval(updateStatus, 3000);
         setInterval(updateStorage, 10000);
     </script>
+    <script src="/js/toast.js"></script>
 </body>
 
 </html>
