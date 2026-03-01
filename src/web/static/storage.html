@@ -59,7 +59,7 @@
                 </div>
                 <div class="info-item">
                     <span class="info-label">Seuil warning</span>
-                    <span class="info-value" id="warningThreshold">15%</span>
+                    <span class="info-value" id="warningThreshold">--%</span>
                 </div>
             </div>
         </div>
@@ -113,7 +113,16 @@
         }
 
         updateStorage();
+        loadThreshold();
         setInterval(updateStorage, 5000);
+
+        async function loadThreshold() {
+            try {
+                const res = await fetch('/api/config');
+                const cfg = await res.json();
+                document.getElementById('warningThreshold').textContent = cfg.storage.warning_percent + '%';
+            } catch (e) { }
+        }
     </script>
 </body>
 
