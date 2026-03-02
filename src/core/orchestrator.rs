@@ -55,6 +55,29 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // ─── Load config snapshot ───────────────────────────
         let config = self.state.config.read().await.clone();
+
+        // ─── Wait for time range to start ───────────────────
+        if config.time_range.duration_hours.is_none() {
+            let time_range = TimeRange { start: config.time_range.start, end: config.time_range.end };
+            let mut logged_wait = false;
+            loop {
+                if self.is_shutdown().await {
+                    return Ok(());
+                }
+                let now = chrono::Local::now().time();
+                if time_range.contains(now) {
+                    break;
+                }
+                if !logged_wait {
+                    let msg = format!("Attente du début de la plage horaire ({})", config.time_range.start);
+                    info!("Orchestrator: {}", msg);
+                    self.log(&msg).await;
+                    logged_wait = true;
+                }
+                sleep(Duration::from_secs(60)).await;
+            }
+        }
+
         self.set_phase(Phase::Calibration).await;
         self.log("Phase: CALIBRATION").await;
 
@@ -87,7 +110,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             match self.camera.capture_jpg(&exposure_ctrl.current()).await {
                 Ok(frame) => {
                     let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
-                    let hist = compute_histogram(&roi_data);
+                    let hist = compute_histogram(roi_data);
                     let settings = exposure_ctrl.update(&hist, Phase::Calibration);
                     info!(
                         "Orchestrator: calibration {}/3 → ISO {} / {}µs",
@@ -133,6 +156,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // ─── Main capture loop ──────────────────────────────
         let mut consecutive_detections = 0u32;
         let mut frame_number = 0u64;
+        let mut consecutive_io_errors = 0u32;
         let loop_start = chrono::Local::now();
 
         loop {
@@ -180,10 +204,18 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
             // ─── Capture frame ──────────────────────────────
             let frame = match self.camera.capture_jpg(&exposure).await {
-                Ok(f) => f,
+                Ok(f) => {
+                    consecutive_io_errors = 0;
+                    f
+                },
                 Err(e) => {
-                    error!("Orchestrator: capture failed: {}", e);
-                    self.log(&format!("❌ Capture échouée: {}", e)).await;
+                    consecutive_io_errors += 1;
+                    error!("Orchestrator: capture failed: {} ({}/5)", e, consecutive_io_errors);
+                    self.log(&format!("❌ Capture échouée: {} ({}/5)", e, consecutive_io_errors)).await;
+                    if consecutive_io_errors >= 5 {
+                        self.log("🚨 Erreur critique caméra - Arrêt forcé (5 erreurs consécutives)").await;
+                        return Err(anyhow::anyhow!("Hardware failure: camera disconnected or I2C timeout"));
+                    }
                     sleep(Duration::from_secs(5)).await;
                     continue;
                 }
@@ -194,11 +226,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let roi_height = (frame.height as f64 * config.detection.roi_top_percent as f64 / 100.0) as u32;
 
             // ─── Exposure update ────────────────────────────
-            let hist = compute_histogram(&roi_data);
+            let hist = compute_histogram(roi_data);
             exposure_ctrl.update(&hist, current_phase);
 
             // ─── Detection ──────────────────────────────────
-            let det_result = detector.analyze(&roi_data, frame.width, roi_height);
+            let det_result = detector.analyze(roi_data, frame.width, roi_height);
 
             // ─── Session logging ────────────────────────────
             if let Some(ref mut logger) = session_logger {
@@ -402,14 +434,14 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 }
 
 /// Crop image data to ROI (top N% of the image).
-/// Returns a new Vec with only the ROI pixel data (RGB).
-pub fn crop_roi(rgb_data: &[u8], width: u32, height: u32, roi_top_percent: u32) -> Vec<u8> {
+/// Returns a slice with only the ROI pixel data (RGB).
+pub fn crop_roi(rgb_data: &[u8], width: u32, height: u32, roi_top_percent: u32) -> &[u8] {
     let roi_height = (height as f64 * roi_top_percent as f64 / 100.0) as u32;
     let roi_bytes = (width * roi_height * 3) as usize;
     if roi_bytes <= rgb_data.len() {
-        rgb_data[..roi_bytes].to_vec()
+        &rgb_data[..roi_bytes]
     } else {
-        rgb_data.to_vec()
+        rgb_data
     }
 }
 
