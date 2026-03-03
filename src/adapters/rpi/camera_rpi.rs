@@ -3,6 +3,7 @@ use tracing::{info, error};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
+use image::GenericImageView;
 use crate::core::models::{CaptureFormat, CaptureFrame, ExposureSettings, FrameMetadata};
 use crate::ports::camera::{CameraError, CameraPort};
 
