@@ -214,6 +214,7 @@ impl CameraPort for CameraRpi {
             height: h,
             format: CaptureFormat::Jpg,
             metadata: raw.metadata.clone(),
+            raw_bytes: jpg_data, // original JPEG bytes — used for lossless save
         };
 
         Ok((raw, jpg))
