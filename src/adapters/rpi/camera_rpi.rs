@@ -75,12 +75,16 @@ impl CameraRpi {
 
 #[async_trait]
 impl CameraPort for CameraRpi {
-    async fn capture_jpg(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
+    async fn capture_jpg(&self, exposure: &ExposureSettings, _tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         if !self.connected {
             return Err(CameraError::NotConnected);
         }
 
-        let tmp_path = tmp_dir.join("aurora_tmp_capture.jpg");
+        // Always use /tmp for intermediate work files — NOT the USB mount point.
+        // The USB is slow and may not be writable during early boot. The orchestrator
+        // calls storage.save_file() separately to persist the final output.
+        let pid = std::process::id();
+        let tmp_path = std::path::Path::new("/tmp").join(format!("aurion_{}_capture.jpg", pid));
         let tmp_path_str = tmp_path.to_string_lossy().to_string();
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
@@ -125,13 +129,15 @@ impl CameraPort for CameraRpi {
         })
     }
 
-    async fn capture_raw(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
+    async fn capture_raw(&self, exposure: &ExposureSettings, _tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         if !self.connected {
             return Err(CameraError::NotConnected);
         }
 
-        let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
-        let tmp_dng = tmp_dir.join("aurora_tmp_capture_raw.dng");
+        // Always use /tmp for intermediate work files.
+        let pid = std::process::id();
+        let tmp_jpg = std::path::Path::new("/tmp").join(format!("aurion_{}_raw.jpg", pid));
+        let tmp_dng = std::path::Path::new("/tmp").join(format!("aurion_{}_raw.dng", pid));
         let tmp_jpg_str = tmp_jpg.to_string_lossy().to_string();
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
@@ -182,13 +188,16 @@ impl CameraPort for CameraRpi {
     async fn capture_raw_and_jpg(
         &self,
         exposure: &ExposureSettings,
-        tmp_dir: &std::path::Path,
+        _tmp_dir: &std::path::Path,
     ) -> Result<(CaptureFrame, CaptureFrame), CameraError> {
         // Single capture: raw() produces both DNG + JPG in one rpicam-still call
-        let raw = self.capture_raw(exposure, tmp_dir).await?;
+        // Pass /tmp explicitly — capture_raw ignores its _tmp_dir anyway
+        let tmp = std::path::Path::new("/tmp");
+        let raw = self.capture_raw(exposure, tmp).await?;
 
         // The JPG was produced alongside the DNG by rpicam-still --raw
-        let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
+        let pid = std::process::id();
+        let tmp_jpg = std::path::Path::new("/tmp").join(format!("aurion_{}_raw.jpg", pid));
         let jpg_data = std::fs::read(&tmp_jpg)
             .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_jpg, e)))?;
 
