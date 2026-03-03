@@ -126,6 +126,7 @@ impl CameraPort for CameraRpi {
                 shutter_us: exposure.shutter_us,
                 timestamp: chrono::Utc::now(),
             },
+            raw_bytes: data, // original JPEG bytes — used for lossless save
         })
     }
 
@@ -173,7 +174,7 @@ impl CameraPort for CameraRpi {
         info!("CameraRpi: captured RAW DNG ({} bytes, {}x{})", dng_data.len(), w, h);
 
         Ok(CaptureFrame {
-            data: dng_data,
+            data: dng_data.clone(),
             width: w,
             height: h,
             format: CaptureFormat::RawDng,
@@ -182,6 +183,7 @@ impl CameraPort for CameraRpi {
                 shutter_us: exposure.shutter_us,
                 timestamp: chrono::Utc::now(),
             },
+            raw_bytes: dng_data, // original DNG bytes — used for lossless save
         })
     }
 

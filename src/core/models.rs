@@ -54,11 +54,15 @@ impl fmt::Display for OutputFormat {
 
 #[derive(Debug, Clone)]
 pub struct CaptureFrame {
+    /// Decoded RGB pixels for analysis (exposure, detection, thumbnail)
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
     pub format: CaptureFormat,
     pub metadata: FrameMetadata,
+    /// Original compressed bytes from rpicam-still (JPEG or DNG).
+    /// If non-empty, used as-is for the final saved file (no re-encode).
+    pub raw_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

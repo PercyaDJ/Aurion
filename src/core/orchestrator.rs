@@ -89,6 +89,41 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut detector = AuroraDetector::from_config(&config.detection);
 
         let storage_path = Path::new(&config.storage.mount_point);
+
+        // ─── USB storage pre-check ──────────────────────────
+        // Before starting the session, verify USB is mounted and writable.
+        // Retry for up to 60s to handle slow USB enumeration at boot.
+        {
+            let mut usb_ok = false;
+            for attempt in 1..=12 {
+                if self.storage.is_available() {
+                    // Try a test write to confirm write access
+                    let test_probe = b"aurion_probe";
+                    match self.storage.save_file(".write_probe", test_probe).await {
+                        Ok(_) => {
+                            let _ = std::fs::remove_file(storage_path.join(".write_probe"));
+                            self.log("✅ Clé USB montée et accessible en écriture").await;
+                            usb_ok = true;
+                            break;
+                        }
+                        Err(e) => {
+                            warn!("Orchestrator: USB write test failed (try {}/12): {}", attempt, e);
+                        }
+                    }
+                } else {
+                    warn!("Orchestrator: USB not available (try {}/12)", attempt);
+                }
+                sleep(Duration::from_secs(5)).await;
+            }
+            if !usb_ok {
+                let msg = "❌ Clé USB inaccessible après 60s — session abandonnée";
+                error!("Orchestrator: {}", msg);
+                self.log(msg).await;
+                self.set_phase(Phase::Shutdown).await;
+                return Err(anyhow::anyhow!("USB storage unavailable — cannot start session"));
+            }
+        }
+
         let mut session_logger = match SessionLogger::new(storage_path) {
             Ok(l) => {
                 info!("Orchestrator: session logger at {:?}", l.session_path());
@@ -105,9 +140,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.log(&format!("Mode: {}", capture_mode_str)).await;
 
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
+        // Use /tmp for calibration captures — USB may be slow at startup
+        // and calibration frames are never saved to disk.
+        let tmp_path = Path::new("/tmp");
         info!("Orchestrator: calibrating exposure (3 frames)...");
         for i in 0..3 {
-            match self.camera.capture_jpg(&exposure_ctrl.current(), storage_path).await {
+            match self.camera.capture_jpg(&exposure_ctrl.current(), tmp_path).await {
                 Ok(frame) => {
                     let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
                     let hist = compute_histogram(roi_data);
@@ -218,18 +256,23 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             //   → jpg_frame used for analysis (exposure + detection)
             //   → raw_frame saved to storage (no second capture)
             // In JPG mode: capture_jpg() for analysis + save
+            // Camera always writes temp files to /tmp, not the USB drive.
             let (analysis_frame, raw_frame_opt): (CaptureFrame, Option<CaptureFrame>) =
                 match config.capture.output_format {
                     OutputFormat::Jpg => {
-                        match self.camera.capture_jpg(&exposure, storage_path).await {
+                        match self.camera.capture_jpg(&exposure, Path::new("/tmp")).await {
                             Ok(f) => { consecutive_io_errors = 0; (f, None) }
                             Err(e) => {
                                 consecutive_io_errors += 1;
                                 error!("Orchestrator: capture failed: {} ({}/5)", e, consecutive_io_errors);
                                 self.log(&format!("❌ Capture échouée: {} ({}/5)", e, consecutive_io_errors)).await;
                                 if consecutive_io_errors >= 5 {
-                                    self.log("🚨 Erreur critique caméra — Arrêt forcé (5 erreurs consécutives)").await;
-                                    return Err(anyhow::anyhow!("Hardware failure: camera disconnected"));
+                                    // Don't crash — wait 5 minutes and auto-recover
+                                    // (camera may have briefly disconnected)
+                                    self.log("⚠️ 5 erreurs consécutives — pause 5 min, tentative de récupération...").await;
+                                    warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
+                                    sleep(Duration::from_secs(300)).await;
+                                    consecutive_io_errors = 0; // reset: try again
                                 }
                                 sleep(Duration::from_secs(5)).await;
                                 continue;
@@ -238,15 +281,17 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     }
                     OutputFormat::RawDng | OutputFormat::RawAndJpg => {
                         // Single capture: returns (dng_frame, jpg_frame)
-                        match self.camera.capture_raw_and_jpg(&exposure, storage_path).await {
+                        match self.camera.capture_raw_and_jpg(&exposure, Path::new("/tmp")).await {
                             Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
                             Err(e) => {
                                 consecutive_io_errors += 1;
                                 error!("Orchestrator: RAW capture failed: {} ({}/5)", e, consecutive_io_errors);
                                 self.log(&format!("❌ Capture RAW échouée: {} ({}/5)", e, consecutive_io_errors)).await;
                                 if consecutive_io_errors >= 5 {
-                                    self.log("🚨 Erreur critique caméra — Arrêt forcé").await;
-                                    return Err(anyhow::anyhow!("Hardware failure: camera disconnected"));
+                                    self.log("⚠️ 5 erreurs consécutives — pause 5 min, tentative de récupération...").await;
+                                    warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
+                                    sleep(Duration::from_secs(300)).await;
+                                    consecutive_io_errors = 0;
                                 }
                                 sleep(Duration::from_secs(5)).await;
                                 continue;
@@ -371,13 +416,23 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         match config.capture.output_format {
             OutputFormat::Jpg => {
                 let filename = format!("aurora_{}_{:05}{}.jpg", timestamp, frame_num, suffix);
-                // Encode the already-captured RGB data as JPEG
-                if let Err(e) = self.save_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &filename).await {
+                // Prefer raw_bytes (original JPEG from rpicam-still) to avoid re-encoding.
+                // Fall back to RGB re-encode only for mock/test frames where raw_bytes is empty.
+                let jpg_bytes: Vec<u8> = if !analysis_frame.raw_bytes.is_empty() {
+                    analysis_frame.raw_bytes.clone()
+                } else {
+                    self.encode_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height)
+                        .unwrap_or_default()
+                };
+                if jpg_bytes.is_empty() {
+                    error!("Orchestrator: no JPEG data to save for frame {}", frame_num);
+                } else if let Err(e) = self.storage.save_file(&filename, &jpg_bytes).await {
                     error!("Orchestrator: save JPG failed: {}", e);
                 } else {
                     self.generate_thumbnail(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &filename).await;
                     info!("Orchestrator: saved {}", filename);
                 }
+
             }
             OutputFormat::RawDng => {
                 // Use the already-captured raw frame (no re-capture)
@@ -414,19 +469,21 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
     }
 
-    /// Encode RGB data as JPEG and save to storage.
+    /// Encode RGB data as JPEG and save to storage (fallback only).
     async fn save_rgb_as_jpg(&self, rgb_data: &[u8], width: u32, height: u32, filename: &str) -> anyhow::Result<()> {
+        let bytes = self.encode_rgb_as_jpg(rgb_data, width, height)?;
+        self.storage.save_file(filename, &bytes).await
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
+    /// Encode RGB pixels to JPEG bytes.
+    fn encode_rgb_as_jpg(&self, rgb_data: &[u8], width: u32, height: u32) -> anyhow::Result<Vec<u8>> {
         use image::{ImageBuffer, Rgb};
         let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgb_data.to_vec())
             .ok_or_else(|| anyhow::anyhow!("Invalid image dimensions"))?;
-
         let mut buf = std::io::Cursor::new(Vec::new());
         img.write_to(&mut buf, image::ImageFormat::Jpeg)?;
-
-        self.storage.save_file(filename, buf.get_ref()).await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        Ok(())
+        Ok(buf.into_inner())
     }
 
     /// Generate a 320×240 thumbnail and save to thumbs/ subdirectory.

@@ -77,6 +77,7 @@ impl CameraMock {
                 shutter_us: exposure.shutter_us,
                 timestamp: chrono::Utc::now(),
             },
+            raw_bytes: vec![],
         }
     }
 
@@ -133,6 +134,7 @@ impl CameraPort for CameraMock {
                     shutter_us: exposure.shutter_us,
                     timestamp: chrono::Utc::now(),
                 },
+                raw_bytes: vec![],
             })
         } else {
             // No test data: use synthetic frame
@@ -160,6 +162,7 @@ impl CameraPort for CameraMock {
             height: raw.height,
             format: CaptureFormat::Jpg,
             metadata: raw.metadata.clone(),
+            raw_bytes: vec![],
         };
         Ok((raw, jpg))
     }
