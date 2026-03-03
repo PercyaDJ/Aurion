@@ -278,6 +278,17 @@
             <span class="gallery-count" id="galleryCount">Chargement...</span>
         </div>
 
+        <!-- Tabs -->
+        <div class="tab-bar"
+            style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:0.5rem;">
+            <button id="tabImages" class="tab-btn active"
+                style="background:none;border:none;color:var(--accent);font-weight:600;padding:0.25rem 0.75rem;border-bottom:2px solid var(--accent);cursor:pointer;font-family:inherit;font-size:0.9rem;"
+                onclick="switchTab('images')">🖼️ Toutes les images</button>
+            <button id="tabSessions" class="tab-btn"
+                style="background:none;border:none;color:var(--text-secondary);font-weight:500;padding:0.25rem 0.75rem;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;font-size:0.9rem;"
+                onclick="switchTab('sessions')">🌙 Par session</button>
+        </div>
+
         <!-- Toolbar (appears when selecting) -->
         <div class="gallery-toolbar" id="toolbar">
             <button class="btn btn-outline btn-sm" onclick="selectAll()">☑️ Tout sélectionner</button>
@@ -290,10 +301,23 @@
                 onclick="confirmDelete()">🗑️ Supprimer</button>
         </div>
 
-        <div id="galleryContent">
-            <div class="empty-state">
-                <div class="empty-icon">⏳</div>
-                <p>Chargement de la galerie...</p>
+        <!-- Tab: All images -->
+        <div id="paneImages">
+            <div id="galleryContent">
+                <div class="empty-state">
+                    <div class="empty-icon">⏳</div>
+                    <p>Chargement de la galerie...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Sessions -->
+        <div id="paneSessions" style="display:none;">
+            <div id="sessionsContent">
+                <div class="empty-state">
+                    <div class="empty-icon">⏳</div>
+                    <p>Chargement des sessions...</p>
+                </div>
             </div>
         </div>
     </div>
@@ -331,6 +355,91 @@
         function toggleMenu() {
             document.getElementById('sideMenu').classList.toggle('open');
             document.getElementById('menuOverlay').classList.toggle('visible');
+        }
+
+        // ── Tab switching ─────────────────────────────────────
+        let sessionLoaded = false;
+
+        function switchTab(tab) {
+            const paneImages = document.getElementById('paneImages');
+            const paneSessions = document.getElementById('paneSessions');
+            const tabImages = document.getElementById('tabImages');
+            const tabSessions = document.getElementById('tabSessions');
+            const toolbar = document.getElementById('toolbar');
+
+            if (tab === 'images') {
+                paneImages.style.display = '';
+                paneSessions.style.display = 'none';
+                tabImages.style.color = 'var(--accent)';
+                tabImages.style.borderBottom = '2px solid var(--accent)';
+                tabSessions.style.color = 'var(--text-secondary)';
+                tabSessions.style.borderBottom = '2px solid transparent';
+                toolbar.style.display = ''; // restore managed by selectMode
+            } else {
+                paneImages.style.display = 'none';
+                paneSessions.style.display = '';
+                tabImages.style.color = 'var(--text-secondary)';
+                tabImages.style.borderBottom = '2px solid transparent';
+                tabSessions.style.color = 'var(--accent)';
+                tabSessions.style.borderBottom = '2px solid var(--accent)';
+                toolbar.style.display = 'none';
+                if (!sessionLoaded) {
+                    sessionLoaded = true;
+                    loadSessions();
+                }
+            }
+        }
+
+        async function loadSessions() {
+            const container = document.getElementById('sessionsContent');
+            try {
+                const res = await fetch('/api/gallery/sessions');
+                const sessions = await res.json();
+
+                if (!sessions || sessions.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">🌙</div>
+                            <p>Aucune session enregistrée.<br>Les sessions apparaissent après la première nuit de capture.</p>
+                        </div>`;
+                    return;
+                }
+
+                let html = '<div style="display:flex;flex-direction:column;gap:0.75rem;">';
+                for (const s of sessions) {
+                    const rate = s.image_count > 0
+                        ? Math.round(s.aurora_count / s.image_count * 100)
+                        : 0;
+                    const rateColor = rate > 30 ? 'var(--green)' : rate > 5 ? 'var(--accent)' : 'var(--text-secondary)';
+                    const duration = s.duration_minutes > 0
+                        ? `${Math.floor(s.duration_minutes / 60)}h${String(s.duration_minutes % 60).padStart(2, '0')}`
+                        : '—';
+
+                    html += `
+                    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+                            <div>
+                                <div style="font-weight:600;font-size:0.95rem;">${s.date.replace(/\//g, ' / ')}</div>
+                                <div style="font-size:0.75rem;color:var(--text-secondary);">${s.name}</div>
+                            </div>
+                            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                                ${s.aurora_count > 0 ? `<span style="background:rgba(0,255,120,0.15);color:var(--green);border:1px solid var(--green);border-radius:20px;padding:0.15rem 0.6rem;font-size:0.75rem;font-weight:600;">🌌 ${s.aurora_count} aurore${s.aurora_count > 1 ? 's' : ''}</span>` : ''}
+                                <span style="color:${rateColor};font-size:0.8rem;font-weight:500;">${rate}% détection</span>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
+                            <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
+                            <span>⏱ ${duration}</span>
+                            ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
+                        </div>
+                    </div>`;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Impossible de charger les sessions.</p></div>`;
+            }
         }
 
         let allImages = [];

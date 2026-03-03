@@ -1,8 +1,8 @@
 [package]
 name = "aurion"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Aurion — Autonomous aurora capture camera for Raspberry Pi"
+description = "Aurion — Autonomous aurora camera for Raspberry Pi"
 authors = ["Aurion"]
 
 [features]
@@ -25,3 +25,6 @@ tower = "0.4"
 async-trait = "0.1"
 anyhow = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+axum-test = "15"

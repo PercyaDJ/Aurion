@@ -723,6 +723,109 @@ pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GallerySta
     })
 }
 
+// ─── Gallery Sessions ────────────────────────────────────
+
+/// One capture session (one night's output).
+#[derive(Serialize)]
+pub struct SessionInfo {
+    pub name: String,
+    pub date: String,
+    pub image_count: usize,
+    pub aurora_count: usize,
+    pub total_size_mb: f64,
+    pub duration_minutes: u64,
+    pub has_log: bool,
+}
+
+/// List all sessions from `{mount_point}/sessions/`.
+/// Each session is a folder named `YYYY-MM-DD_HH-MM`.
+pub async fn get_gallery_sessions(State(state): State<AppState>) -> Json<Vec<SessionInfo>> {
+    let config = state.config.read().await;
+    let sessions_dir = std::path::Path::new(&config.storage.mount_point).join("sessions");
+    drop(config);
+
+    let mut sessions = Vec::new();
+
+    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+        return Json(sessions);
+    };
+
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        if name.is_empty() {
+            continue;
+        }
+
+        // Parse date from folder name YYYY-MM-DD_HH-MM
+        let date = name.get(..10).unwrap_or(&name).replace('-', "/");
+
+        // Count images and aurora-tagged images
+        let mut image_count = 0usize;
+        let mut aurora_count = 0usize;
+        let mut first_modified: Option<std::time::SystemTime> = None;
+        let mut last_modified: Option<std::time::SystemTime> = None;
+
+        // Images are stored at mount_point root, not in session dir
+        // session dir contains event.jsonl — count aurora from log
+        let has_log = path.join("event.jsonl").exists();
+
+        // Count from event.jsonl if available
+        if has_log {
+            if let Ok(content) = std::fs::read_to_string(path.join("event.jsonl")) {
+                for line in content.lines() {
+                    image_count += 1;
+                    if line.contains("\"aurora_detected\":true") {
+                        aurora_count += 1;
+                    }
+                }
+            }
+        }
+
+        // Compute session duration from folder creation + last modified time on event.jsonl
+        if has_log {
+            if let Ok(meta) = std::fs::metadata(path.join("event.jsonl")) {
+                let _ = meta.created().ok().map(|t| first_modified = Some(t));
+                let _ = meta.modified().ok().map(|t| last_modified = Some(t));
+            }
+        }
+
+        let duration_minutes = match (first_modified, last_modified) {
+            (Some(start), Some(end)) => {
+                end.duration_since(start)
+                    .map(|d| d.as_secs() / 60)
+                    .unwrap_or(0)
+            }
+            _ => 0,
+        };
+
+        // Estimate total size from image count (rough: ~5 MB/frame for JPG)
+        let total_size_mb = image_count as f64 * 5.0;
+
+        sessions.push(SessionInfo {
+            name,
+            date,
+            image_count,
+            aurora_count,
+            total_size_mb,
+            duration_minutes,
+            has_log,
+        });
+    }
+
+    // Sort by session name descending (most recent first)
+    sessions.sort_by(|a, b| b.name.cmp(&a.name));
+
+    Json(sessions)
+}
 
 // ─── Gallery Delete ───────────────────────────────────────
 

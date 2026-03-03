@@ -43,9 +43,10 @@ impl AppState {
     }
 }
 
-/// Start the web server on the configured port.
-pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
-    let app = Router::new()
+/// Build the full Axum router with all routes and the given state.
+/// Exposed as pub so tests can create a TestServer without binding a port.
+pub fn build_router(state: AppState) -> Router<()> {
+    Router::new()
         // Captive portal detection routes (must be before fallback)
         .route("/hotspot-detect.html", get(api::captive_apple))
         .route("/library/test/success.html", get(api::captive_apple))
@@ -77,6 +78,7 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/wifi/status", get(api::wifi_status))
         // Gallery (Recovery mode)
         .route("/api/gallery", get(api::get_gallery))
+        .route("/api/gallery/sessions", get(api::get_gallery_sessions))
         .route("/api/gallery/stats", get(api::get_gallery_stats))
         .route("/api/gallery/delete", post(api::delete_gallery_images))
         .route("/api/gallery/download-zip", post(api::download_gallery_zip))
@@ -84,7 +86,12 @@ pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
         .route("/api/gallery/thumbnail/{filename}", get(api::get_gallery_thumbnail))
         // Static file serving
         .fallback_service(ServeDir::new("src/web/static"))
-        .with_state(state);
+        .with_state(state)
+}
+
+/// Start the web server on the configured port.
+pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
+    let app = build_router(state);
 
     let addr = format!("0.0.0.0:{}", port);
     info!("Web server starting on http://{}", addr);
