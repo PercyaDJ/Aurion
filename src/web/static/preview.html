@@ -11,7 +11,8 @@
 
 <body>
     <nav class="navbar">
-        <div class="navbar-brand"><img src="/icons/icon-192.png" alt="Aurion" style="width:28px;height:28px;vertical-align:middle;margin-right:6px;"><span>Aurion</span></div>
+        <div class="navbar-brand"><img src="/icons/icon-192.png" alt="Aurion"
+                style="width:28px;height:28px;vertical-align:middle;margin-right:6px;"><span>Aurion</span></div>
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
@@ -178,13 +179,23 @@
         function updateRoiOverlay() {
             const overlay = document.getElementById('roiOverlay');
             const img = document.getElementById('previewImg');
-            if (!roiVisible || img.style.display === 'none') {
+            if (!roiVisible || img.style.display === 'none' || !img.complete || img.naturalWidth === 0) {
                 overlay.style.display = 'none';
                 return;
             }
-            const excludedPercent = 100 - roiPercent;
+            // Compute overlay dimensions from the image's rendered rect
+            const imgRect = img.getBoundingClientRect();
+            const container = document.getElementById('previewContainer');
+            const containerRect = container.getBoundingClientRect();
+            const imgTopInContainer = imgRect.top - containerRect.top;
+            const excludedFraction = (100 - roiPercent) / 100;
+            const excludedPx = Math.round(imgRect.height * excludedFraction);
             overlay.style.display = 'block';
-            overlay.style.height = excludedPercent + '%';
+            overlay.style.left = (imgRect.left - containerRect.left) + 'px';
+            overlay.style.top = (imgTopInContainer + imgRect.height - excludedPx) + 'px';
+            overlay.style.width = imgRect.width + 'px';
+            overlay.style.height = excludedPx + 'px';
+            overlay.style.bottom = '';
         }
 
         function toggleRoi() {
@@ -192,11 +203,15 @@
             const btn = document.getElementById('roiToggle');
             btn.classList.toggle('btn-outline', !roiVisible);
             btn.classList.toggle('btn-primary', roiVisible);
-            loadRoi(); // Reload config in case ROI was changed in advanced settings
+            // Reload config then update (config may have changed in advanced settings)
+            loadRoi();
         }
 
+        // Keep overlay correct on window resize
+        window.addEventListener('resize', updateRoiOverlay);
+
         loadRoi();
-        loadExisting();
+        loadExisting().then(() => updateRoiOverlay());
     </script>
     <script src="/js/toast.js"></script>
 </body>

@@ -4,14 +4,17 @@ use std::path::{Path, PathBuf};
 
 use crate::core::models::SessionEvent;
 
-/// Session logger — writes one NDJSON line per event to event.jsonl.
+/// Session logger — writes to two files on the USB drive:
+/// - `event.jsonl` : one JSON line per capture event (structured data)
+/// - `session.log` : human-readable timestamped messages (orchestrator status, errors)
 ///
-/// Path: `{base_dir}/sessions/YYYY-MM-DD_HH-MM/event.jsonl`
+/// Path: `{base_dir}/sessions/YYYY-MM-DD_HH-MM/`
 ///
-/// Flushes every 10 lines (not every line) to reduce USB write pressure.
+/// Flushes every 10 lines to reduce USB write pressure.
 /// Always flushes on Drop to avoid data loss.
 pub struct SessionLogger {
     writer: BufWriter<File>,
+    log_writer: BufWriter<File>,
     session_dir: PathBuf,
     lines_since_flush: u32,
 }
@@ -29,18 +32,38 @@ impl SessionLogger {
         fs::create_dir_all(&session_dir)
             .map_err(|e| SessionLoggerError::IoError(format!("Create session dir: {}", e)))?;
 
+        // Structured JSON events
         let event_path = session_dir.join("event.jsonl");
-        let file = OpenOptions::new()
+        let event_file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&event_path)
             .map_err(|e| SessionLoggerError::IoError(format!("Open event.jsonl: {}", e)))?;
 
-        Ok(Self {
-            writer: BufWriter::new(file),
+        // Human-readable text log (survives reboot, readable on PC/Mac)
+        let log_path = session_dir.join("session.log");
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|e| SessionLoggerError::IoError(format!("Open session.log: {}", e)))?;
+
+        let mut logger = Self {
+            writer: BufWriter::new(event_file),
+            log_writer: BufWriter::new(log_file),
             session_dir,
             lines_since_flush: 0,
-        })
+        };
+
+        // Write session header
+        let header = format!(
+            "=== Aurion Session — {} ===\n",
+            now.format("%Y-%m-%d %H:%M:%S")
+        );
+        let _ = logger.log_writer.write_all(header.as_bytes());
+        let _ = logger.log_writer.flush();
+
+        Ok(logger)
     }
 
     /// Append one event as a JSON line.
@@ -61,10 +84,21 @@ impl SessionLogger {
         Ok(())
     }
 
-    /// Force a flush (call on shutdown).
+    /// Append a human-readable message to session.log on USB.
+    /// This is the persistent log, readable after reboot.
+    /// Flushes immediately so it survives hard shutdowns.
+    pub fn log_text(&mut self, msg: &str) {
+        let now = chrono::Local::now().format("%H:%M:%S").to_string();
+        let line = format!("[{}] {}\n", now, msg);
+        let _ = self.log_writer.write_all(line.as_bytes());
+        let _ = self.log_writer.flush(); // immediate flush — critical messages must survive
+    }
+
+    /// Force a flush of both files (call on shutdown).
     pub fn flush(&mut self) -> Result<(), SessionLoggerError> {
         self.writer.flush()
             .map_err(|e| SessionLoggerError::IoError(e.to_string()))?;
+        let _ = self.log_writer.flush();
         self.lines_since_flush = 0;
         Ok(())
     }
@@ -79,6 +113,7 @@ impl Drop for SessionLogger {
     /// Always flush on drop to avoid data loss on shutdown.
     fn drop(&mut self) {
         let _ = self.writer.flush();
+        let _ = self.log_writer.flush();
     }
 }
 

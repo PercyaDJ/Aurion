@@ -138,6 +138,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let is_safe_mode = !config.detection.detection_capture_enabled;
         let capture_mode_str = if is_safe_mode { "SAFE" } else { "FILTER" };
         self.log(&format!("Mode: {}", capture_mode_str)).await;
+        if let Some(ref mut sl) = session_logger {
+            sl.log_text(&format!("Mode capture: {}", capture_mode_str));
+            sl.log_text(&format!("Format: {:?} | Intervalle: {}s | ROI top: {}%",
+                config.capture.output_format, config.capture.capture_interval_secs, config.detection.roi_top_percent));
+        }
 
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
         // Use /tmp for calibration captures — USB may be slow at startup
@@ -163,7 +168,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
 
         let settings = exposure_ctrl.current();
-        self.log(&format!("Calibration done: ISO {} / {}µs", settings.iso, settings.shutter_us)).await;
+        let calib_msg = format!("Calibration done: ISO {} / {}µs", settings.iso, settings.shutter_us);
+        self.log(&calib_msg).await;
+        if let Some(ref mut sl) = session_logger { sl.log_text(&calib_msg); }
 
         // ─── Transition based on mode ───────────────────────
         if is_safe_mode {
@@ -171,11 +178,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             sm.set_phase(Phase::Run);
             self.set_phase(Phase::Run).await;
             self.log("Phase: RUN (SAFE mode — capture toute la nuit)").await;
+            if let Some(ref mut sl) = session_logger { sl.log_text("Phase: RUN (SAFE mode)"); }
         } else {
             info!("Orchestrator: FILTER mode → Watch");
             sm.set_phase(Phase::Watch);
             self.set_phase(Phase::Watch).await;
             self.log("Phase: WATCH (FILTER mode — attente détection)").await;
+            if let Some(ref mut sl) = session_logger { sl.log_text("Phase: WATCH (FILTER mode)"); }
         }
 
         // ─── Compute deadline (timer vs time-range mode) ────
@@ -183,11 +192,15 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             // Timer mode: run for N hours from now
             let secs = (hours * 3600.0) as i64;
             let end = chrono::Local::now() + chrono::Duration::seconds(secs);
-            self.log(&format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"))).await;
+            let msg = format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"));
+            self.log(&msg).await;
+            if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
             Some(end.time())
         } else {
             // Time range mode: use configured end time
-            self.log(&format!("Mode plage horaire: {} → {}", config.time_range.start, config.time_range.end)).await;
+            let msg = format!("Mode plage horaire: {} → {}", config.time_range.start, config.time_range.end);
+            self.log(&msg).await;
+            if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
             None
         };
 
