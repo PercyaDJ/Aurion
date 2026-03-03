@@ -1,12 +1,13 @@
 use async_trait::async_trait;
 use tracing::{info, error};
-use std::process::Command;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 use crate::core::models::{CaptureFormat, CaptureFrame, ExposureSettings, FrameMetadata};
 use crate::ports::camera::{CameraError, CameraPort};
 
 /// Raspberry Pi camera adapter using rpicam-still.
-/// Captures images via the rpicam command-line tools.
+/// Uses async tokio::process::Command so captures never block the Tokio runtime.
 ///
 /// Requires: rpicam-apps installed on the Pi.
 pub struct CameraRpi {
@@ -16,8 +17,8 @@ pub struct CameraRpi {
 
 impl CameraRpi {
     pub fn new() -> Self {
-        // Check if rpicam-still is available
-        let connected = Command::new("rpicam-still")
+        // Synchronous check at startup only (before the async runtime is in full use)
+        let connected = std::process::Command::new("rpicam-still")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
@@ -63,6 +64,12 @@ impl CameraRpi {
 
         cmd
     }
+
+    /// Compute a safe async timeout: shutter duration + 15s headroom.
+    fn capture_timeout_secs(exposure: &ExposureSettings) -> u64 {
+        let shutter_secs = exposure.shutter_us / 1_000_000;
+        shutter_secs + 15
+    }
 }
 
 #[async_trait]
@@ -73,16 +80,21 @@ impl CameraPort for CameraRpi {
         }
 
         let tmp_path = tmp_dir.join("aurora_tmp_capture.jpg");
-        let tmp_path_str = tmp_path.to_string_lossy();
-        let output = self
-            .build_capture_command(exposure, &tmp_path_str, false)
-            .output()
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
+        let tmp_path_str = tmp_path.to_string_lossy().to_string();
+
+        let timeout_secs = Self::capture_timeout_secs(exposure);
+        let output = timeout(
+            Duration::from_secs(timeout_secs),
+            self.build_capture_command(exposure, &tmp_path_str, false).output(),
+        )
+        .await
+        .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still timeout after {}s", timeout_secs)))?
+        .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(CameraError::CaptureFailed(format!(
-                "rpicam-still failed: {},",
+                "rpicam-still failed: {}",
                 stderr
             )));
         }
@@ -119,18 +131,23 @@ impl CameraPort for CameraRpi {
 
         let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
         let tmp_dng = tmp_dir.join("aurora_tmp_capture_raw.dng");
-        let tmp_jpg_str = tmp_jpg.to_string_lossy();
+        let tmp_jpg_str = tmp_jpg.to_string_lossy().to_string();
+
+        let timeout_secs = Self::capture_timeout_secs(exposure);
 
         // rpicam-still --raw produces a DNG alongside the JPG
-        let output = self
-            .build_capture_command(exposure, &tmp_jpg_str, true)
-            .output()
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
+        let output = timeout(
+            Duration::from_secs(timeout_secs),
+            self.build_capture_command(exposure, &tmp_jpg_str, true).output(),
+        )
+        .await
+        .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still RAW timeout after {}s", timeout_secs)))?
+        .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(CameraError::CaptureFailed(format!(
-                "rpicam-still raw failed: {},",
+                "rpicam-still raw failed: {}",
                 stderr
             )));
         }
@@ -139,12 +156,19 @@ impl CameraPort for CameraRpi {
         let dng_data = std::fs::read(&tmp_dng)
             .map_err(|e| CameraError::CaptureFailed(format!("DNG read failed from {:?}: {}", tmp_dng, e)))?;
 
-        info!("CameraRpi: captured RAW DNG ({} bytes)", dng_data.len());
+        // Read actual dimensions from the accompanying JPG
+        let jpg_data = std::fs::read(&tmp_jpg).ok();
+        let (w, h) = jpg_data
+            .and_then(|d| image::load_from_memory(&d).ok())
+            .map(|img| img.dimensions())
+            .unwrap_or((4056, 3040)); // fallback: IMX477 full res
+
+        info!("CameraRpi: captured RAW DNG ({} bytes, {}x{})", dng_data.len(), w, h);
 
         Ok(CaptureFrame {
             data: dng_data,
-            width: 4056, // IMX477 full res
-            height: 3040,
+            width: w,
+            height: h,
             format: CaptureFormat::RawDng,
             metadata: FrameMetadata {
                 iso: exposure.iso,
@@ -159,10 +183,10 @@ impl CameraPort for CameraRpi {
         exposure: &ExposureSettings,
         tmp_dir: &std::path::Path,
     ) -> Result<(CaptureFrame, CaptureFrame), CameraError> {
-        // Capture raw first (produces both DNG + JPG)
+        // Single capture: raw() produces both DNG + JPG in one rpicam-still call
         let raw = self.capture_raw(exposure, tmp_dir).await?;
 
-        // Read the JPG that was produced alongside
+        // The JPG was produced alongside the DNG by rpicam-still --raw
         let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
         let jpg_data = std::fs::read(&tmp_jpg)
             .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_jpg, e)))?;

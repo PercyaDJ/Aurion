@@ -184,26 +184,55 @@ impl AppConfig {
 
     /// Validate configuration bounds.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        // ─── Exposure ────────────────────────────────────────
         if self.exposure.iso_min > self.exposure.iso_max {
             return Err(ConfigError::ValidationError(
-                "ISO min must be <= ISO max".into(),
+                "ISO min doit être ≤ ISO max".into(),
             ));
         }
         if self.exposure.shutter_min_us > self.exposure.shutter_max_us {
             return Err(ConfigError::ValidationError(
-                "Shutter min must be <= shutter max".into(),
-            ));
-        }
-        if self.detection.roi_top_percent < 50 || self.detection.roi_top_percent > 99 {
-            return Err(ConfigError::ValidationError(
-                "ROI must be between 50% and 99%".into(),
+                "Obturateur min doit être ≤ obturateur max".into(),
             ));
         }
         if self.exposure.ev_step_max <= 0.0 || self.exposure.ev_step_max > 2.0 {
             return Err(ConfigError::ValidationError(
-                "EV step max must be between 0 and 2".into(),
+                "EV step max doit être entre 0 et 2".into(),
             ));
         }
+
+        // ─── Detection ───────────────────────────────────────
+        if self.detection.roi_top_percent < 30 || self.detection.roi_top_percent > 100 {
+            return Err(ConfigError::ValidationError(
+                "ROI doit être entre 30% et 100%".into(),
+            ));
+        }
+        if self.detection.hysteresis_off >= self.detection.hysteresis_on {
+            return Err(ConfigError::ValidationError(
+                "Hystérésis OFF doit être < hystérésis ON (sinon la détection ne peut jamais basculer)".into(),
+            ));
+        }
+        if self.detection.green_threshold < 0.0
+            || self.detection.red_threshold < 0.0
+            || self.detection.blue_threshold < 0.0
+        {
+            return Err(ConfigError::ValidationError(
+                "Les seuils de détection doivent être ≥ 0".into(),
+            ));
+        }
+
+        // ─── Capture ─────────────────────────────────────────
+        if self.capture.capture_interval_secs < 1 {
+            return Err(ConfigError::ValidationError(
+                "L'intervalle de capture doit être ≥ 1 seconde".into(),
+            ));
+        }
+        if self.capture.watch_interval_secs < 5 {
+            return Err(ConfigError::ValidationError(
+                "L'intervalle d'observation doit être ≥ 5 secondes".into(),
+            ));
+        }
+
         Ok(())
     }
 
@@ -364,7 +393,23 @@ mod tests {
     #[test]
     fn test_invalid_roi() {
         let mut config = AppConfig::default();
-        config.detection.roi_top_percent = 30; // Below 50
+        config.detection.roi_top_percent = 20; // Below the 30% minimum
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_hysteresis() {
+        let mut config = AppConfig::default();
+        // hysteresis_off >= hysteresis_on → detection can never flip off
+        config.detection.hysteresis_off = 0.8;
+        config.detection.hysteresis_on = 0.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_capture_interval() {
+        let mut config = AppConfig::default();
+        config.capture.capture_interval_secs = 0; // Must be >= 1
         assert!(config.validate().is_err());
     }
 

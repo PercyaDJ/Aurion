@@ -5,7 +5,7 @@ use tracing::{info, warn, error};
 use crate::core::config::AppConfig;
 use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
-use crate::core::models::{CaptureFrame, ExposureSettings, OutputFormat, Phase, SessionEvent, TimeRange};
+use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
@@ -202,24 +202,59 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let current_phase = sm.phase();
             let exposure = exposure_ctrl.current();
 
-            // ─── Capture frame ──────────────────────────────
-            let frame = match self.camera.capture_jpg(&exposure, storage_path).await {
-                Ok(f) => {
-                    consecutive_io_errors = 0;
-                    f
-                },
-                Err(e) => {
-                    consecutive_io_errors += 1;
-                    error!("Orchestrator: capture failed: {} ({}/5)", e, consecutive_io_errors);
-                    self.log(&format!("❌ Capture échouée: {} ({}/5)", e, consecutive_io_errors)).await;
-                    if consecutive_io_errors >= 5 {
-                        self.log("🚨 Erreur critique caméra - Arrêt forcé (5 erreurs consécutives)").await;
-                        return Err(anyhow::anyhow!("Hardware failure: camera disconnected or I2C timeout"));
+            // ─── Live config (hot-reload of mutable params) ─────
+            // Re-read only the parameters that are safe to change mid-session:
+            //   - capture_interval_secs / watch_interval_secs
+            //   - detection thresholds (sensitivity, ROI, etc.)
+            // Immutable params (mount_point, output_format, time_range) use the snapshot.
+            let live_cfg = self.state.config.read().await.clone();
+            detector.update_config(&live_cfg.detection);
+            let live_capture_interval = live_cfg.capture.capture_interval_secs.max(1);
+            let live_watch_interval = live_cfg.capture.watch_interval_secs.max(5);
+            drop(live_cfg);
+
+            // ─── Capture frame (format-aware, single capture) ──
+            // In RAW mode: capture_raw_and_jpg() returns (raw_frame, jpg_frame)
+            //   → jpg_frame used for analysis (exposure + detection)
+            //   → raw_frame saved to storage (no second capture)
+            // In JPG mode: capture_jpg() for analysis + save
+            let (analysis_frame, raw_frame_opt): (CaptureFrame, Option<CaptureFrame>) =
+                match config.capture.output_format {
+                    OutputFormat::Jpg => {
+                        match self.camera.capture_jpg(&exposure, storage_path).await {
+                            Ok(f) => { consecutive_io_errors = 0; (f, None) }
+                            Err(e) => {
+                                consecutive_io_errors += 1;
+                                error!("Orchestrator: capture failed: {} ({}/5)", e, consecutive_io_errors);
+                                self.log(&format!("❌ Capture échouée: {} ({}/5)", e, consecutive_io_errors)).await;
+                                if consecutive_io_errors >= 5 {
+                                    self.log("🚨 Erreur critique caméra — Arrêt forcé (5 erreurs consécutives)").await;
+                                    return Err(anyhow::anyhow!("Hardware failure: camera disconnected"));
+                                }
+                                sleep(Duration::from_secs(5)).await;
+                                continue;
+                            }
+                        }
                     }
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-            };
+                    OutputFormat::RawDng | OutputFormat::RawAndJpg => {
+                        // Single capture: returns (dng_frame, jpg_frame)
+                        match self.camera.capture_raw_and_jpg(&exposure, storage_path).await {
+                            Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
+                            Err(e) => {
+                                consecutive_io_errors += 1;
+                                error!("Orchestrator: RAW capture failed: {} ({}/5)", e, consecutive_io_errors);
+                                self.log(&format!("❌ Capture RAW échouée: {} ({}/5)", e, consecutive_io_errors)).await;
+                                if consecutive_io_errors >= 5 {
+                                    self.log("🚨 Erreur critique caméra — Arrêt forcé").await;
+                                    return Err(anyhow::anyhow!("Hardware failure: camera disconnected"));
+                                }
+                                sleep(Duration::from_secs(5)).await;
+                                continue;
+                            }
+                        }
+                    }
+                };
+            let frame = &analysis_frame;
 
             // ROI crop
             let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
@@ -274,21 +309,20 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                         consecutive_detections = 0;
                     }
 
-                    // Watch interval
-                    sleep(Duration::from_secs(config.capture.watch_interval_secs as u64)).await;
+                    // Watch interval (hot-reloadable)
+                    sleep(Duration::from_secs(live_watch_interval as u64)).await;
                 }
 
                 Phase::Run => {
-                    // Save the already-captured frame (NO double capture)
-                    self.save_frame(&config, &frame, frame_number, det_result.detected).await;
+                    // Save the captured frame (NO double capture — raw_frame_opt already holds the DNG)
+                    self.save_frame(&config, &analysis_frame, raw_frame_opt.as_ref(), frame_number, det_result.detected).await;
                     frame_number += 1;
 
                     // In FILTER mode during Run, if detection drops we keep capturing
                     // (conservative: don't stop on momentary gaps)
 
-                    // Wait for configured capture interval (timelapse pacing)
-                    let interval_secs = config.capture.capture_interval_secs.max(1) as u64;
-                    sleep(Duration::from_secs(interval_secs)).await;
+                    // Wait for configured capture interval (hot-reloadable timelapse pacing)
+                    sleep(Duration::from_secs(live_capture_interval as u64)).await;
                 }
 
                 _ => {
@@ -318,59 +352,62 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         Ok(())
     }
 
-    /// Save the already-captured frame to storage (single capture, no re-capture).
-    /// Also generates a thumbnail for the gallery.
-    async fn save_frame(&self, config: &AppConfig, frame: &CaptureFrame, frame_num: u64, is_aurora: bool) {
+    /// Save a captured frame to storage.
+    /// `analysis_frame` is the JPG frame used for analysis (always present).
+    /// `raw_frame` is the pre-captured DNG (Some for RawDng/RawAndJpg, None for JPG mode).
+    /// `is_aurora` controls whether `_AURORA` is appended to the filename.
+    async fn save_frame(
+        &self,
+        config: &AppConfig,
+        analysis_frame: &CaptureFrame,
+        raw_frame: Option<&CaptureFrame>,
+        frame_num: u64,
+        is_aurora: bool,
+    ) {
 
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
-        let tmp_dir = Path::new(&config.storage.mount_point);
 
         match config.capture.output_format {
             OutputFormat::Jpg => {
                 let filename = format!("aurora_{}_{:05}{}.jpg", timestamp, frame_num, suffix);
                 // Encode the already-captured RGB data as JPEG
-                if let Err(e) = self.save_rgb_as_jpg(&frame.data, frame.width, frame.height, &filename).await {
+                if let Err(e) = self.save_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &filename).await {
                     error!("Orchestrator: save JPG failed: {}", e);
                 } else {
-                    // Generate thumbnail
-                    self.generate_thumbnail(&frame.data, frame.width, frame.height, &filename).await;
+                    self.generate_thumbnail(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &filename).await;
                     info!("Orchestrator: saved {}", filename);
                 }
             }
             OutputFormat::RawDng => {
-                // RAW requires a separate capture (DNG can't be created from RGB analysis frame)
+                // Use the already-captured raw frame (no re-capture)
                 let filename = format!("aurora_{}_{:05}{}.dng", timestamp, frame_num, suffix);
-                let exposure = ExposureSettings::new(frame.metadata.iso, frame.metadata.shutter_us);
-                match self.camera.capture_raw(&exposure, tmp_dir).await {
-                    Ok(raw_frame) => {
-                        if let Err(e) = self.storage.save_file(&filename, &raw_frame.data).await {
-                            error!("Orchestrator: save RAW failed: {}", e);
-                        } else {
-                            info!("Orchestrator: saved {}", filename);
-                        }
+                if let Some(raw) = raw_frame {
+                    if let Err(e) = self.storage.save_file(&filename, &raw.data).await {
+                        error!("Orchestrator: save RAW failed: {}", e);
+                    } else {
+                        info!("Orchestrator: saved {}", filename);
                     }
-                    Err(e) => error!("Orchestrator: RAW capture failed: {}", e),
+                } else {
+                    error!("Orchestrator: no raw frame available for RawDng format — skipping");
                 }
             }
             OutputFormat::RawAndJpg => {
                 let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
-                // Save the analysis frame as JPG (no re-capture)
+                // Save the analysis frame as JPG (no re-capture needed)
                 let jpg_filename = format!("{}.jpg", base);
-                if let Err(e) = self.save_rgb_as_jpg(&frame.data, frame.width, frame.height, &jpg_filename).await {
+                if let Err(e) = self.save_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &jpg_filename).await {
                     error!("Orchestrator: save JPG failed: {}", e);
                 } else {
-                    self.generate_thumbnail(&frame.data, frame.width, frame.height, &jpg_filename).await;
+                    self.generate_thumbnail(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &jpg_filename).await;
                 }
-                // RAW requires separate capture
-                let exposure = ExposureSettings::new(frame.metadata.iso, frame.metadata.shutter_us);
-                match self.camera.capture_raw(&exposure, tmp_dir).await {
-                    Ok(raw_frame) => {
-                        if let Err(e) = self.storage.save_file(&format!("{}.dng", base), &raw_frame.data).await {
-                            error!("Orchestrator: save RAW failed: {}", e);
-                        }
+                // Save pre-captured DNG (no re-capture)
+                if let Some(raw) = raw_frame {
+                    if let Err(e) = self.storage.save_file(&format!("{}.dng", base), &raw.data).await {
+                        error!("Orchestrator: save RAW failed: {}", e);
                     }
-                    Err(e) => error!("Orchestrator: RAW capture failed: {}", e),
+                } else {
+                    error!("Orchestrator: no raw frame for RawAndJpg format");
                 }
                 info!("Orchestrator: saved {}.jpg + .dng", base);
             }
