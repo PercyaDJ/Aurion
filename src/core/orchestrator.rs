@@ -1,4 +1,4 @@
-use std::path::Path;
+﻿use std::path::Path;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 
@@ -6,6 +6,7 @@ use crate::core::config::AppConfig;
 use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
+use chrono::Datelike;
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
@@ -56,6 +57,21 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // ─── Load config snapshot ───────────────────────────
         let config = self.state.config.read().await.clone();
 
+        // ─── Log system clock immediately (critical for diagnosis without screen) ─
+        {
+            let sys_now = chrono::Local::now();
+            let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
+            info!("Orchestrator: {}", clock_msg);
+            self.log(&clock_msg).await;
+
+            // Warn if the clock looks like epoch (Pi without NTP)
+            if sys_now.year() < 2024 {
+                let warn_msg = "[!] Horloge systeme < 2024 - NTP non synchronise ? La plage horaire peut ne pas fonctionner.";
+                warn!("Orchestrator: {}", warn_msg);
+                self.log(warn_msg).await;
+            }
+        }
+
         // ─── Wait for time range to start ───────────────────
         if config.time_range.duration_hours.is_none() {
             let time_range = TimeRange { start: config.time_range.start, end: config.time_range.end };
@@ -64,18 +80,26 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 if self.is_shutdown().await {
                     return Ok(());
                 }
-                let now = chrono::Local::now().time();
-                if time_range.contains(now) {
+                let now = chrono::Local::now();
+                if time_range.contains(now.time()) {
                     break;
                 }
                 if !logged_wait {
-                    let msg = format!("Attente du début de la plage horaire ({})", config.time_range.start);
+                    let msg = format!(
+                        "Attente plage horaire ({} -> {}) | heure actuelle: {}",
+                        config.time_range.start, config.time_range.end,
+                        now.format("%H:%M:%S")
+                    );
                     info!("Orchestrator: {}", msg);
                     self.log(&msg).await;
                     logged_wait = true;
                 }
                 sleep(Duration::from_secs(60)).await;
             }
+            let start_msg = format!("Plage horaire atteinte - demarrage capture ({} -> {})",
+                config.time_range.start, config.time_range.end);
+            self.log(&start_msg).await;
+            info!("Orchestrator: {}", start_msg);
         }
 
         self.set_phase(Phase::Calibration).await;
@@ -88,41 +112,50 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
         let mut detector = AuroraDetector::from_config(&config.detection);
 
-        let storage_path = Path::new(&config.storage.mount_point);
-
-        // ─── USB storage pre-check ──────────────────────────
-        // Before starting the session, verify USB is mounted and writable.
-        // Retry for up to 60s to handle slow USB enumeration at boot.
+        // ─── USB storage: write-first check with auto-mount ─
+        // Don't rely on mountpoint -q (can lie). Try a real write directly.
+        // If it fails: attempt to (re)mount, then retry.
+        let configured_path = std::path::PathBuf::from(&config.storage.mount_point);
         {
-            let mut usb_ok = false;
-            for attempt in 1..=12 {
-                if self.storage.is_available() {
-                    // Try a test write to confirm write access
-                    let test_probe = b"aurion_probe";
-                    match self.storage.save_file(".write_probe", test_probe).await {
-                        Ok(_) => {
-                            let _ = std::fs::remove_file(storage_path.join(".write_probe"));
-                            self.log("✅ Clé USB montée et accessible en écriture").await;
-                            usb_ok = true;
-                            break;
-                        }
-                        Err(e) => {
-                            warn!("Orchestrator: USB write test failed (try {}/12): {}", attempt, e);
-                        }
-                    }
-                } else {
-                    warn!("Orchestrator: USB not available (try {}/12)", attempt);
+            let probe_path = configured_path.join(".aurion_probe");
+            let mut storage_ok = false;
+
+            // First attempt: direct write (USB already mounted via fstab/boot)
+            if std::fs::create_dir_all(&configured_path).is_ok() {
+                if std::fs::write(&probe_path, b"ok").is_ok() {
+                    let _ = std::fs::remove_file(&probe_path);
+                    self.log(&format!("USB accessible: {}", config.storage.mount_point)).await;
+                    storage_ok = true;
                 }
-                sleep(Duration::from_secs(5)).await;
             }
-            if !usb_ok {
-                let msg = "❌ Clé USB inaccessible après 60s — session abandonnée";
-                error!("Orchestrator: {}", msg);
-                self.log(msg).await;
-                self.set_phase(Phase::Shutdown).await;
-                return Err(anyhow::anyhow!("USB storage unavailable — cannot start session"));
+
+            // Second attempt: try to (re)mount then retry
+            if !storage_ok {
+                warn!("Orchestrator: direct write failed, attempting mount...");
+                self.log("USB: montage en cours...").await;
+                let _ = self.storage.mount().await; // ignore if already mounted
+                sleep(Duration::from_secs(3)).await;
+                if std::fs::create_dir_all(&configured_path).is_ok() {
+                    if std::fs::write(&probe_path, b"ok").is_ok() {
+                        let _ = std::fs::remove_file(&probe_path);
+                        self.log(&format!("USB monte et accessible: {}", config.storage.mount_point)).await;
+                        storage_ok = true;
+                    }
+                }
+            }
+
+            if !storage_ok {
+                // Log a clear warning — session continues and will try to write anyway
+                // (write may still succeed if permissions allow)
+                let msg = format!(
+                    "[!] USB ({}) non accessible en ecriture - la session va tenter de continuer",
+                    config.storage.mount_point
+                );
+                warn!("Orchestrator: {}", msg);
+                self.log(&msg).await;
             }
         }
+        let storage_path: &Path = configured_path.as_path();
 
         let mut session_logger = match SessionLogger::new(storage_path) {
             Ok(l) => {
@@ -451,7 +484,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 // Use the already-captured raw frame (no re-capture)
                 let filename = format!("aurora_{}_{:05}{}.dng", timestamp, frame_num, suffix);
                 if let Some(raw) = raw_frame {
-                    if let Err(e) = self.storage.save_file(&filename, &raw.data).await {
+                    let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
+                    if let Err(e) = self.storage.save_file(&filename, dng_bytes).await {
                         error!("Orchestrator: save RAW failed: {}", e);
                     } else {
                         info!("Orchestrator: saved {}", filename);
@@ -471,7 +505,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 }
                 // Save pre-captured DNG (no re-capture)
                 if let Some(raw) = raw_frame {
-                    if let Err(e) = self.storage.save_file(&format!("{}.dng", base), &raw.data).await {
+                    let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
+                    if let Err(e) = self.storage.save_file(&format!("{}.dng", base), dng_bytes).await {
                         error!("Orchestrator: save RAW failed: {}", e);
                     }
                 } else {
