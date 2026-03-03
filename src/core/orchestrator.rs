@@ -107,7 +107,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
         info!("Orchestrator: calibrating exposure (3 frames)...");
         for i in 0..3 {
-            match self.camera.capture_jpg(&exposure_ctrl.current()).await {
+            match self.camera.capture_jpg(&exposure_ctrl.current(), storage_path).await {
                 Ok(frame) => {
                     let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
                     let hist = compute_histogram(roi_data);
@@ -203,7 +203,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let exposure = exposure_ctrl.current();
 
             // ─── Capture frame ──────────────────────────────
-            let frame = match self.camera.capture_jpg(&exposure).await {
+            let frame = match self.camera.capture_jpg(&exposure, storage_path).await {
                 Ok(f) => {
                     consecutive_io_errors = 0;
                     f
@@ -280,7 +280,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
                 Phase::Run => {
                     // Save the already-captured frame (NO double capture)
-                    self.save_frame(&config, &frame, frame_number).await;
+                    self.save_frame(&config, &frame, frame_number, det_result.detected).await;
                     frame_number += 1;
 
                     // In FILTER mode during Run, if detection drops we keep capturing
@@ -320,13 +320,15 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
     /// Save the already-captured frame to storage (single capture, no re-capture).
     /// Also generates a thumbnail for the gallery.
-    async fn save_frame(&self, config: &AppConfig, frame: &CaptureFrame, frame_num: u64) {
+    async fn save_frame(&self, config: &AppConfig, frame: &CaptureFrame, frame_num: u64, is_aurora: bool) {
 
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let suffix = if is_aurora { "_AURORA" } else { "" };
+        let tmp_dir = Path::new(&config.storage.mount_point);
 
         match config.capture.output_format {
             OutputFormat::Jpg => {
-                let filename = format!("aurora_{}_{:05}.jpg", timestamp, frame_num);
+                let filename = format!("aurora_{}_{:05}{}.jpg", timestamp, frame_num, suffix);
                 // Encode the already-captured RGB data as JPEG
                 if let Err(e) = self.save_rgb_as_jpg(&frame.data, frame.width, frame.height, &filename).await {
                     error!("Orchestrator: save JPG failed: {}", e);
@@ -338,9 +340,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
             OutputFormat::RawDng => {
                 // RAW requires a separate capture (DNG can't be created from RGB analysis frame)
-                let filename = format!("aurora_{}_{:05}.dng", timestamp, frame_num);
+                let filename = format!("aurora_{}_{:05}{}.dng", timestamp, frame_num, suffix);
                 let exposure = ExposureSettings::new(frame.metadata.iso, frame.metadata.shutter_us);
-                match self.camera.capture_raw(&exposure).await {
+                match self.camera.capture_raw(&exposure, tmp_dir).await {
                     Ok(raw_frame) => {
                         if let Err(e) = self.storage.save_file(&filename, &raw_frame.data).await {
                             error!("Orchestrator: save RAW failed: {}", e);
@@ -352,7 +354,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 }
             }
             OutputFormat::RawAndJpg => {
-                let base = format!("aurora_{}_{:05}", timestamp, frame_num);
+                let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
                 // Save the analysis frame as JPG (no re-capture)
                 let jpg_filename = format!("{}.jpg", base);
                 if let Err(e) = self.save_rgb_as_jpg(&frame.data, frame.width, frame.height, &jpg_filename).await {
@@ -362,7 +364,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 }
                 // RAW requires separate capture
                 let exposure = ExposureSettings::new(frame.metadata.iso, frame.metadata.shutter_us);
-                match self.camera.capture_raw(&exposure).await {
+                match self.camera.capture_raw(&exposure, tmp_dir).await {
                     Ok(raw_frame) => {
                         if let Err(e) = self.storage.save_file(&format!("{}.dng", base), &raw_frame.data).await {
                             error!("Orchestrator: save RAW failed: {}", e);

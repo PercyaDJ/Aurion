@@ -67,14 +67,15 @@ impl CameraRpi {
 
 #[async_trait]
 impl CameraPort for CameraRpi {
-    async fn capture_jpg(&self, exposure: &ExposureSettings) -> Result<CaptureFrame, CameraError> {
+    async fn capture_jpg(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         if !self.connected {
             return Err(CameraError::NotConnected);
         }
 
-        let tmp_path = "/tmp/aurora_capture.jpg";
+        let tmp_path = tmp_dir.join("aurora_tmp_capture.jpg");
+        let tmp_path_str = tmp_path.to_string_lossy();
         let output = self
-            .build_capture_command(exposure, tmp_path, false)
+            .build_capture_command(exposure, &tmp_path_str, false)
             .output()
             .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
 
@@ -86,8 +87,8 @@ impl CameraPort for CameraRpi {
             )));
         }
 
-        let data = std::fs::read(tmp_path)
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
+        let data = std::fs::read(&tmp_path)
+            .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_path, e)))?;
 
         // Decode to get dimensions
         let img = image::load_from_memory(&data)
@@ -111,17 +112,18 @@ impl CameraPort for CameraRpi {
         })
     }
 
-    async fn capture_raw(&self, exposure: &ExposureSettings) -> Result<CaptureFrame, CameraError> {
+    async fn capture_raw(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         if !self.connected {
             return Err(CameraError::NotConnected);
         }
 
-        let tmp_jpg = "/tmp/aurora_capture_raw.jpg";
-        let tmp_dng = "/tmp/aurora_capture_raw.dng";
+        let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
+        let tmp_dng = tmp_dir.join("aurora_tmp_capture_raw.dng");
+        let tmp_jpg_str = tmp_jpg.to_string_lossy();
 
         // rpicam-still --raw produces a DNG alongside the JPG
         let output = self
-            .build_capture_command(exposure, tmp_jpg, true)
+            .build_capture_command(exposure, &tmp_jpg_str, true)
             .output()
             .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
 
@@ -134,8 +136,8 @@ impl CameraPort for CameraRpi {
         }
 
         // Read the DNG file
-        let dng_data = std::fs::read(tmp_dng)
-            .map_err(|e| CameraError::CaptureFailed(format!("DNG read failed: {}", e)))?;
+        let dng_data = std::fs::read(&tmp_dng)
+            .map_err(|e| CameraError::CaptureFailed(format!("DNG read failed from {:?}: {}", tmp_dng, e)))?;
 
         info!("CameraRpi: captured RAW DNG ({} bytes)", dng_data.len());
 
@@ -155,13 +157,15 @@ impl CameraPort for CameraRpi {
     async fn capture_raw_and_jpg(
         &self,
         exposure: &ExposureSettings,
+        tmp_dir: &std::path::Path,
     ) -> Result<(CaptureFrame, CaptureFrame), CameraError> {
         // Capture raw first (produces both DNG + JPG)
-        let raw = self.capture_raw(exposure).await?;
+        let raw = self.capture_raw(exposure, tmp_dir).await?;
 
         // Read the JPG that was produced alongside
-        let jpg_data = std::fs::read("/tmp/aurora_capture_raw.jpg")
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
+        let tmp_jpg = tmp_dir.join("aurora_tmp_capture_raw.jpg");
+        let jpg_data = std::fs::read(&tmp_jpg)
+            .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_jpg, e)))?;
 
         let img = image::load_from_memory(&jpg_data)
             .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;

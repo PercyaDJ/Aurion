@@ -90,7 +90,7 @@ impl CameraMock {
 
 #[async_trait]
 impl CameraPort for CameraMock {
-    async fn capture_jpg(&self, exposure: &ExposureSettings) -> Result<CaptureFrame, CameraError> {
+    async fn capture_jpg(&self, exposure: &ExposureSettings, _tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         if !self.connected {
             return Err(CameraError::NotConnected);
         }
@@ -141,9 +141,9 @@ impl CameraPort for CameraMock {
         }
     }
 
-    async fn capture_raw(&self, exposure: &ExposureSettings) -> Result<CaptureFrame, CameraError> {
+    async fn capture_raw(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         // Mock: return same as JPG but marked as RAW
-        let mut frame = self.capture_jpg(exposure).await?;
+        let mut frame = self.capture_jpg(exposure, tmp_dir).await?;
         frame.format = CaptureFormat::RawDng;
         Ok(frame)
     }
@@ -151,8 +151,9 @@ impl CameraPort for CameraMock {
     async fn capture_raw_and_jpg(
         &self,
         exposure: &ExposureSettings,
+        tmp_dir: &std::path::Path,
     ) -> Result<(CaptureFrame, CaptureFrame), CameraError> {
-        let raw = self.capture_raw(exposure).await?;
+        let raw = self.capture_raw(exposure, tmp_dir).await?;
         let jpg = CaptureFrame {
             data: raw.data.clone(),
             width: raw.width,

@@ -39,7 +39,8 @@ async fn run_watch_loop(
         }
 
         let exposure = exposure_ctrl.current();
-        let frame = camera.capture_jpg(&exposure).await.unwrap();
+        let tmp_dir = PathBuf::from("./output");
+        let frame = camera.capture_jpg(&exposure, &tmp_dir).await.unwrap();
         let result = detector.analyze(&frame.data, frame.width, frame.height);
 
         let event = if result.detected {
@@ -338,7 +339,8 @@ async fn test_full_lifecycle() {
     // CALIBRATION
     assert_eq!(sm.phase(), Phase::Calibration);
     let exp = aurion::core::models::ExposureSettings::new(800, 5_000_000);
-    let frame = camera.capture_jpg(&exp).await.unwrap();
+    let tmp_dir = PathBuf::from("./output");
+    let frame = camera.capture_jpg(&exp, &tmp_dir).await.unwrap();
     assert!(frame.width > 0);
     sm.transition(Event::CalibrationDone).unwrap();
 

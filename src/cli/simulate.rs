@@ -71,7 +71,8 @@ pub async fn run_simulation() -> anyhow::Result<()> {
     // ─── CALIBRATION ───────────────────────────────────────
     info!("[CALIBRATION] Capturing test image...");
     let exposure = exposure_ctrl.current();
-    let frame = camera.capture_jpg(&exposure).await?;
+    let tmp_dir = PathBuf::from("./output");
+    let frame = camera.capture_jpg(&exposure, &tmp_dir).await?;
     let histogram = compute_histogram(&frame.data);
     let calibrated = exposure_ctrl.update(&histogram, Phase::Calibration);
     info!(
@@ -103,7 +104,8 @@ pub async fn run_simulation() -> anyhow::Result<()> {
 
         // Capture
         let exposure = exposure_ctrl.current();
-        let frame = camera.capture_jpg(&exposure).await?;
+        let tmp_dir = PathBuf::from("./output");
+        let frame = camera.capture_jpg(&exposure, &tmp_dir).await?;
         let result = detector.analyze(&frame.data, frame.width, frame.height);
 
         info!(
@@ -154,7 +156,8 @@ pub async fn run_simulation() -> anyhow::Result<()> {
             }
 
             let exposure = exposure_ctrl.current();
-            let frame = camera.capture_jpg(&exposure).await?;
+            let tmp_dir = PathBuf::from("./output");
+            let frame = camera.capture_jpg(&exposure, &tmp_dir).await?;
 
             // Auto-adjust exposure
             let histogram = compute_histogram(&frame.data);

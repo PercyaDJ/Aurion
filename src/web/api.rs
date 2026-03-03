@@ -121,8 +121,8 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 ///   3. Repeat until properly exposed
 ///   4. Return final image with metadata overlay
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
-    let tmp_path = "/tmp/aurion_preview.jpg";
-    let meta_path = "/tmp/aurion_preview_meta.txt";
+    let tmp_path = "aurion_preview.jpg";
+    let meta_path = "aurion_preview_meta.txt";
     let config = state.config.read().await.clone();
 
     // Initialize exposure at geometric midpoint of user's range
