@@ -153,7 +153,13 @@ setup_capture_automount() {
 
   backup_file /etc/fstab
   sed -i -E '\|/mnt/capture|d' /etc/fstab
-  echo "UUID=${target_uuid}  /mnt/capture  ${target_fstype}  defaults,noatime,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0" >> /etc/fstab
+  # Detect uid/gid of the aurion user so the USB drive is writable without sudo
+  local AURION_UID AURION_GID
+  AURION_UID=$(id -u "${SUDO_USER:-aurion}" 2>/dev/null || echo "1000")
+  AURION_GID=$(id -g "${SUDO_USER:-aurion}" 2>/dev/null || echo "1000")
+
+  # uid/gid required for vfat/exfat: without these the mount is root:root and aurion cannot write
+  echo "UUID=${target_uuid}  /mnt/capture  ${target_fstype}  defaults,noatime,nofail,uid=${AURION_UID},gid=${AURION_GID},umask=0002  0  0" >> /etc/fstab
 
   systemctl daemon-reload
   mount -a || true
