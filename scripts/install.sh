@@ -136,7 +136,8 @@ create_service() {
 [Unit]
 Description=Aurion — Autonomous Aurora Capture
 After=network.target
-After=mnt-capture.automount
+# USB mount is handled by /etc/fstab (plain mount, not automount)
+RequiresMountsFor=/mnt/capture
 
 [Service]
 Type=simple

@@ -59,7 +59,7 @@ ask_yes_no() {
 ensure_packages() {
   info "Installing packages: log2ram, util-linux, exfat support, git, build deps"
   apt update
-  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfat-utils git libclang-dev
+  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfatprogs git libclang-dev
 }
 
 enable_log2ram() {
