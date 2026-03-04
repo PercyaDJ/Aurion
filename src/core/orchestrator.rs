@@ -249,6 +249,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut frame_number = 0u64;
         let mut consecutive_io_errors = 0u32;
         let loop_start = chrono::Local::now();
+        let mut has_started_range = false;
+        let mut wait_iters = 0u64;
 
         loop {
             // Check for external shutdown signal
@@ -259,17 +261,45 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
             // Check time limit
             let now = chrono::Local::now();
-            let should_stop = if let Some(_dl) = deadline {
+            let mut should_stop = false;
+            let mut wait_for_start = false;
+
+            if let Some(_dl) = deadline {
                 let elapsed = now.signed_duration_since(loop_start);
                 let max_duration = config.time_range.duration_hours.unwrap_or(0.0);
-                elapsed.num_seconds() >= (max_duration * 3600.0) as i64
+                should_stop = elapsed.num_seconds() >= (max_duration * 3600.0) as i64;
             } else {
                 let time_range = TimeRange {
                     start: config.time_range.start,
                     end: config.time_range.end,
                 };
-                !time_range.contains(now.time())
+                if time_range.contains(now.time()) {
+                    has_started_range = true;
+                } else {
+                    if has_started_range {
+                        // We were in the range, and now we exited -> STOP
+                        should_stop = true;
+                    } else {
+                        // Not in range, and haven't started yet -> WAIT
+                        wait_for_start = true;
+                    }
+                }
             };
+
+            if wait_for_start {
+                if wait_iters % 30 == 0 {
+                    let wait_msg = format!(
+                        "Attente du début de plage (actuel: {}, début: {})",
+                        now.format("%H:%M:%S"), config.time_range.start
+                    );
+                    info!("Orchestrator: {}", wait_msg);
+                    self.log(&wait_msg).await;
+                    if let Some(ref mut sl) = session_logger { sl.log_text(&wait_msg); }
+                }
+                wait_iters += 1;
+                sleep(Duration::from_secs(10)).await;
+                continue;
+            }
 
             // Log each loop iteration so we can trace from session.log
             {
