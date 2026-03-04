@@ -65,6 +65,28 @@
             </div>
         </div>
 
+        <!-- USB Storage Status -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">💾 Stockage USB</span>
+                <span class="badge" id="usbBadge" style="background:var(--bg-secondary)">--</span>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Chemin configuré</span>
+                    <span class="info-value" id="usbPath">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Accessible en écriture</span>
+                    <span class="info-value" id="usbWritable">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Espace libre</span>
+                    <span class="info-value" id="usbFree">--</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Date/Time Setting -->
         <div class="card fade-in">
             <div class="card-header">
@@ -226,6 +248,24 @@
                     document.getElementById('sysCpuTemp').textContent = 'N/A';
                 }
                 document.getElementById('sysVersion').textContent = 'v' + diag.version;
+
+                // USB status from /api/status
+                const usbOk = status.usb_mounted;
+                document.getElementById('usbWritable').textContent = usbOk ? '✅ Oui' : '❌ Non';
+                const usbBadge = document.getElementById('usbBadge');
+                usbBadge.textContent = usbOk ? 'OK' : 'ERREUR';
+                usbBadge.style.background = usbOk ? 'var(--green, #2ecc71)' : 'var(--red, #e74c3c)';
+
+                // Mount path from config
+                const cfgRes = await fetch('/api/config');
+                const cfg = await cfgRes.json();
+                document.getElementById('usbPath').textContent = cfg.storage?.mount_point || '--';
+
+                // Free space from /api/storage
+                const storRes = await fetch('/api/storage');
+                const stor = await storRes.json();
+                document.getElementById('usbFree').textContent = stor.summary || '--';
+
             } catch (e) {
                 console.error('Diagnostics update failed:', e);
             }

@@ -171,10 +171,17 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let is_safe_mode = !config.detection.detection_capture_enabled;
         let capture_mode_str = if is_safe_mode { "SAFE" } else { "FILTER" };
         self.log(&format!("Mode: {}", capture_mode_str)).await;
+        // Dump effective config to session.log so we can verify from SSH next morning
         if let Some(ref mut sl) = session_logger {
-            sl.log_text(&format!("Mode capture: {}", capture_mode_str));
-            sl.log_text(&format!("Format: {:?} | Intervalle: {}s | ROI top: {}%",
-                config.capture.output_format, config.capture.capture_interval_secs, config.detection.roi_top_percent));
+            sl.log_text(&format!("=== CONFIG EFFECTIVE ==="));
+            sl.log_text(&format!("Mode: {}", capture_mode_str));
+            sl.log_text(&format!("Format: {:?}", config.capture.output_format));
+            sl.log_text(&format!("Intervalle: {}s", config.capture.capture_interval_secs));
+            sl.log_text(&format!("Plage: {} -> {}", config.time_range.start, config.time_range.end));
+            sl.log_text(&format!("Minuteur: {:?}h", config.time_range.duration_hours));
+            sl.log_text(&format!("detection_capture_enabled: {}", config.detection.detection_capture_enabled));
+            sl.log_text(&format!("Mount point: {}", config.storage.mount_point));
+            sl.log_text(&format!("======================="));
         }
 
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
@@ -253,34 +260,54 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             // Check time limit
             let now = chrono::Local::now();
             let should_stop = if let Some(_dl) = deadline {
-                // Timer mode: check elapsed duration
                 let elapsed = now.signed_duration_since(loop_start);
                 let max_duration = config.time_range.duration_hours.unwrap_or(0.0);
                 elapsed.num_seconds() >= (max_duration * 3600.0) as i64
             } else {
-                // Time range mode
                 let time_range = TimeRange {
                     start: config.time_range.start,
                     end: config.time_range.end,
                 };
                 !time_range.contains(now.time())
             };
+
+            // Log each loop iteration so we can trace from session.log
+            {
+                let iter_msg = format!(
+                    "[loop] heure={} phase={:?} should_stop={}",
+                    now.format("%H:%M:%S"), sm.phase(), should_stop
+                );
+                info!("Orchestrator: {}", iter_msg);
+                if let Some(ref mut sl) = session_logger { sl.log_text(&iter_msg); }
+            }
+
             if should_stop {
-                info!("Orchestrator: time limit reached at {}", now.format("%H:%M:%S"));
+                let stop_msg = format!("Heure de fin de plage atteinte ({}) — arret capture", now.format("%H:%M:%S"));
+                info!("Orchestrator: {}", stop_msg);
+                self.log(&stop_msg).await;
+                if let Some(ref mut sl) = session_logger { sl.log_text(&stop_msg); }
                 break;
             }
 
-            // Check storage
+            // Check storage — log result, don't silently abort
             if let Ok(info) = self.storage.info() {
                 let status = info.status(
                     config.storage.warning_percent as f64,
                     config.storage.critical_percent as f64,
                 );
+                let storage_msg = format!("[storage] libre={:.1}% statut={:?}", info.free_percent(), status);
+                if let Some(ref mut sl) = session_logger { sl.log_text(&storage_msg); }
                 if status == crate::core::models::StorageStatus::Critical {
-                    warn!("Orchestrator: storage critical! Entering safe mode");
-                    self.log("⚠️ Stockage critique — arrêt").await;
+                    let msg = "Stockage critique — arret session";
+                    self.log(msg).await;
+                    if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
                     break;
                 }
+            } else {
+                // df failed — USB may not be mounted, log it
+                let msg = "[storage] df echoue - USB inaccessible ?";
+                if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
+                warn!("Orchestrator: {}", msg);
             }
 
             let current_phase = sm.phase();
@@ -310,15 +337,17 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                             Ok(f) => { consecutive_io_errors = 0; (f, None) }
                             Err(e) => {
                                 consecutive_io_errors += 1;
-                                error!("Orchestrator: capture failed: {} ({}/5)", e, consecutive_io_errors);
-                                self.log(&format!("❌ Capture échouée: {} ({}/5)", e, consecutive_io_errors)).await;
+                                let fail_msg = format!("CAPTURE ECHEC JPG: {} ({}/5)", e, consecutive_io_errors);
+                                error!("Orchestrator: {}", fail_msg);
+                                self.log(&format!("Capture echouee: {} ({}/5)", e, consecutive_io_errors)).await;
+                                if let Some(ref mut sl) = session_logger { sl.log_text(&fail_msg); }
                                 if consecutive_io_errors >= 5 {
-                                    // Don't crash — wait 5 minutes and auto-recover
-                                    // (camera may have briefly disconnected)
-                                    self.log("⚠️ 5 erreurs consécutives — pause 5 min, tentative de récupération...").await;
+                                    let rec_msg = "5 erreurs consecutives - pause 5min";
+                                    self.log(rec_msg).await;
+                                    if let Some(ref mut sl) = session_logger { sl.log_text(rec_msg); }
                                     warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
                                     sleep(Duration::from_secs(300)).await;
-                                    consecutive_io_errors = 0; // reset: try again
+                                    consecutive_io_errors = 0;
                                 }
                                 sleep(Duration::from_secs(5)).await;
                                 continue;
@@ -331,10 +360,14 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                             Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
                             Err(e) => {
                                 consecutive_io_errors += 1;
-                                error!("Orchestrator: RAW capture failed: {} ({}/5)", e, consecutive_io_errors);
-                                self.log(&format!("❌ Capture RAW échouée: {} ({}/5)", e, consecutive_io_errors)).await;
+                                let fail_msg = format!("CAPTURE ECHEC RAW: {} ({}/5)", e, consecutive_io_errors);
+                                error!("Orchestrator: {}", fail_msg);
+                                self.log(&format!("Capture RAW echouee: {} ({}/5)", e, consecutive_io_errors)).await;
+                                if let Some(ref mut sl) = session_logger { sl.log_text(&fail_msg); }
                                 if consecutive_io_errors >= 5 {
-                                    self.log("⚠️ 5 erreurs consécutives — pause 5 min, tentative de récupération...").await;
+                                    let rec_msg = "5 erreurs RAW consecutives - pause 5min";
+                                    self.log(rec_msg).await;
+                                    if let Some(ref mut sl) = session_logger { sl.log_text(rec_msg); }
                                     warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
                                     sleep(Duration::from_secs(300)).await;
                                     consecutive_io_errors = 0;
@@ -458,6 +491,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
+        info!("Orchestrator: save_frame frame={} format={:?} aurora={}", frame_num, config.capture.output_format, is_aurora);
 
         match config.capture.output_format {
             OutputFormat::Jpg => {

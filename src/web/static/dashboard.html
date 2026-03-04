@@ -80,6 +80,12 @@
         <!-- Warnings -->
         <div id="warningsContainer"></div>
 
+        <!-- USB Warning (shown only if USB not writable) -->
+        <div id="usbWarning" class="warning-box warning" style="display:none; margin-bottom:1rem;">
+            <span class="warning-icon">⚠️</span>
+            <span>Clé USB non détectée — vérifiez la connectique. Les photos seront tout de même capturées.</span>
+        </div>
+
         <!-- Disconnect -->
         <div class="disconnect-section">
             <button class="btn btn-danger btn-block" onclick="requestDisconnect()" id="disconnectBtn">
@@ -116,16 +122,12 @@
                         </div>`;
                 });
 
-                // Disable capture button if USB not mounted
-                const btn = document.getElementById('disconnectBtn');
+                // USB status — show warning but never disable the button
+                const usbWarn = document.getElementById('usbWarning');
                 if (!data.usb_mounted) {
-                    btn.disabled = true;
-                    btn.textContent = '⚠️ Clé USB non détectée';
-                    btn.style.opacity = '0.5';
-                } else if (btn.textContent.includes('USB')) {
-                    btn.disabled = false;
-                    btn.textContent = '🔌 Déconnexion — Lancer la capture';
-                    btn.style.opacity = '1';
+                    usbWarn.style.display = 'block';
+                } else {
+                    usbWarn.style.display = 'none';
                 }
             } catch (e) {
                 showToast('Erreur de connexion au serveur', 'error');

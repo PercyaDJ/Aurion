@@ -42,9 +42,11 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         warnings.push("Règle 500 dépassée : risque d'étoiles filées".into());
     }
 
+    let mount_point = config.storage.mount_point.clone();
+
     // Read real storage stats
     let storage_info = {
-        let mount_point = &config.storage.mount_point;
+        let mount_point = &mount_point;
         match std::process::Command::new("df")
             .args(["--output=size,avail", "-B1", mount_point])
             .output()
@@ -76,18 +78,15 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         }
     };
 
-    // Check if USB storage is mounted
-    let mount_point = &config.storage.mount_point;
-    let usb_mounted = std::path::Path::new(mount_point).exists() && {
-        // Check if actually a mounted filesystem (not just the mount point directory)
-        match std::process::Command::new("mountpoint").arg("-q").arg(mount_point).status() {
-            Ok(status) => status.success(),
-            Err(_) => std::path::Path::new(mount_point).join(".").metadata().is_ok(),
-        }
+    // Check if USB storage is writable (direct write test — more reliable than mountpoint -q)
+    let usb_mounted = {
+        let mount_point_path = std::path::Path::new(mount_point.as_str());
+        let probe = mount_point_path.join(".aurion_status_probe");
+        let writable = std::fs::create_dir_all(mount_point_path).is_ok()
+            && std::fs::write(&probe, b"ok").is_ok();
+        let _ = std::fs::remove_file(&probe);
+        writable
     };
-    if !usb_mounted {
-        warnings.push("⚠️ Clé USB non montée — les captures ne seront pas sauvegardées".into());
-    }
 
     Json(StatusResponse {
         phase: phase.to_string(),
