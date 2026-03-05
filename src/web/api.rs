@@ -880,14 +880,14 @@ pub struct GalleryZipRequest {
 
 pub async fn download_gallery_zip(
     State(state): State<AppState>,
-    Json(req): Json<GalleryZipRequest>,
+    axum::Form(req): axum::Form<GalleryZipRequest>,
 ) -> impl IntoResponse {
-    use tokio::io::AsyncWriteExt;
+    
     let config = state.config.read().await;
     let mount_point = config.storage.mount_point.clone();
     drop(config);
 
-    let (mut tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
+    let (tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
 
     tokio::spawn(async move {
         // tx is a tokio AsyncWrite. async_zip expects a futures-io AsyncWrite.
@@ -904,11 +904,11 @@ pub async fn download_gallery_zip(
             
             if let Ok(mut file) = tokio::fs::File::open(&path).await {
                 let builder = async_zip::ZipEntryBuilder::new(filename.into(), async_zip::Compression::Stored);
-                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                if let Ok(entry_writer) = zip.write_entry_stream(builder).await {
                     // entry_writer is a futures-io AsyncWrite. We need a tokio AsyncWrite to use tokio::io::copy
                     let mut tokio_entry_writer = entry_writer.compat_write();
                     let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
-                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let entry_writer = tokio_entry_writer.into_inner();
                     let _ = entry_writer.close().await;
                 }
             }
@@ -942,7 +942,7 @@ pub async fn download_gallery_session_zip(
     State(state): State<AppState>,
     Path(path): Path<SessionPath>,
 ) -> impl IntoResponse {
-    use tokio::io::AsyncWriteExt;
+    
 
     let config = state.config.read().await;
     let mount_point = config.storage.mount_point.clone();
@@ -972,7 +972,7 @@ pub async fn download_gallery_session_zip(
         return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no logs")).into_response();
     }
 
-    let (mut tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
+    let (tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
 
     tokio::spawn(async move {
         use tokio_util::compat::{TokioAsyncWriteCompatExt, FuturesAsyncWriteCompatExt};
@@ -984,10 +984,10 @@ pub async fn download_gallery_session_zip(
             let file_path = std::path::Path::new(&mount_point).join(&filename);
             if let Ok(mut file) = tokio::fs::File::open(&file_path).await {
                 let builder = async_zip::ZipEntryBuilder::new(filename.into(), async_zip::Compression::Stored);
-                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                if let Ok(entry_writer) = zip.write_entry_stream(builder).await {
                     let mut tokio_entry_writer = entry_writer.compat_write();
                     let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
-                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let entry_writer = tokio_entry_writer.into_inner();
                     let _ = entry_writer.close().await;
                 }
             }
@@ -999,10 +999,10 @@ pub async fn download_gallery_session_zip(
             if let Ok(mut file) = tokio::fs::File::open(&log_path).await {
                 let entry_name = format!("sessions/{}/{}", session_name, log_file);
                 let builder = async_zip::ZipEntryBuilder::new(entry_name.into(), async_zip::Compression::Stored);
-                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                if let Ok(entry_writer) = zip.write_entry_stream(builder).await {
                     let mut tokio_entry_writer = entry_writer.compat_write();
                     let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
-                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let entry_writer = tokio_entry_writer.into_inner();
                     let _ = entry_writer.close().await;
                 }
             }

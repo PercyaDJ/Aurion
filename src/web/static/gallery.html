@@ -637,33 +637,35 @@
         }
 
         // Download selected as ZIP
-        async function downloadSelected() {
+        function downloadSelected() {
             const files = Array.from(selectedFiles);
             if (files.length === 0) {
                 showToast('Aucune image sélectionnée', 'info');
                 return;
             }
             showToast(`Téléchargement de ${files.length} image(s)...`, 'info');
-            try {
-                const res = await fetch('/api/gallery/download-zip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filenames: files }),
-                });
-                if (!res.ok) throw new Error('Erreur serveur');
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const disposition = res.headers.get('content-disposition');
-                const match = disposition && disposition.match(/filename="(.+)"/);
-                a.download = match ? match[1] : 'aurion.zip';
-                a.href = url;
-                a.click();
-                URL.revokeObjectURL(url);
-                showToast('Téléchargement terminé ✅', 'success');
-            } catch (e) {
-                showToast('Erreur téléchargement: ' + e.message, 'error');
-            }
+
+            // Create a hidden form to submit natively (avoids JS fetch RAM crashes on big files)
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/api/gallery/download-zip';
+            form.style.display = 'none';
+
+            files.forEach(fn => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'filenames';
+                input.value = fn;
+                form.appendChild(input);
+            });
+
+            document.body.appendChild(form);
+            form.submit();
+            setTimeout(() => document.body.removeChild(form), 1000);
+
+            // Deselect all after download starts
+            deselectAll();
+            showToast('Téléchargement lancé ✅', 'success');
         }
 
         // Lightbox
