@@ -57,9 +57,9 @@ ask_yes_no() {
 }
 
 ensure_packages() {
-  info "Installing packages: log2ram, util-linux, exfat support, git, build deps"
+  info "Installing packages: log2ram, util-linux, exfat support, watchdog, git, build deps"
   apt update
-  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfatprogs git libclang-dev
+  apt install -y --no-install-recommends log2ram util-linux exfat-fuse exfatprogs watchdog git libclang-dev
 }
 
 enable_log2ram() {
@@ -281,6 +281,49 @@ add_shutdown_alias() {
   fi
 }
 
+enable_hardware_watchdog() {
+  info "Configuring BCM2711 Hardware Watchdog"
+  local config_file="/boot/firmware/config.txt"
+  [[ -f "$config_file" ]] || config_file="/boot/config.txt"
+  
+  if [[ -f "$config_file" ]]; then
+    if ! grep -q "^dtparam=watchdog=on" "$config_file"; then
+      echo "dtparam=watchdog=on" >> "$config_file"
+      info "Watchdog added to $config_file"
+    fi
+  else
+    warn "Could not find /boot/config.txt to enable hardware watchdog."
+  fi
+
+  # Configure systemd to use the hardware watchdog
+  local sysconf="/etc/systemd/system.conf"
+  backup_file "$sysconf"
+  sed -i -E 's/^#?RuntimeWatchdogSec=.*/RuntimeWatchdogSec=15s/g' "$sysconf"
+  sed -i -E 's/^#?RebootWatchdogSec=.*/RebootWatchdogSec=5min/g' "$sysconf"
+  
+  info "systemd configured for hardware watchdog (15s runtime, 5min reboot timeout)."
+}
+
+maybe_enable_overlayfs_interactive() {
+  if ! command -v raspi-config &>/dev/null; then
+    info "raspi-config not found, skipping OverlayFS setup."
+    return 0
+  fi
+  
+  if grep -q "overlay" /etc/fstab 2>/dev/null; then
+    info "OverlayFS seems already active."
+    return 0
+  fi
+
+  if ask_yes_no "Do you want to enable a Read-Only RootFS (OverlayFS) to protect your SD Card from corruption? (Highly Recommended for production!)" "y"; then
+    info "Enabling OverlayFS..."
+    raspi-config nonint enable_overlayfs
+    info "OverlayFS enabled. Your RootFS will be Read-Only after reboot."
+  else
+    info "OverlayFS skipped."
+  fi
+}
+
 final_report() {
   info "═══ Aurion Bootstrap Complete ═══"
   echo ""
@@ -313,6 +356,8 @@ main() {
   create_aurion_power_watch
   maybe_disable_zram_interactive
   add_shutdown_alias
+  enable_hardware_watchdog
+  maybe_enable_overlayfs_interactive
   final_report
 }
 

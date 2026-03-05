@@ -325,10 +325,17 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     config.storage.warning_percent as f64,
                     config.storage.critical_percent as f64,
                 );
-                let storage_msg = format!("[storage] libre={:.1}% statut={:?}", info.free_percent(), status);
+                let storage_msg = format!("[storage] libre={:.1}% ({} octets) statut={:?}", info.free_percent(), info.free_bytes, status);
                 if let Some(ref mut sl) = session_logger { sl.log_text(&storage_msg); }
-                if status == crate::core::models::StorageStatus::Critical {
-                    let msg = "Stockage critique — arret session";
+                
+                // Hard limit: < 50MB free triggers an immediate OS shutdown to prevent FS corruption
+                if info.free_bytes < 50_000_000 {
+                    let msg = "Stockage critique (< 50Mo restants) — Arrêt système immédiat";
+                    self.log(msg).await;
+                    if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
+                    break;
+                } else if status == crate::core::models::StorageStatus::Critical {
+                    let msg = "Stockage critique (seuil %) — Arrêt session";
                     self.log(msg).await;
                     if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
                     break;
