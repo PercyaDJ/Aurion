@@ -62,15 +62,8 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y git
 git clone https://<TOKEN>@github.com/PercyaDJ/Aurion.git ~/Aurion
 
-# Bootstrap (hardening OS + automount USB)
-sudo bash ~/Aurion/scripts/bootstrap.sh
-sudo reboot
-
-# Installation (Rust + compilation + service)
-bash ~/Aurion/scripts/install.sh
-
-# Démarrer
-sudo systemctl start aurion
+# Installation Tout-en-un (Bootstrap + Compilation + Reboot auto)
+bash ~/Aurion/scripts/setup.sh
 ```
 
 ### Développement PC

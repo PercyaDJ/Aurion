@@ -315,6 +315,12 @@ maybe_enable_overlayfs_interactive() {
     return 0
   fi
 
+  # Skip OverlayFS prompt in non-interactive (auto_yes) mode
+  if $AUTO_YES; then
+    info "Skipping OverlayFS (Safe mode / Non-interactive)."
+    return 0
+  fi
+
   if ask_yes_no "Do you want to enable a Read-Only RootFS (OverlayFS) to protect your SD Card from corruption? (Highly Recommended for production!)" "y"; then
     info "Enabling OverlayFS..."
     raspi-config nonint enable_overlayfs
