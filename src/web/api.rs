@@ -882,52 +882,45 @@ pub async fn download_gallery_zip(
     State(state): State<AppState>,
     Json(req): Json<GalleryZipRequest>,
 ) -> impl IntoResponse {
-    use std::io::Write;
-
+    use tokio::io::AsyncWriteExt;
     let config = state.config.read().await;
-    let mount_point = &config.storage.mount_point;
+    let mount_point = config.storage.mount_point.clone();
+    drop(config);
 
-    let mut zip_buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut zip = zip::ZipWriter::new(&mut zip_buf);
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
+    let (mut tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
 
-        for filename in &req.filenames {
-            // Security: reject any path traversal
+    tokio::spawn(async move {
+        // tx is a tokio AsyncWrite. async_zip expects a futures-io AsyncWrite.
+        use tokio_util::compat::{TokioAsyncWriteCompatExt, FuturesAsyncWriteCompatExt};
+        let compat_tx = tx.compat_write();
+        
+        let mut zip = async_zip::tokio::write::ZipFileWriter::new(compat_tx);
+        
+        for filename in req.filenames {
             if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
                 continue;
             }
-            let path = std::path::Path::new(mount_point).join(filename);
-            if let Ok(data) = std::fs::read(&path) {
-                if zip.start_file(filename, options).is_ok() {
-                    let _ = zip.write_all(&data);
+            let path = std::path::Path::new(&mount_point).join(&filename);
+            
+            if let Ok(mut file) = tokio::fs::File::open(&path).await {
+                let builder = async_zip::ZipEntryBuilder::new(filename.into(), async_zip::Compression::Stored);
+                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                    // entry_writer is a futures-io AsyncWrite. We need a tokio AsyncWrite to use tokio::io::copy
+                    let mut tokio_entry_writer = entry_writer.compat_write();
+                    let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
+                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let _ = entry_writer.close().await;
                 }
             }
         }
 
-        // Include session_events.jsonl if it exists
-        let sessions_dir = std::path::Path::new(mount_point).join("sessions");
-        if sessions_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
-                for entry in entries.flatten() {
-                    if entry.path().extension().map_or(false, |e| e == "jsonl") {
-                        if let Ok(data) = std::fs::read(entry.path()) {
-                            let name = format!("sessions/{}", entry.file_name().to_string_lossy());
-                            if zip.start_file(&name, options).is_ok() {
-                                let _ = zip.write_all(&data);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let _ = zip.finish();
-    }
+        let _ = zip.close().await;
+    });
 
     let today = chrono::Local::now().format("%Y-%m-%d");
     let zip_name = format!("aurion_{}.zip", today);
+
+    let stream = tokio_util::io::ReaderStream::new(rx);
 
     (
         StatusCode::OK,
@@ -935,7 +928,7 @@ pub async fn download_gallery_zip(
             ("content-type", "application/zip".to_string()),
             ("content-disposition", format!("attachment; filename=\"{}\"", zip_name)),
         ],
-        zip_buf.into_inner(),
+        axum::body::Body::from_stream(stream),
     )
 }
 
@@ -949,24 +942,23 @@ pub async fn download_gallery_session_zip(
     State(state): State<AppState>,
     Path(path): Path<SessionPath>,
 ) -> impl IntoResponse {
-    use std::io::Write;
+    use tokio::io::AsyncWriteExt;
 
     let config = state.config.read().await;
-    let mount_point = &config.storage.mount_point;
-    let session_name = &path.name;
+    let mount_point = config.storage.mount_point.clone();
+    let session_name = path.name.clone();
+    drop(config);
 
-    // Security
     if session_name.contains("..") || session_name.contains('/') || session_name.contains('\\') {
-        return (StatusCode::BAD_REQUEST, [("content-type", "text/plain".to_string())], b"Invalid session name".to_vec()).into_response();
+        return (StatusCode::BAD_REQUEST, [("content-type", "text/plain".to_string())], axum::body::Body::from("Invalid session name")).into_response();
     }
 
-    let session_dir = std::path::Path::new(mount_point).join("sessions").join(session_name);
+    let session_dir = std::path::Path::new(&mount_point).join("sessions").join(&session_name);
     let event_log_path = session_dir.join("event.jsonl");
 
     let mut filenames = Vec::new();
     if let Ok(content) = std::fs::read_to_string(&event_log_path) {
         for line in content.lines() {
-            // Very simple JSON extraction avoiding full serde_json parsing overhead for each line
             if let Some(filename_start) = line.find(r#""filename":""#) {
                 let after = &line[filename_start + 12..];
                 if let Some(filename_end) = after.find('"') {
@@ -977,38 +969,50 @@ pub async fn download_gallery_session_zip(
     }
 
     if filenames.is_empty() {
-        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], b"Session is empty or has no logs".to_vec()).into_response();
+        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no logs")).into_response();
     }
 
-    let mut zip_buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut zip = zip::ZipWriter::new(&mut zip_buf);
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
+    let (mut tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
 
-        // Add images
-        for filename in &filenames {
-            let file_path = std::path::Path::new(mount_point).join(filename);
-            if let Ok(data) = std::fs::read(&file_path) {
-                if zip.start_file(filename, options).is_ok() {
-                    let _ = zip.write_all(&data);
+    tokio::spawn(async move {
+        use tokio_util::compat::{TokioAsyncWriteCompatExt, FuturesAsyncWriteCompatExt};
+        let compat_tx = tx.compat_write();
+        let mut zip = async_zip::tokio::write::ZipFileWriter::new(compat_tx);
+        
+        // Add images via stream
+        for filename in filenames {
+            let file_path = std::path::Path::new(&mount_point).join(&filename);
+            if let Ok(mut file) = tokio::fs::File::open(&file_path).await {
+                let builder = async_zip::ZipEntryBuilder::new(filename.into(), async_zip::Compression::Stored);
+                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                    let mut tokio_entry_writer = entry_writer.compat_write();
+                    let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
+                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let _ = entry_writer.close().await;
                 }
             }
         }
 
         // Add logs
         for log_file in &["event.jsonl", "session.log"] {
-            if let Ok(data) = std::fs::read(session_dir.join(log_file)) {
-                if zip.start_file(format!("sessions/{}/{}", session_name, log_file), options).is_ok() {
-                    let _ = zip.write_all(&data);
+            let log_path = session_dir.join(log_file);
+            if let Ok(mut file) = tokio::fs::File::open(&log_path).await {
+                let entry_name = format!("sessions/{}/{}", session_name, log_file);
+                let builder = async_zip::ZipEntryBuilder::new(entry_name.into(), async_zip::Compression::Stored);
+                if let Ok(mut entry_writer) = zip.write_entry_stream(builder).await {
+                    let mut tokio_entry_writer = entry_writer.compat_write();
+                    let _ = tokio::io::copy(&mut file, &mut tokio_entry_writer).await;
+                    let mut entry_writer = tokio_entry_writer.into_inner();
+                    let _ = entry_writer.close().await;
                 }
             }
         }
 
-        let _ = zip.finish();
-    }
+        let _ = zip.close().await;
+    });
 
-    let zip_name = format!("aurion_session_{}.zip", session_name);
+    let zip_name = format!("aurion_session_{}.zip", path.name);
+    let stream = tokio_util::io::ReaderStream::new(rx);
 
     (
         StatusCode::OK,
@@ -1016,7 +1020,7 @@ pub async fn download_gallery_session_zip(
             ("content-type", "application/zip".to_string()),
             ("content-disposition", format!("attachment; filename=\"{}\"", zip_name)),
         ],
-        zip_buf.into_inner(),
+        axum::body::Body::from_stream(stream),
     ).into_response()
 }
 
