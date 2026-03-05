@@ -891,7 +891,7 @@ pub async fn download_gallery_zip(
     {
         let mut zip = zip::ZipWriter::new(&mut zip_buf);
         let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+            .compression_method(zip::CompressionMethod::Stored);
 
         for filename in &req.filenames {
             // Security: reject any path traversal
@@ -984,7 +984,7 @@ pub async fn download_gallery_session_zip(
     {
         let mut zip = zip::ZipWriter::new(&mut zip_buf);
         let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+            .compression_method(zip::CompressionMethod::Stored);
 
         // Add images
         for filename in &filenames {
