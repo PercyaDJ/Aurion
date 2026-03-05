@@ -849,8 +849,8 @@ pub async fn delete_gallery_images(
     let mut errors = Vec::new();
 
     for filename in &req.filenames {
-        // Security: reject any path traversal
-        if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        // Security: reject upward path traversal or absolute paths
+        if filename.contains("..") || filename.starts_with('/') || filename.starts_with('\\') {
             errors.push(format!("{}: nom de fichier invalide", filename));
             continue;
         }
@@ -1022,6 +1022,33 @@ pub async fn download_gallery_session_zip(
         ],
         axum::body::Body::from_stream(stream),
     ).into_response()
+}
+
+pub async fn delete_gallery_session(
+    State(state): State<AppState>,
+    Path(session_name): Path<String>,
+) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let mount_point = &config.storage.mount_point;
+
+    // Security: reject any path traversal
+    if session_name.contains("..") || session_name.contains('/') || session_name.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "Invalid session name").into_response();
+    }
+
+    let session_dir = std::path::Path::new(mount_point).join("sessions").join(&session_name);
+
+    if session_dir.exists() {
+        match std::fs::remove_dir_all(&session_dir) {
+            Ok(_) => {
+                state.add_log(format!("🗑️ Session {} supprimée", session_name)).await;
+                StatusCode::OK.into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur: {}", e)).into_response()
+        }
+    } else {
+        (StatusCode::NOT_FOUND, "Session introuvable").into_response()
+    }
 }
 
 // ─── Diagnostics ──────────────────────────────────────────

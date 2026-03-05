@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, post, delete},
 };
 use tower_http::services::ServeDir;
 use tracing::info;
@@ -83,6 +83,7 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/gallery/delete", post(api::delete_gallery_images))
         .route("/api/gallery/download-zip", post(api::download_gallery_zip))
         .route("/api/gallery/sessions/{name}/download", get(api::download_gallery_session_zip))
+        .route("/api/gallery/sessions/{name}", delete(api::delete_gallery_session))
         .route("/api/gallery/{filename}", get(api::get_gallery_image))
         .route("/api/gallery/thumbnail/{filename}", get(api::get_gallery_thumbnail))
         // Static file serving

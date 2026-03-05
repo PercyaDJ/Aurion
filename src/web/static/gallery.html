@@ -433,9 +433,14 @@
                                 <span>⏱ ${duration}</span>
                                 ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
                             </div>
-                            <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
-                                ⬇️ Télécharger ZIP
-                            </a>
+                            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                                <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
+                                    🗑️ Supprimer
+                                </button>
+                                <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                    ⬇️ Télécharger ZIP
+                                </a>
+                            </div>
                         </div>
                     </div>`;
                 }
@@ -594,10 +599,11 @@
         document.addEventListener('touchend', () => clearTimeout(longPressTimer));
         document.addEventListener('touchmove', () => clearTimeout(longPressTimer));
 
-        // Delete
         let pendingDeleteFiles = [];
+        let pendingDeleteSession = null;
 
         function confirmDelete() {
+            pendingDeleteSession = null;
             pendingDeleteFiles = Array.from(selectedFiles);
             if (pendingDeleteFiles.length === 0) return;
             document.getElementById('deleteModalText').textContent =
@@ -606,20 +612,43 @@
         }
 
         function confirmDeleteSingle(filename) {
+            pendingDeleteSession = null;
             pendingDeleteFiles = [filename];
             document.getElementById('deleteModalText').textContent =
                 `Supprimer "${filename}" ? Cette action est irréversible.`;
             document.getElementById('deleteModal').classList.add('active');
         }
 
+        function confirmDeleteSession(sessionName) {
+            pendingDeleteFiles = [];
+            pendingDeleteSession = sessionName;
+            document.getElementById('deleteModalText').textContent =
+                `Supprimer la nuit complète "${sessionName}" ? Toutes les photos et logs seront définitivement effacés.`;
+            document.getElementById('deleteModal').classList.add('active');
+        }
+
         function closeDeleteModal() {
             document.getElementById('deleteModal').classList.remove('active');
             pendingDeleteFiles = [];
+            pendingDeleteSession = null;
         }
 
         async function executeDelete() {
             closeDeleteModal();
             try {
+                if (pendingDeleteSession) {
+                    const res = await fetch(`/api/gallery/sessions/${pendingDeleteSession}`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error('Erreur serveur au téléchargement');
+                    showToast('Session supprimée ✅', 'success');
+                    pendingDeleteSession = null;
+                    if (currentTab === 'sessions') {
+                        loadGallerySessions();
+                    } else {
+                        loadGallery();
+                    }
+                    return;
+                }
+
                 const res = await fetch('/api/gallery/delete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -629,8 +658,15 @@
                 // Remove deleted from selection
                 pendingDeleteFiles.forEach(f => selectedFiles.delete(f));
                 updateSelectionUI();
-                // Reload gallery
-                loadGallery();
+                
+                showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
+                
+                // Reload current view
+                if (currentTab === 'sessions') {
+                    loadGallerySessions();
+                } else {
+                    loadGallery();
+                }
             } catch (e) {
                 showToast('Erreur suppression: ' + e.message, 'error');
             }
