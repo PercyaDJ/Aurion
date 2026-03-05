@@ -107,6 +107,34 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 _ = async {
+                    // Systemd watchdog ping loop (pure rust)
+                    #[cfg(target_os = "linux")]
+                    {
+                        if let Ok(socket_path) = std::env::var("NOTIFY_SOCKET") {
+                            // systemd sockets might start with @ for abstract namespace
+                            let path = if socket_path.starts_with('@') {
+                                socket_path.replacen('@', "\0", 1)
+                            } else {
+                                socket_path
+                            };
+                            
+                            if let Ok(socket) = std::os::unix::net::UnixDatagram::unbound() {
+                                let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                                loop {
+                                    interval.tick().await;
+                                    let _ = socket.send_to(b"WATCHDOG=1", &path);
+                                }
+                            } else {
+                                std::future::pending::<()>().await
+                            }
+                        } else {
+                            std::future::pending::<()>().await
+                        }
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    std::future::pending::<()>().await
+                } => unreachable!(),
+                _ = async {
                     // Signal handler: SIGTERM / SIGINT / Ctrl+C
                     let _ = tokio::signal::ctrl_c().await;
                     tracing::info!("Shutdown signal received (Ctrl+C / SIGTERM)");
