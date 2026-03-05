@@ -427,10 +427,15 @@
                                 <span style="color:${rateColor};font-size:0.8rem;font-weight:500;">${rate}% détection</span>
                             </div>
                         </div>
-                        <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
-                            <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
-                            <span>⏱ ${duration}</span>
-                            ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:0.25rem;">
+                            <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
+                                <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
+                                <span>⏱ ${duration}</span>
+                                ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
+                            </div>
+                            <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                ⬇️ Télécharger ZIP
+                            </a>
                         </div>
                     </div>`;
                 }
@@ -516,6 +521,14 @@
         }
 
         function handleItemClick(event, filename, size, modified, isRaw) {
+            // If we click directly on the select checkbox, toggle selection immediately
+            if (event.target.classList.contains('select-checkbox')) {
+                toggleSelect(filename);
+                // Also enter select mode if not already
+                if (!selectMode) enterSelectMode();
+                return;
+            }
+
             if (selectMode) {
                 toggleSelect(filename);
             } else {
