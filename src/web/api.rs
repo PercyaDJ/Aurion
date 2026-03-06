@@ -650,21 +650,43 @@ pub async fn get_gallery_thumbnail(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    match image::open(&file_path) {
-        Ok(img) => {
-            let thumb = img.thumbnail(320, 240);
-            let mut buffer = Vec::new();
-            let mut cursor = std::io::Cursor::new(&mut buffer);
-            if thumb
-                .write_to(&mut cursor, image::ImageFormat::Jpeg)
-                .is_ok()
-            {
-                (StatusCode::OK, [("content-type", "image/jpeg")], buffer).into_response()
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            }
+    // Checking cache first
+    let cache_dir = std::path::Path::new("/tmp/aurion_thumbnails");
+    let _ = std::fs::create_dir_all(cache_dir); // Ensure it exists
+    let cache_path = cache_dir.join(&filename);
+
+    if cache_path.exists() {
+        if let Ok(buffer) = tokio::fs::read(&cache_path).await {
+            return (StatusCode::OK, [("content-type", "image/jpeg")], buffer).into_response();
         }
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+
+    // Offload the heavy CPU blocking work of decoding/resizing to a dedicated blocking thread
+    let result = tokio::task::spawn_blocking(move || {
+        match image::open(&file_path) {
+            Ok(img) => {
+                let thumb = img.thumbnail(64, 48); // Ultra-low resolution for mobile grids (saves massive CPU/RAM)
+                let mut buffer = Vec::new();
+                let mut cursor = std::io::Cursor::new(&mut buffer);
+                if thumb
+                    .write_to(&mut cursor, image::ImageFormat::Jpeg)
+                    .is_ok()
+                {
+                    // Cache the thumbnail
+                    let _ = std::fs::write(&cache_path, &buffer);
+                    Some(buffer)
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    }).await;
+
+    match result {
+        Ok(Some(buffer)) => (StatusCode::OK, [("content-type", "image/jpeg")], buffer).into_response(),
+        Ok(None) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
