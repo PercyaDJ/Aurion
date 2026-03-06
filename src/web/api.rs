@@ -875,7 +875,7 @@ pub async fn delete_gallery_images(
 
 #[derive(Deserialize)]
 pub struct GalleryZipRequest {
-    pub filenames: Vec<String>,
+    pub filenames: String,
 }
 
 pub async fn download_gallery_zip(
@@ -896,7 +896,9 @@ pub async fn download_gallery_zip(
         
         let mut zip = async_zip::tokio::write::ZipFileWriter::new(compat_tx);
         
-        for filename in req.filenames {
+        for filename in req.filenames.split(',') {
+            let filename = filename.trim();
+            if filename.is_empty() { continue; }
             if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
                 continue;
             }

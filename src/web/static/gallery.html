@@ -437,7 +437,7 @@
                                 <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
                                     🗑️ Supprimer
                                 </button>
-                                <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                <a href="/api/gallery/sessions/${s.name}/download" download class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
                                     ⬇️ Télécharger ZIP
                                 </a>
                             </div>
@@ -658,9 +658,9 @@
                 // Remove deleted from selection
                 pendingDeleteFiles.forEach(f => selectedFiles.delete(f));
                 updateSelectionUI();
-                
+
                 showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
-                
+
                 // Reload current view
                 if (currentTab === 'sessions') {
                     loadGallerySessions();
@@ -687,13 +687,11 @@
             form.action = '/api/gallery/download-zip';
             form.style.display = 'none';
 
-            files.forEach(fn => {
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = 'filenames';
-                input.value = fn;
-                form.appendChild(input);
-            });
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'filenames';
+            input.value = files.join(',');
+            form.appendChild(input);
 
             document.body.appendChild(form);
             form.submit();
