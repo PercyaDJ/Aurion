@@ -956,22 +956,11 @@ pub async fn download_gallery_session_zip(
     }
 
     let session_dir = std::path::Path::new(&mount_point).join("sessions").join(&session_name);
-    let event_log_path = session_dir.join("event.jsonl");
 
-    let mut filenames = Vec::new();
-    if let Ok(content) = std::fs::read_to_string(&event_log_path) {
-        for line in content.lines() {
-            if let Some(filename_start) = line.find(r#""filename":""#) {
-                let after = &line[filename_start + 12..];
-                if let Some(filename_end) = after.find('"') {
-                    filenames.push(after[..filename_end].to_string());
-                }
-            }
-        }
-    }
+    let filenames = get_session_filenames(&mount_point, &session_name);
 
     if filenames.is_empty() {
-        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no logs")).into_response();
+        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no images")).into_response();
     }
 
     let (tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
@@ -1039,11 +1028,21 @@ pub async fn delete_gallery_session(
     }
 
     let session_dir = std::path::Path::new(mount_point).join("sessions").join(&session_name);
+    let mut deleted_images = 0;
+
+    // 1. Delete all images belonging to the session
+    let filenames = get_session_filenames(mount_point, &session_name);
+    for filename in filenames {
+        let path = std::path::Path::new(mount_point).join(&filename);
+        if std::fs::remove_file(&path).is_ok() {
+            deleted_images += 1;
+        }
+    }
 
     if session_dir.exists() {
         match std::fs::remove_dir_all(&session_dir) {
             Ok(_) => {
-                state.add_log(format!("🗑️ Session {} supprimée", session_name)).await;
+                state.add_log(format!("🗑️ Session {} et {} images supprimées", session_name, deleted_images)).await;
                 StatusCode::OK.into_response()
             }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur: {}", e)).into_response()
@@ -1053,6 +1052,62 @@ pub async fn delete_gallery_session(
     }
 }
 
+/// Helper to find all image filenames belonging to a specific session
+fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
+    let mut filenames = Vec::new();
+    let start_fmt = chrono::NaiveDateTime::parse_from_str(session_name, "%Y-%m-%d_%H-%M").ok();
+    
+    // Find next session start time
+    let mut next_session_start = None;
+    if let Ok(entries) = std::fs::read_dir(std::path::Path::new(mount_point).join("sessions")) {
+        let mut names: Vec<String> = entries.filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        if let Some(idx) = names.iter().position(|n| n == session_name) {
+            if idx + 1 < names.len() {
+                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&names[idx + 1], "%Y-%m-%d_%H-%M") {
+                    next_session_start = Some(dt);
+                }
+            }
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(mount_point) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if !["jpg", "jpeg", "png", "dng", "raw"].contains(&ext.as_str()) { continue; }
+            
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                if filename.starts_with("aurora_") && filename.len() >= 22 {
+                    let ts_str = &filename[7..22]; // YYYYMMDD_HHMMSS
+                    if let Ok(file_dt) = chrono::NaiveDateTime::parse_from_str(ts_str, "%Y%m%d_%H%M%S") {
+                        if let Some(s_dt) = start_fmt {
+                            // files written just before session logic starts
+                            let start_margin = s_dt - chrono::Duration::minutes(2); 
+                            if file_dt >= start_margin {
+                                let mut inside = true;
+                                if let Some(n_dt) = next_session_start {
+                                    if file_dt >= n_dt { inside = false; }
+                                } else if file_dt > s_dt + chrono::Duration::hours(24) {
+                                    // Cap unbounded sessions to 24 hours
+                                    inside = false;
+                                }
+                                if inside {
+                                    filenames.push(filename.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    filenames
+}
 // ─── Diagnostics ──────────────────────────────────────────
 
 #[derive(Serialize)]

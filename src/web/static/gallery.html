@@ -359,8 +359,10 @@
 
         // ── Tab switching ─────────────────────────────────────
         let sessionLoaded = false;
+        let currentTab = 'images';
 
         function switchTab(tab) {
+            currentTab = tab;
             const paneImages = document.getElementById('paneImages');
             const paneSessions = document.getElementById('paneSessions');
             const tabImages = document.getElementById('tabImages');
