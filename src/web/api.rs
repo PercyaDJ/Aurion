@@ -852,6 +852,7 @@ pub async fn delete_gallery_images(
         // Security: reject upward path traversal or absolute paths
         if filename.contains("..") || filename.starts_with('/') || filename.starts_with('\\') {
             errors.push(format!("{}: nom de fichier invalide", filename));
+            tracing::warn!("Delete rejection: invalid filename '{}'", filename);
             continue;
         }
 
@@ -859,10 +860,14 @@ pub async fn delete_gallery_images(
         if path.exists() {
             match std::fs::remove_file(&path) {
                 Ok(_) => deleted += 1,
-                Err(e) => errors.push(format!("{}: {}", filename, e)),
+                Err(e) => {
+                    errors.push(format!("{}: {}", filename, e));
+                    tracing::warn!("Delete error for '{}': {}", filename, e);
+                }
             }
         } else {
             errors.push(format!("{}: fichier introuvable", filename));
+            tracing::warn!("Delete skipped, file not found: '{}' at {:?}", filename, path);
         }
     }
 
@@ -1055,7 +1060,7 @@ pub async fn delete_gallery_session(
 /// Helper to find all image filenames belonging to a specific session
 fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
     let mut filenames = Vec::new();
-    let start_fmt = chrono::NaiveDateTime::parse_from_str(session_name, "%Y-%m-%d_%H-%M").ok();
+    let start_fmt = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", session_name), "%Y-%m-%d_%H-%M_%S").ok();
     
     // Find next session start time
     let mut next_session_start = None;
@@ -1067,7 +1072,7 @@ fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
         names.sort();
         if let Some(idx) = names.iter().position(|n| n == session_name) {
             if idx + 1 < names.len() {
-                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&names[idx + 1], "%Y-%m-%d_%H-%M") {
+                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", names[idx + 1]), "%Y-%m-%d_%H-%M_%S") {
                     next_session_start = Some(dt);
                 }
             }

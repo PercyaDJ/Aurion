@@ -631,8 +631,6 @@
 
         function closeDeleteModal() {
             document.getElementById('deleteModal').classList.remove('active');
-            pendingDeleteFiles = [];
-            pendingDeleteSession = null;
         }
 
         async function executeDelete() {
@@ -644,7 +642,7 @@
                     showToast('Session supprimée ✅', 'success');
                     pendingDeleteSession = null;
                     if (currentTab === 'sessions') {
-                        loadGallerySessions();
+                        loadSessions();
                     } else {
                         loadGallery();
                     }
@@ -656,16 +654,31 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ filenames: pendingDeleteFiles }),
                 });
-                const data = await res.json();
-                // Remove deleted from selection
-                pendingDeleteFiles.forEach(f => selectedFiles.delete(f));
-                updateSelectionUI();
 
-                showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
+                // Clear the pending state after sending the request
+                const deletedFiles = pendingDeleteFiles;
+                pendingDeleteFiles = [];
+                pendingDeleteSession = null;
+                const data = await res.json();
+
+                if (data.errors && data.errors.length > 0) {
+                    showToast(`${data.deleted} supprimée(s), ${data.errors.length} erreur(s)`, 'error');
+                    console.error('Aurion Deletion Errors:', data.errors);
+                } else {
+                    showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
+                }
+
+                // Remove deleted from selection
+                pendingDeleteFiles.forEach(f => {
+                    if (!data.errors || !data.errors.some(e => e.includes(f))) {
+                        selectedFiles.delete(f);
+                    }
+                });
+                updateSelectionUI();
 
                 // Reload current view
                 if (currentTab === 'sessions') {
-                    loadGallerySessions();
+                    loadSessions();
                 } else {
                     loadGallery();
                 }
