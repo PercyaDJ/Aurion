@@ -112,7 +112,7 @@
             </div>
             <div style="display: flex; gap: 0.5rem;">
                 <button class="btn btn-primary" style="flex: 1;" onclick="syncFromPhone()">
-                    📱 Utiliser l'heure du téléphone
+                    Utiliser l'heure du téléphone
                 </button>
                 <button class="btn btn-outline" style="flex: 1;" onclick="applyTime()">
                     ✅ Appliquer
@@ -166,7 +166,7 @@
                 </div>
             </div>
             <button class="btn btn-outline btn-block" onclick="scanWifi()" id="scanBtn">
-                🔍 Scanner les réseaux
+                Scanner les réseaux
             </button>
             <div id="wifiList" style="display: none; margin-top: 0.75rem;">
                 <div id="wifiNetworks"></div>
@@ -180,7 +180,7 @@
                             title="Afficher/masquer">👁️</button>
                     </div>
                 </div>
-                <button class="btn btn-primary btn-block" onclick="connectWifi()">📶 Connecter</button>
+                <button class="btn btn-primary btn-block" onclick="connectWifi()">Connecter</button>
             </div>
             <div id="wifiStatus" style="display: none; margin-top: 0.75rem; text-align: center; font-size: 0.85rem;">
             </div>
@@ -190,7 +190,7 @@
         <div class="card fade-in">
             <div class="card-header">
                 <span class="card-title">Logs récents</span>
-                <button class="btn btn-outline btn-sm" onclick="refreshLogs()">🔄 Rafraîchir</button>
+                <button class="btn btn-outline btn-sm" onclick="refreshLogs()">Rafraîchir</button>
             </div>
             <div class="log-container" id="logContainer">
                 <div class="log-line" style="color: var(--text-muted);">Chargement des logs...</div>
@@ -198,7 +198,7 @@
         </div>
 
         <button class="btn btn-outline btn-block" onclick="refreshLogs()">
-            🔄 Rafraîchir les logs
+            Rafraîchir les logs
         </button>
     </div>
 
@@ -380,7 +380,7 @@
             } catch (e) {
                 alert('Scan échoué: ' + e.message);
             }
-            btn.textContent = '🔍 Scanner les réseaux';
+            btn.textContent = 'Scanner les réseaux';
             btn.disabled = false;
         }
 

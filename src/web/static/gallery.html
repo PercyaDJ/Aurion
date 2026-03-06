@@ -283,27 +283,27 @@
             style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:0.5rem;flex-wrap:wrap;">
             <button id="tabImages" class="tab-btn active"
                 style="background:none;border:none;color:var(--accent);font-weight:600;padding:0.25rem 0.75rem;border-bottom:2px solid var(--accent);cursor:pointer;font-family:inherit;font-size:0.9rem;"
-                onclick="switchTab('images')">🖼️ Toutes les images</button>
+                onclick="switchTab('images')">Toutes les images</button>
             <button id="tabSessions" class="tab-btn"
                 style="background:none;border:none;color:var(--text-secondary);font-weight:500;padding:0.25rem 0.75rem;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;font-size:0.9rem;"
-                onclick="switchTab('sessions')">🌙 Par session</button>
+                onclick="switchTab('sessions')">Par session</button>
             <div style="flex:1;"></div>
             <button id="sortBtn" class="btn btn-outline"
                 style="padding:0.25rem 0.5rem;font-size:0.8rem;border-color:var(--border);" onclick="toggleSort()">
-                ↕️ Plus anciens d'abord
+                Plus anciens d'abord
             </button>
         </div>
 
         <!-- Toolbar (appears when selecting) -->
         <div class="gallery-toolbar" id="toolbar">
-            <button class="btn btn-outline btn-sm" onclick="selectAll()">☑️ Tout sélectionner</button>
-            <button class="btn btn-outline btn-sm" onclick="deselectAll()">✖️ Désélectionner</button>
+            <button class="btn btn-outline btn-sm" onclick="selectAll()">Tout sélectionner</button>
+            <button class="btn btn-outline btn-sm" onclick="deselectAll()">Désélectionner</button>
             <span class="selection-count" id="selectionCount">0 sélectionné(s)</span>
             <div style="flex:1;"></div>
             <button class="btn btn-outline btn-sm" style="color:var(--green); border-color:var(--green);"
-                onclick="downloadSelected()">⬇️ Télécharger ZIP</button>
+                onclick="downloadSelected()">Télécharger ZIP</button>
             <button class="btn btn-outline btn-sm" style="color:var(--red); border-color:var(--red);"
-                onclick="confirmDelete()">🗑️ Supprimer</button>
+                onclick="confirmDelete()">Supprimer</button>
         </div>
 
         <!-- Tab: All images -->
@@ -346,7 +346,7 @@
     <!-- Delete confirmation modal -->
     <div class="modal-overlay" id="deleteModal">
         <div class="modal-box">
-            <h3>⚠️ Supprimer ?</h3>
+            <h3>Supprimer ?</h3>
             <p id="deleteModalText">Supprimer les images sélectionnées ?</p>
             <div class="modal-buttons">
                 <button class="btn btn-outline" onclick="closeDeleteModal()">Annuler</button>
@@ -370,8 +370,8 @@
         function toggleSort() {
             sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
             document.getElementById('sortBtn').innerHTML = sortOrder === 'asc'
-                ? '↕️ Plus anciens d\'abord'
-                : '↕️ Plus récents d\'abord';
+                ? 'Plus anciens d\'abord'
+                : 'Plus récents d\'abord';
 
             if (currentTab === 'images') {
                 allImages.reverse();
@@ -406,10 +406,8 @@
                 tabSessions.style.color = 'var(--accent)';
                 tabSessions.style.borderBottom = '2px solid var(--accent)';
                 toolbar.style.display = 'none';
-                if (!sessionLoaded) {
-                    sessionLoaded = true;
-                    loadSessions();
-                }
+                // Always load fresh sessions when switching to this tab
+                loadSessions();
             }
         }
 
@@ -462,22 +460,22 @@
                             <div style="font-size:0.75rem;color:var(--text-secondary);">${s.name}</div>
                         </div>
                         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                            ${s.aurora_count > 0 ? `<span style="background:rgba(0,255,120,0.15);color:var(--green);border:1px solid var(--green);border-radius:20px;padding:0.15rem 0.6rem;font-size:0.75rem;font-weight:600;">🌌 ${s.aurora_count} aurore${s.aurora_count > 1 ? 's' : ''}</span>` : ''}
+                            ${s.aurora_count > 0 ? `<span style="background:rgba(0,255,120,0.15);color:var(--green);border:1px solid var(--green);border-radius:20px;padding:0.15rem 0.6rem;font-size:0.75rem;font-weight:600;">${s.aurora_count} aurore${s.aurora_count > 1 ? 's' : ''}</span>` : ''}
                             <span style="color:${rateColor};font-size:0.8rem;font-weight:500;">${rate}% détection</span>
                         </div>
                     </div>
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:0.25rem;">
                         <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
-                            <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
-                            <span>⏱ ${duration}</span>
-                            ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
+                            <span>${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
+                            <span>${duration}</span>
+                            ${s.has_log ? '<span style="color:var(--green);">Logs disponibles</span>' : ''}
                         </div>
                         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                             <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
-                                🗑️ Supprimer
+                                Supprimer
                             </button>
-                            <a href="/api/gallery/sessions/${s.name}/download" download class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
-                                ⬇️ Télécharger ZIP
+                            <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                Télécharger ZIP
                             </a>
                         </div>
                     </div>
@@ -691,13 +689,11 @@
             try {
                 if (reqSession) {
                     const res = await fetch(`/api/gallery/sessions/${reqSession}`, { method: 'DELETE' });
-                    if (!res.ok) throw new Error('Erreur serveur au téléchargement');
-                    showToast('Session supprimée ✅', 'success');
-                    if (currentTab === 'sessions') {
-                        loadSessions();
-                    } else {
-                        loadGallery();
-                    }
+                    if (!res.ok) throw new Error('Erreur de requête côté serveur');
+                    showToast('Session supprimée', 'success');
+                    // Reload both views to stay perfectly in sync
+                    loadSessions();
+                    loadGallery();
                 } else {
                     const res = await fetch('/api/gallery/delete', {
                         method: 'POST',
@@ -721,12 +717,9 @@
                     });
                     updateSelectionUI();
 
-                    // Reload current view
-                    if (currentTab === 'sessions') {
-                        loadSessions();
-                    } else {
-                        loadGallery();
-                    }
+                    // Reload both views to stay perfectly in sync
+                    loadGallery();
+                    loadSessions();
                 }
             } catch (e) {
                 showToast('Erreur suppression: ' + e.message, 'error');
