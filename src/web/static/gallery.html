@@ -634,56 +634,69 @@
         }
 
         async function executeDelete() {
-            closeDeleteModal();
+            const reqSession = pendingDeleteSession;
+            const reqFiles = Array.from(pendingDeleteFiles);
+
+            if (!reqSession && reqFiles.length === 0) {
+                closeDeleteModal();
+                return;
+            }
+
+            // Sync clear state to prevent double clicks
+            pendingDeleteFiles = [];
+            pendingDeleteSession = null;
+
+            const btn = document.querySelector('#deleteModal .modal-buttons button:last-child');
+            const originalText = btn.textContent;
+            btn.textContent = 'Suppression...';
+            btn.disabled = true;
+
             try {
-                if (pendingDeleteSession) {
-                    const res = await fetch(`/api/gallery/sessions/${pendingDeleteSession}`, { method: 'DELETE' });
+                if (reqSession) {
+                    const res = await fetch(`/api/gallery/sessions/${reqSession}`, { method: 'DELETE' });
                     if (!res.ok) throw new Error('Erreur serveur au téléchargement');
                     showToast('Session supprimée ✅', 'success');
-                    pendingDeleteSession = null;
                     if (currentTab === 'sessions') {
                         loadSessions();
                     } else {
                         loadGallery();
                     }
-                    return;
-                }
-
-                const res = await fetch('/api/gallery/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filenames: pendingDeleteFiles }),
-                });
-
-                // Clear the pending state after sending the request
-                const deletedFiles = pendingDeleteFiles;
-                pendingDeleteFiles = [];
-                pendingDeleteSession = null;
-                const data = await res.json();
-
-                if (data.errors && data.errors.length > 0) {
-                    showToast(`${data.deleted} supprimée(s), ${data.errors.length} erreur(s)`, 'error');
-                    console.error('Aurion Deletion Errors:', data.errors);
                 } else {
-                    showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
-                }
+                    const res = await fetch('/api/gallery/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filenames: reqFiles }),
+                    });
+                    const data = await res.json();
 
-                // Remove deleted from selection
-                pendingDeleteFiles.forEach(f => {
-                    if (!data.errors || !data.errors.some(e => e.includes(f))) {
-                        selectedFiles.delete(f);
+                    if (data.errors && data.errors.length > 0) {
+                        showToast(`${data.deleted} supprimée(s), ${data.errors.length} erreur(s)`, 'error');
+                        console.error('Aurion Deletion Errors:', data.errors);
+                    } else {
+                        showToast(`${data.deleted} image(s) supprimée(s)`, 'success');
                     }
-                });
-                updateSelectionUI();
 
-                // Reload current view
-                if (currentTab === 'sessions') {
-                    loadSessions();
-                } else {
-                    loadGallery();
+                    // Remove deleted from selection
+                    reqFiles.forEach(f => {
+                        if (!data.errors || !data.errors.some(e => e.includes(f))) {
+                            selectedFiles.delete(f);
+                        }
+                    });
+                    updateSelectionUI();
+
+                    // Reload current view
+                    if (currentTab === 'sessions') {
+                        loadSessions();
+                    } else {
+                        loadGallery();
+                    }
                 }
             } catch (e) {
                 showToast('Erreur suppression: ' + e.message, 'error');
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                closeDeleteModal();
             }
         }
 

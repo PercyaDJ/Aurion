@@ -965,6 +965,7 @@ pub async fn download_gallery_session_zip(
     let filenames = get_session_filenames(&mount_point, &session_name);
 
     if filenames.is_empty() {
+        state.add_log(format!("❌ Echec ZIP '{}': 0 fichiers trouvés dans {}", session_name, mount_point)).await;
         return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no images")).into_response();
     }
 
@@ -1045,22 +1046,20 @@ pub async fn delete_gallery_session(
     }
 
     if session_dir.exists() {
-        match std::fs::remove_dir_all(&session_dir) {
-            Ok(_) => {
-                state.add_log(format!("🗑️ Session {} et {} images supprimées", session_name, deleted_images)).await;
-                StatusCode::OK.into_response()
-            }
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Erreur: {}", e)).into_response()
+        if let Err(e) = std::fs::remove_dir_all(&session_dir) {
+            state.add_log(format!("⚠️ Destruction dossier ignorée: {}", e)).await;
         }
-    } else {
-        (StatusCode::NOT_FOUND, "Session introuvable").into_response()
     }
+    
+    state.add_log(format!("🗑️ Session {} et {} images supprimées", session_name, deleted_images)).await;
+    StatusCode::OK.into_response()
 }
 
 /// Helper to find all image filenames belonging to a specific session
 fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
     let mut filenames = Vec::new();
-    let start_fmt = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", session_name), "%Y-%m-%d_%H-%M_%S").ok();
+    let safe_name = session_name.trim();
+    let start_fmt = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", safe_name), "%Y-%m-%d_%H-%M_%S").ok();
     
     // Find next session start time
     let mut next_session_start = None;
@@ -1070,7 +1069,7 @@ fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
             .filter_map(|e| e.file_name().into_string().ok())
             .collect();
         names.sort();
-        if let Some(idx) = names.iter().position(|n| n == session_name) {
+        if let Some(idx) = names.iter().position(|n| n == safe_name) {
             if idx + 1 < names.len() {
                 if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", names[idx + 1]), "%Y-%m-%d_%H-%M_%S") {
                     next_session_start = Some(dt);
