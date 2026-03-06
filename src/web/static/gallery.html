@@ -280,13 +280,18 @@
 
         <!-- Tabs -->
         <div class="tab-bar"
-            style="display:flex;gap:0.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:0.5rem;">
+            style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:0.5rem;flex-wrap:wrap;">
             <button id="tabImages" class="tab-btn active"
                 style="background:none;border:none;color:var(--accent);font-weight:600;padding:0.25rem 0.75rem;border-bottom:2px solid var(--accent);cursor:pointer;font-family:inherit;font-size:0.9rem;"
                 onclick="switchTab('images')">🖼️ Toutes les images</button>
             <button id="tabSessions" class="tab-btn"
                 style="background:none;border:none;color:var(--text-secondary);font-weight:500;padding:0.25rem 0.75rem;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;font-size:0.9rem;"
                 onclick="switchTab('sessions')">🌙 Par session</button>
+            <div style="flex:1;"></div>
+            <button id="sortBtn" class="btn btn-outline"
+                style="padding:0.25rem 0.5rem;font-size:0.8rem;border-color:var(--border);" onclick="toggleSort()">
+                ↕️ Plus anciens d'abord
+            </button>
         </div>
 
         <!-- Toolbar (appears when selecting) -->
@@ -360,6 +365,22 @@
         // ── Tab switching ─────────────────────────────────────
         let sessionLoaded = false;
         let currentTab = 'images';
+        let sortOrder = 'asc'; // 'asc' = oldest first (default for images), 'desc' = newest first
+
+        function toggleSort() {
+            sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+            document.getElementById('sortBtn').innerHTML = sortOrder === 'asc'
+                ? '↕️ Plus anciens d\'abord'
+                : '↕️ Plus récents d\'abord';
+
+            if (currentTab === 'images') {
+                allImages.reverse();
+                renderGrid();
+            } else {
+                currentSessions.reverse();
+                renderSessionsGrid();
+            }
+        }
 
         function switchTab(tab) {
             currentTab = tab;
@@ -392,11 +413,13 @@
             }
         }
 
+        let currentSessions = [];
+
         async function loadSessions() {
             const container = document.getElementById('sessionsContent');
             try {
                 const res = await fetch('/api/gallery/sessions');
-                const sessions = await res.json();
+                let sessions = await res.json();
 
                 if (!sessions || sessions.length === 0) {
                     container.innerHTML = `
@@ -407,51 +430,61 @@
                     return;
                 }
 
-                let html = '<div style="display:flex;flex-direction:column;gap:0.75rem;">';
-                for (const s of sessions) {
-                    const rate = s.image_count > 0
-                        ? Math.round(s.aurora_count / s.image_count * 100)
-                        : 0;
-                    const rateColor = rate > 30 ? 'var(--green)' : rate > 5 ? 'var(--accent)' : 'var(--text-secondary)';
-                    const duration = s.duration_minutes > 0
-                        ? `${Math.floor(s.duration_minutes / 60)}h${String(s.duration_minutes % 60).padStart(2, '0')}`
-                        : '—';
-
-                    html += `
-                    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
-                            <div>
-                                <div style="font-weight:600;font-size:0.95rem;">${s.date.replace(/\//g, ' / ')}</div>
-                                <div style="font-size:0.75rem;color:var(--text-secondary);">${s.name}</div>
-                            </div>
-                            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                                ${s.aurora_count > 0 ? `<span style="background:rgba(0,255,120,0.15);color:var(--green);border:1px solid var(--green);border-radius:20px;padding:0.15rem 0.6rem;font-size:0.75rem;font-weight:600;">🌌 ${s.aurora_count} aurore${s.aurora_count > 1 ? 's' : ''}</span>` : ''}
-                                <span style="color:${rateColor};font-size:0.8rem;font-weight:500;">${rate}% détection</span>
-                            </div>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:0.25rem;">
-                            <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
-                                <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
-                                <span>⏱ ${duration}</span>
-                                ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
-                            </div>
-                            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                                <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
-                                    🗑️ Supprimer
-                                </button>
-                                <a href="/api/gallery/sessions/${s.name}/download" download class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
-                                    ⬇️ Télécharger ZIP
-                                </a>
-                            </div>
-                        </div>
-                    </div>`;
+                // API default is descending. Reverse if needed.
+                if (sortOrder === 'asc') {
+                    sessions.reverse();
                 }
-                html += '</div>';
-                container.innerHTML = html;
+                currentSessions = sessions;
+                renderSessionsGrid();
 
             } catch (e) {
                 container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Impossible de charger les sessions.</p></div>`;
             }
+        }
+
+        function renderSessionsGrid() {
+            const container = document.getElementById('sessionsContent');
+            let html = '<div style="display:flex;flex-direction:column;gap:0.75rem;">';
+            for (const s of currentSessions) {
+                const rate = s.image_count > 0
+                    ? Math.round(s.aurora_count / s.image_count * 100)
+                    : 0;
+                const rateColor = rate > 30 ? 'var(--green)' : rate > 5 ? 'var(--accent)' : 'var(--text-secondary)';
+                const duration = s.duration_minutes > 0
+                    ? `${Math.floor(s.duration_minutes / 60)}h${String(s.duration_minutes % 60).padStart(2, '0')}`
+                    : '—';
+
+                html += `
+                <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;display:flex;flex-direction:column;gap:0.5rem;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+                        <div>
+                            <div style="font-weight:600;font-size:0.95rem;">${s.date.replace(/\//g, ' / ')}</div>
+                            <div style="font-size:0.75rem;color:var(--text-secondary);">${s.name}</div>
+                        </div>
+                        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                            ${s.aurora_count > 0 ? `<span style="background:rgba(0,255,120,0.15);color:var(--green);border:1px solid var(--green);border-radius:20px;padding:0.15rem 0.6rem;font-size:0.75rem;font-weight:600;">🌌 ${s.aurora_count} aurore${s.aurora_count > 1 ? 's' : ''}</span>` : ''}
+                            <span style="color:${rateColor};font-size:0.8rem;font-weight:500;">${rate}% détection</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-top:0.25rem;">
+                        <div style="display:flex;gap:1rem;font-size:0.8rem;color:var(--text-secondary);flex-wrap:wrap;">
+                            <span>📸 ${s.image_count} image${s.image_count > 1 ? 's' : ''}</span>
+                            <span>⏱ ${duration}</span>
+                            ${s.has_log ? '<span style="color:var(--green);">📋 Logs disponibles</span>' : ''}
+                        </div>
+                        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                            <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
+                                🗑️ Supprimer
+                            </button>
+                            <a href="/api/gallery/sessions/${s.name}/download" download class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                ⬇️ Télécharger ZIP
+                            </a>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
         }
 
         let allImages = [];
@@ -466,6 +499,10 @@
                 const countEl = document.getElementById('galleryCount');
 
                 allImages = data.images || [];
+
+                if (sortOrder === 'desc') {
+                    allImages.reverse();
+                }
 
                 if (allImages.length === 0) {
                     container.innerHTML = `

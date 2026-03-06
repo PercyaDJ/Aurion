@@ -740,7 +740,8 @@ pub struct SessionInfo {
 /// Each session is a folder named `YYYY-MM-DD_HH-MM`.
 pub async fn get_gallery_sessions(State(state): State<AppState>) -> Json<Vec<SessionInfo>> {
     let config = state.config.read().await;
-    let sessions_dir = std::path::Path::new(&config.storage.mount_point).join("sessions");
+    let mount_point = config.storage.mount_point.clone();
+    let sessions_dir = std::path::Path::new(&mount_point).join("sessions");
     drop(config);
 
     let mut sessions = Vec::new();
@@ -809,10 +810,20 @@ pub async fn get_gallery_sessions(State(state): State<AppState>) -> Json<Vec<Ses
         // Estimate total size from image count (rough: ~5 MB/frame for JPG)
         let total_size_mb = image_count as f64 * 5.0;
 
+        // VERIFY that the session actually has files on disk
+        let true_filenames = get_session_filenames(&mount_point, &name);
+        if true_filenames.is_empty() {
+            // Clean up defunct session directory if it's empty of images
+            let _ = std::fs::remove_dir_all(&path);
+            continue; // Hide from UI
+        }
+        
+        let actual_image_count = true_filenames.len();
+
         sessions.push(SessionInfo {
             name,
             date,
-            image_count,
+            image_count: actual_image_count,
             aurora_count,
             total_size_mb,
             duration_minutes,
@@ -965,8 +976,8 @@ pub async fn download_gallery_session_zip(
     let filenames = get_session_filenames(&mount_point, &session_name);
 
     if filenames.is_empty() {
-        state.add_log(format!("❌ Echec ZIP '{}': 0 fichiers trouvés dans {}", session_name, mount_point)).await;
-        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Session is empty or has no images")).into_response();
+        state.add_log(format!("❌ Echec ZIP '{}': aucun fichier JPG/DNG associé n'a été trouvé à la racine de la clé", session_name)).await;
+        return (StatusCode::NOT_FOUND, [("content-type", "text/plain".to_string())], axum::body::Body::from("Le dossier est vide ou les fichiers sources n'existent plus sur la clef USB.")).into_response();
     }
 
     let (tx, rx) = tokio::io::duplex(1024 * 1024 * 4); // 4MB buffer pipe
@@ -1061,7 +1072,9 @@ fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
     let safe_name = session_name.trim();
     let start_fmt = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", safe_name), "%Y-%m-%d_%H-%M_%S").ok();
     
-    // Find next session start time
+    // Fallback string manipulation (in case chrono fails unpredictably)
+    let s_date_str = safe_name.replace("-", "").replace("_", ""); // "202603052130"
+    
     let mut next_session_start = None;
     if let Ok(entries) = std::fs::read_dir(std::path::Path::new(mount_point).join("sessions")) {
         let mut names: Vec<String> = entries.filter_map(|e| e.ok())
@@ -1071,9 +1084,10 @@ fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
         names.sort();
         if let Some(idx) = names.iter().position(|n| n == safe_name) {
             if idx + 1 < names.len() {
-                if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&format!("{}_00", names[idx + 1]), "%Y-%m-%d_%H-%M_%S") {
-                    next_session_start = Some(dt);
-                }
+                next_session_start = chrono::NaiveDateTime::parse_from_str(
+                    &format!("{}_00", names[idx + 1]), 
+                    "%Y-%m-%d_%H-%M_%S"
+                ).ok();
             }
         }
     }
@@ -1082,27 +1096,34 @@ fn get_session_filenames(mount_point: &str, session_name: &str) -> Vec<String> {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if !path.is_file() { continue; }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let ext = path.extension().unwrap_or_default().to_str().unwrap_or("").to_lowercase();
             if !["jpg", "jpeg", "png", "dng", "raw"].contains(&ext.as_str()) { continue; }
             
             if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
                 if filename.starts_with("aurora_") && filename.len() >= 22 {
                     let ts_str = &filename[7..22]; // YYYYMMDD_HHMMSS
+                    
                     if let Ok(file_dt) = chrono::NaiveDateTime::parse_from_str(ts_str, "%Y%m%d_%H%M%S") {
                         if let Some(s_dt) = start_fmt {
-                            // files written just before session logic starts
-                            let start_margin = s_dt - chrono::Duration::minutes(2); 
+                            // Substract 5 minutes of margin just to be safe
+                            let margin_dur = chrono::TimeDelta::try_minutes(5).unwrap_or(chrono::TimeDelta::zero());
+                            let start_margin = s_dt - margin_dur;
                             if file_dt >= start_margin {
                                 let mut inside = true;
                                 if let Some(n_dt) = next_session_start {
                                     if file_dt >= n_dt { inside = false; }
-                                } else if file_dt > s_dt + chrono::Duration::hours(24) {
-                                    // Cap unbounded sessions to 24 hours
-                                    inside = false;
+                                } else if file_dt > s_dt + chrono::TimeDelta::try_hours(16).unwrap_or_default() {
+                                    inside = false; // Cap unbounded sessions to 16 hours
                                 }
                                 if inside {
                                     filenames.push(filename.to_string());
                                 }
+                            }
+                        } else {
+                            // Date parsing failed completely on start_fmt, use string suffix matched
+                            let clean_ts = ts_str.replace("_", ""); // "20260305213500"
+                            if clean_ts.starts_with(&s_date_str[..8]) && clean_ts >= format!("{}00", s_date_str) {
+                                filenames.push(filename.to_string());
                             }
                         }
                     }
