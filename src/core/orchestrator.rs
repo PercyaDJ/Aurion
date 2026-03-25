@@ -1,4 +1,4 @@
-﻿use std::path::Path;
+use std::path::Path;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 
@@ -55,7 +55,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
 
         // ─── Load config snapshot ───────────────────────────
-        let config = self.state.config.read().await.clone();
+        let config: AppConfig = self.state.config.read().await.clone();
 
         // ─── Log system clock immediately (critical for diagnosis without screen) ─
         {
@@ -355,7 +355,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             //   - capture_interval_secs / watch_interval_secs
             //   - detection thresholds (sensitivity, ROI, etc.)
             // Immutable params (mount_point, output_format, time_range) use the snapshot.
-            let live_cfg = self.state.config.read().await.clone();
+            let live_cfg: AppConfig = self.state.config.read().await.clone();
             detector.update_config(&live_cfg.detection);
             let live_capture_interval = live_cfg.capture.capture_interval_secs.max(1);
             let live_watch_interval = live_cfg.capture.watch_interval_secs.max(5);

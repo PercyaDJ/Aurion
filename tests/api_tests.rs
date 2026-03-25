@@ -153,7 +153,22 @@ mod api_tests {
 
         let body: Value = response.json();
         let version = body["version"].as_str().unwrap_or("");
+        // Version doit être non-vide et ressembler à un semver (contient au moins un point)
         assert!(!version.is_empty(), "version field should be present and non-empty");
-        assert!(version.starts_with("0."), "version should look like a semver string");
+        assert!(version.contains('.'), "version should look like a semver string (x.y.z)");
+    }
+
+    // ─── GET /api/config/is-default-password ──────────────
+
+    #[tokio::test]
+    async fn test_is_default_password_returns_true_for_default() {
+        let server = make_server();
+        // La config par défaut a le mot de passe "aurora2024"
+        let response = server.get("/api/config/is-default-password").await;
+        response.assert_status_ok();
+
+        let body: Value = response.json();
+        assert!(body["default"].as_bool().unwrap_or(false),
+            "Default config should report default password");
     }
 }

@@ -224,12 +224,36 @@ impl AppConfig {
         // ─── Capture ─────────────────────────────────────────
         if self.capture.capture_interval_secs < 1 {
             return Err(ConfigError::ValidationError(
-                "L'intervalle de capture doit être ≥ 1 seconde".into(),
+                "L'intervalle de capture doit être >= 1 seconde".into(),
             ));
         }
         if self.capture.watch_interval_secs < 5 {
             return Err(ConfigError::ValidationError(
-                "L'intervalle d'observation doit être ≥ 5 secondes".into(),
+                "L'intervalle d'observation doit être >= 5 secondes".into(),
+            ));
+        }
+        if self.capture.capture_interval_secs as u64 > self.capture.watch_interval_secs {
+            return Err(ConfigError::ValidationError(
+                "L'intervalle de capture ne peut pas dépasser l'intervalle d'observation".into(),
+            ));
+        }
+        if self.capture.focal_length_mm <= 0.0 {
+            return Err(ConfigError::ValidationError(
+                "La longueur focale doit être > 0 mm".into(),
+            ));
+        }
+
+        // ─── Réseau ──────────────────────────────────────────
+        if self.network.password.len() < 10 {
+            return Err(ConfigError::ValidationError(
+                "Le mot de passe Wi-Fi doit faire au moins 10 caractères (WPA2)".into(),
+            ));
+        }
+
+        // ─── Web ─────────────────────────────────────────────
+        if self.web.port < 1024 {
+            return Err(ConfigError::ValidationError(
+                "Le port web doit être >= 1024 (ports < 1024 sont réservés au système)".into(),
             ));
         }
 
@@ -427,5 +451,34 @@ mod tests {
         let presets = AppConfig::builtin_presets();
         assert_eq!(presets.len(), 3);
         assert!(presets.iter().all(|p| p.is_builtin));
+    }
+
+    #[test]
+    fn test_short_wifi_password() {
+        let mut config = AppConfig::default();
+        config.network.password = "court".into(); // 5 chars < 10
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_privileged_port() {
+        let mut config = AppConfig::default();
+        config.web.port = 80; // port privilégié
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_zero_focal_length() {
+        let mut config = AppConfig::default();
+        config.capture.focal_length_mm = 0.0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_capture_interval_exceeds_watch() {
+        let mut config = AppConfig::default();
+        config.capture.watch_interval_secs = 10;
+        config.capture.capture_interval_secs = 15; // > watch_interval
+        assert!(config.validate().is_err());
     }
 }

@@ -5,6 +5,7 @@ use axum::{
     Json,
     response::{IntoResponse, Redirect},
 };
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
 use crate::core::config::{AppConfig, Preset};
@@ -120,8 +121,8 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 ///   3. Repeat until properly exposed
 ///   4. Return final image with metadata overlay
 pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse {
-    let tmp_path = "aurion_preview.jpg";
-    let meta_path = "aurion_preview_meta.txt";
+    let tmp_path = "/tmp/aurion_preview.jpg";
+    let meta_path = "/tmp/aurion_preview_meta.txt";
     let config = state.config.read().await.clone();
 
     // Initialize exposure at geometric midpoint of user's range
@@ -137,7 +138,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
         let shutter_us_str = settings.shutter_us.to_string();
         let gain_str = format!("{:.1}", settings.iso as f64 / 100.0);
 
-        let result = std::process::Command::new("rpicam-still")
+        let result = tokio::process::Command::new("rpicam-still")
             .args([
                 "--nopreview",
                 "-o", tmp_path,
@@ -147,12 +148,13 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
                 "--awb", "auto",
                 "--metadata", meta_path,
             ])
-            .output();
+            .output()
+            .await;
 
         match result {
             Ok(output) if output.status.success() => {
                 // Decode JPEG to RGB for histogram
-                if let Ok(jpeg_data) = std::fs::read(tmp_path) {
+                if let Ok(jpeg_data) = tokio::fs::read(tmp_path).await {
                     if let Ok(img) = image::load_from_memory(&jpeg_data) {
                         let rgb = img.to_rgb8();
                         let rgb_data = rgb.as_raw();
@@ -185,7 +187,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
     let shutter_us_str = final_settings.shutter_us.to_string();
     let gain_str = format!("{:.1}", final_settings.iso as f64 / 100.0);
 
-    let result = std::process::Command::new("rpicam-still")
+    let result = tokio::process::Command::new("rpicam-still")
         .args([
             "--nopreview",
             "-o", tmp_path,
@@ -194,11 +196,12 @@ pub async fn capture_preview(State(state): State<AppState>) -> impl IntoResponse
             "--gain", &gain_str,
             "--awb", "auto",
         ])
-        .output();
+        .output()
+        .await;
 
     match result {
         Ok(output) if output.status.success() => {
-            match std::fs::read(tmp_path) {
+            match tokio::fs::read(tmp_path).await {
                 Ok(data) => {
                     let mut preview = state.latest_preview.write().await;
                     *preview = Some(data.clone());
@@ -259,44 +262,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<AppConfig> {
 pub async fn get_wifi_password(State(state): State<AppState>) -> Json<serde_json::Value> {
     let config = state.config.read().await;
     Json(serde_json::json!({ "password": config.network.password }))
-}
 
-#[derive(Deserialize)]
-pub struct ConfigUpdate {
-    #[serde(flatten)]
-    pub config: AppConfig,
-}
-
-pub async fn update_config(
-    State(state): State<AppState>,
-    Json(mut update): Json<AppConfig>,
-) -> Result<Json<AppConfig>, (StatusCode, String)> {
-    if let Err(e) = update.validate() {
-        return Err((StatusCode::BAD_REQUEST, e.to_string()));
-    }
-
-    let mut config = state.config.write().await;
-    // Preserve real WiFi password if the masked placeholder was sent
-    if update.network.password == "********" {
-        update.network.password = config.network.password.clone();
-    }
-    *config = update;
-
-    // Persist
-    if let Err(e) = config.save(&AppConfig::default_path()) {
-        tracing::error!("Failed to persist config: {}", e);
-    }
-
-    state
-        .add_log(format!("Configuration mise à jour"))
-        .await;
-
-    Ok(Json(config.clone()))
-}
-
-// ─── Presets ───────────────────────────────────────────────
-
-#[derive(Serialize)]
 pub struct PresetsResponse {
     pub presets: Vec<PresetInfo>,
 }
@@ -1478,44 +1444,247 @@ fn get_wlan_ip() -> Option<String> {
         })
 }
 
+// ─── Sécurité ─────────────────────────────────────────────
+
+/// Indique si le mot de passe Wi-Fi est encore la valeur par défaut.
+/// Utilisé par l'UI pour afficher un avertissement au premier démarrage.
+pub async fn is_default_password(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config = state.config.read().await;
+    Json(serde_json::json!({
+        "default": config.network.password == "aurora2024"
+    }))
+}
+
+// ─── Mise à jour OTA ──────────────────────────────────────
+
+/// Upload d'un nouveau binaire Aurion depuis le téléphone.
+///
+/// Flux :
+///   1. Le téléphone uploade le binaire en multipart (field "binary")
+///   2. On vérifie les magic bytes ELF (0x7f 'E' 'L' 'F')
+///   3. Le binaire est écrit dans /tmp/aurion_update
+///   4. Il remplace le binaire actuel via sudo cp
+///   5. Le service systemd est redémarré
+///
+/// Le téléphone doit recharger l'interface après ~10 secondes.
+pub async fn system_update(
+    State(state): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    let mut binary_data: Option<Vec<u8>> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("binary") {
+            match field.bytes().await {
+                Ok(data) => binary_data = Some(data.to_vec()),
+                Err(e) => return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Lecture du fichier impossible: {}", e),
+                ).into_response(),
+            }
+        }
+    }
+
+    let data = match binary_data {
+        Some(d) if !d.is_empty() => d,
+        _ => return (StatusCode::BAD_REQUEST, "Aucun binaire reçu".to_string()).into_response(),
+    };
+
+    // Vérification magic bytes ELF : 0x7f 'E' 'L' 'F'
+    if data.len() < 4 || &data[..4] != b"\x7fELF" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Le fichier envoyé n'est pas un binaire ELF valide".to_string(),
+        ).into_response();
+    }
+
+    // Écriture dans /tmp
+    let tmp_bin = "/tmp/aurion_update";
+    if let Err(e) = std::fs::write(tmp_bin, &data) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Ecriture échouée: {}", e),
+        ).into_response();
+    }
+
+    // Récupérer le chemin du binaire courant
+    let current_bin = match std::env::current_exe() {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Impossible de localiser le binaire courant".to_string(),
+        ).into_response(),
+    };
+
+    tracing::info!("OTA: remplacement de {} par {} ({} octets)", current_bin, tmp_bin, data.len());
+    state.add_log(format!("Mise a jour OTA: {} octets recus", data.len())).await;
+
+    // Remplacement du binaire (chmod + cp via sudo)
+    let _ = std::process::Command::new("sudo")
+        .args(["chmod", "+x", tmp_bin])
+        .output();
+
+    let cp_result = std::process::Command::new("sudo")
+        .args(["cp", tmp_bin, &current_bin])
+        .output();
+
+    match cp_result {
+        Ok(out) if out.status.success() => {
+            tracing::info!("OTA: binaire remplace. Redemarrage du service...");
+            state.add_log("OTA: binaire remplace. Redemarrage dans 2s...".into()).await;
+            // Redémarrage du service en arrière-plan (le process courant continuera encore 2s)
+            tokio::spawn(async {
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                let _ = std::process::Command::new("sudo")
+                    .args(["systemctl", "restart", "aurion"])
+                    .output();
+            });
+            (StatusCode::OK, "Mise a jour appliquee. Reconnectez-vous dans quelques secondes.".to_string()).into_response()
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Remplacement du binaire impossible: {}", stderr),
+            ).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Erreur: {}", e),
+        ).into_response(),
+    }
+}
+
+// ─── Synchronisation d'heure automatique ──────────────────
+
+/// Tenter de synchroniser l'heure système depuis le header Date: HTTP.
+/// Appel idempotent : ne fait rien si l'heure est déjà correcte (>= 2024)
+/// ou si la synchro a déjà été effectuée cette session.
+pub async fn try_sync_time_from_header(
+    state: &AppState,
+    date_header: Option<&str>,
+) {
+    // Vérifier si on a besoin de synchroniser (année < 2024 = Pi sans RTC ni NTP)
+    let needs_sync = chrono::Local::now().year() < 2024;
+    if !needs_sync {
+        // Marquer comme synchronisé de toute façon (horloge correcte)
+        state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+
+    // Ne synchroniser qu'une seule fois par session
+    if state.time_synced.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+
+    let date_str = match date_header {
+        Some(s) if !s.is_empty() => s,
+        _ => return,
+    };
+
+    // Parser le header Date: HTTP (ex: "Tue, 25 Mar 2026 13:00:00 GMT")
+    // Format RFC 2822 compatible avec chrono
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc2822(date_str) {
+        let year = parsed.year();
+        if year < 2024 {
+            tracing::warn!("Synchro heure: date recue invalide ({}), ignoree", date_str);
+            return;
+        }
+
+        // Format pour la commande date : MMDDHHmmYYYY.ss
+        let date_cmd = parsed.format("%m%d%H%M%Y.%S").to_string();
+        tracing::info!("Synchro heure automatique depuis le telephone: {}", parsed.format("%Y-%m-%d %H:%M:%S"));
+
+        let result = std::process::Command::new("sudo")
+            .args(["date", "-s", &parsed.format("%Y-%m-%d %H:%M:%S").to_string()])
+            .output();
+
+        match result {
+            Ok(out) if out.status.success() => {
+                state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed);
+                state.add_log(format!(
+                    "Heure synchronisee automatiquement: {}",
+                    parsed.format("%Y-%m-%d %H:%M:%S")
+                )).await;
+                tracing::info!("Heure systeme synchronisee: {} (date cmd: {})", parsed, date_cmd);
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                tracing::warn!("Synchro heure echouee: {}", stderr);
+            }
+            Err(e) => {
+                tracing::warn!("Synchro heure: erreur commande date: {}", e);
+            }
+        }
+    } else {
+        tracing::debug!("Synchro heure: header Date non parseable: {}", date_str);
+    }
+}
+
 // ─── Captive Portal Detection ─────────────────────────────
 //
-// When a device connects to the Aurion Wi-Fi, the OS tries to
-// reach known URLs to check internet connectivity. If it gets a
-// redirect instead of the expected response, it opens a captive
-// portal browser window automatically.
+// Quand un appareil se connecte au Wi-Fi Aurion, l'OS vérifie
+// la connectivité internet via des URLs connues. Si la réponse
+// est une redirection au lieu de la réponse attendue, le
+// navigateur captif s'ouvre automatiquement.
 //
-// iOS/macOS:  GET /hotspot-detect.html → expects "Success"
-// Android:    GET /generate_204       → expects 204
-// Windows:    GET /connecttest.txt     → expects "Microsoft Connect Test"
-// Firefox:    GET /canonical.html      → expects 200 with specific content
+// iOS/macOS:  GET /hotspot-detect.html -> attend "Success"
+// Android:    GET /generate_204        -> attend 204
+// Windows:    GET /connecttest.txt     -> attend "Microsoft Connect Test"
+// Firefox:    GET /canonical.html      -> attend 200
 //
-// We redirect them all to http://192.168.4.1:8080/
+// On redirige tout vers l'interface Aurion.
+// On profite de ces requêtes pour synchroniser l'heure automatiquement
+// via le header Date: envoyé par le navigateur.
 
 const PORTAL_REDIRECT: &str = "http://192.168.4.1:8080/";
 
 /// iOS / macOS captive portal detection
-pub async fn captive_apple() -> impl IntoResponse {
+pub async fn captive_apple(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let date = headers.get("date").and_then(|v| v.to_str().ok());
+    try_sync_time_from_header(&state, date).await;
     Redirect::temporary(PORTAL_REDIRECT)
 }
 
 /// Android captive portal detection (expects 204, gets 302)
-pub async fn captive_android() -> impl IntoResponse {
+pub async fn captive_android(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let date = headers.get("date").and_then(|v| v.to_str().ok());
+    try_sync_time_from_header(&state, date).await;
     Redirect::temporary(PORTAL_REDIRECT)
 }
 
 /// Windows NCSI captive portal detection
-pub async fn captive_windows() -> impl IntoResponse {
+pub async fn captive_windows(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let date = headers.get("date").and_then(|v| v.to_str().ok());
+    try_sync_time_from_header(&state, date).await;
     Redirect::temporary(PORTAL_REDIRECT)
 }
 
 /// Firefox captive portal detection
-pub async fn captive_firefox() -> impl IntoResponse {
+pub async fn captive_firefox(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let date = headers.get("date").and_then(|v| v.to_str().ok());
+    try_sync_time_from_header(&state, date).await;
     Redirect::temporary(PORTAL_REDIRECT)
 }
 
-/// Fallback: any unknown host request gets redirected if it's
-/// a connectivity check (common Android/Samsung variants)
-pub async fn captive_fallback() -> impl IntoResponse {
+/// Fallback captive portal (Samsung, autres variantes Android)
+pub async fn captive_fallback(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let date = headers.get("date").and_then(|v| v.to_str().ok());
+    try_sync_time_from_header(&state, date).await;
     Redirect::temporary(PORTAL_REDIRECT)
 }

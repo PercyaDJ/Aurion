@@ -43,6 +43,13 @@ async fn main() -> anyhow::Result<()> {
             )
             .unwrap_or_default();
 
+            // Avertir si le mot de passe Wi-Fi n'a pas été changé
+            if config.network.password == "aurora2024" {
+                tracing::warn!(
+                    "[Securite] Mot de passe Wi-Fi par defaut detecte. Changez-le dans l'interface (Parametres -> Reseau)."
+                );
+            }
+
             let port = config.web.port;
             let state = aurion::web::AppState::new(config);
 
