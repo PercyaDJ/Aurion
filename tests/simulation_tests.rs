@@ -249,3 +249,93 @@ async fn hotspot_is_switched_off_when_the_night_starts() {
     orch.run().await.unwrap();
     assert!(!shared.is_ap_active());
 }
+
+// ─── Photo quality: Pi-like captures (full JPEG + EXIF thumbnail) ────
+
+fn saved_jpeg(capture: &Path, name: &str) -> Vec<u8> {
+    std::fs::read(capture.join(name)).unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn pi_captures_are_saved_untouched_with_exif_thumbnail() {
+    let (night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawAndJpg;
+        c.time_range.duration_hours = Some(0.02);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Aurora).with_jpeg_output(), storage, clock()).await;
+
+    let files = images(&night.capture);
+    let jpg = files.iter().find(|f| f.ends_with(".jpg")).expect("a JPEG");
+    let data = saved_jpeg(&night.capture, jpg);
+    let full = image::load_from_memory(&data).unwrap();
+    assert_eq!((full.width(), full.height()), (1280, 960), "full resolution kept");
+    let thumb = aurion::core::jpeg::exif_thumbnail(&data).expect("EXIF thumbnail kept");
+    // Gallery thumbnail = the EXIF thumbnail itself (no re-encoding)
+    assert_eq!(std::fs::read(night.capture.join("thumbs").join(jpg)).unwrap(), thumb);
+    assert!(files.iter().any(|f| f.ends_with(".dng")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn hot_pixel_correction_on_jpeg_keeps_exif() {
+    let (night, _) = setup(|c| {
+        c.capture.denoise.hot_pixels = true;
+        c.time_range.duration_hours = Some(0.01);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark).with_jpeg_output(), storage, clock()).await;
+    let files = images(&night.capture);
+    let data = saved_jpeg(&night.capture, &files[0]);
+    assert!(aurion::core::jpeg::exif_thumbnail(&data).is_some(), "EXIF must survive re-encoding");
+    let rgb = image::load_from_memory(&data).unwrap().to_rgb8();
+    let saturated = rgb.pixels().filter(|p| p.0.iter().all(|&v| v > 240)).count();
+    assert!(saturated < aurion::adapters::pc::camera_mock::MOCK_HOT_PIXELS / 5, "{} hot pixels left", saturated);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stacking_produces_one_extra_image_every_n_frames() {
+    let (night, _) = setup(|c| {
+        c.capture.denoise.stack_frames = 4;
+        c.time_range.duration_hours = Some(0.05); // 3 min → ~18 frames
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Aurora).with_jpeg_output(), storage, clock()).await;
+    let files = images(&night.capture);
+    let stacks: Vec<_> = files.iter().filter(|f| f.contains("_STACK4")).collect();
+    let singles = files.iter().filter(|f| !f.contains("_STACK")).count();
+    assert_eq!(stacks.len(), singles / 4, "{} stacks for {} frames", stacks.len(), singles);
+    let img = image::load_from_memory(&saved_jpeg(&night.capture, stacks[0])).unwrap();
+    assert_eq!(img.width(), 1280);
+}
+
+#[tokio::test(start_paused = true)]
+async fn exposure_lock_keeps_the_timelapse_flicker_free() {
+    let (night, _) = setup(|c| {
+        c.exposure.lock_in_run = true;
+        c.time_range.duration_hours = Some(0.1);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Intermittent), storage, clock()).await;
+    let events = session_events(&night.capture);
+    let run: Vec<_> = events.iter().filter(|e| e["phase"] == "Run").collect();
+    assert!(run.len() > 20);
+    assert!(run.windows(2).all(|w| w[0]["exposure_us"] == w[1]["exposure_us"] && w[0]["iso"] == w[1]["iso"]),
+        "exposure must not change during RUN");
+}
+
+#[tokio::test(start_paused = true)]
+async fn strongest_auroras_are_ranked_from_the_night_log() {
+    let (night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawAndJpg;
+        c.time_range.duration_hours = Some(0.05);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Intermittent), storage, clock()).await;
+    let events = session_events(&night.capture);
+    assert!(events.iter().all(|e| e["frame_number"].is_u64()), "every saved frame is numbered");
+
+    let best = aurion::web::gallery::best_auroras(&night.capture, 5);
+    assert!(!best.is_empty() && best.len() <= 5);
+    assert!(best.windows(2).all(|w| w[0].score >= w[1].score), "sorted by score");
+    assert!(best.iter().all(|b| b.score > 0.0 && b.dng.is_some() && b.jpg.is_some()));
+}

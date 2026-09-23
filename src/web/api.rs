@@ -119,6 +119,7 @@ pub async fn get_preview(State(state): State<AppState>) -> impl IntoResponse {
 async fn rpicam_still(
     output: &FsPath,
     settings: &crate::core::models::ExposureSettings,
+    awb: &str,
 ) -> Result<Vec<u8>, String> {
     let shutter = settings.shutter_us.to_string();
     let gain = format!("{:.2}", settings.iso as f64 / 100.0);
@@ -126,7 +127,7 @@ async fn rpicam_still(
     let timeout = Duration::from_secs(settings.shutter_us.div_ceil(1_000_000) * 3 + 20);
     crate::sys::run(
         "rpicam-still",
-        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", "auto"],
+        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb],
         timeout,
     )
     .await?;
@@ -155,7 +156,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> Response {
     let mut last: Option<(Vec<u8>, crate::core::models::ExposureSettings)> = None;
     for i in 0..4 {
         let settings = expo.current();
-        let data = match rpicam_still(&tmp_path, &settings).await {
+        let data = match rpicam_still(&tmp_path, &settings, &config.capture.awb).await {
             Ok(d) => d,
             Err(e) => {
                 tracing::warn!("Preview capture {}/4 failed: {}", i + 1, e);
@@ -181,6 +182,7 @@ pub async fn capture_preview(State(state): State<AppState>) -> Response {
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Aucune image capturée").into_response();
     };
     *state.latest_preview.write().await = Some(data.clone());
+    *state.last_preview.write().await = Some(settings);
     state
         .add_log(format!("Preview: ISO {} / {} µs", settings.iso, settings.shutter_us))
         .await;
@@ -364,6 +366,108 @@ pub async fn delete_preset(
         .map_err(|_| err(StatusCode::NOT_FOUND, format!("Preset '{}' introuvable", name)))?;
     state.add_log(format!("Preset '{}' supprimé", name)).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── Dark frames ───────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct DarksRequest {
+    /// Number of dark frames (1 to 30, default 10).
+    #[serde(default)]
+    pub count: Option<u32>,
+    /// ISO / shutter; default: those of the last preview.
+    #[serde(default)]
+    pub iso: Option<u32>,
+    #[serde(default)]
+    pub shutter_us: Option<u64>,
+}
+
+/// Capture a series of dark frames (lens cap ON) in RAW, with the same ISO
+/// and shutter as the night. Subtracting them in post-processing (Sequator,
+/// Siril, PixInsight...) removes the thermal noise and hot pixels of the
+/// sensor from the DNGs. Files: `<key>/darks/dark_<date>_ISO<iso>_<t>s_<n>.dng`.
+/// Runs in the background; progress with GET /api/darks.
+pub async fn capture_darks(
+    State(state): State<AppState>,
+    Json(req): Json<DarksRequest>,
+) -> Result<Json<crate::web::DarkProgress>, ApiError> {
+    if state.current_phase().await != Phase::Arm {
+        return Err(err(StatusCode::CONFLICT, "Les darks se font avant de lancer la nuit (phase ARM)"));
+    }
+    let count = req.count.unwrap_or(10);
+    if !(1..=30).contains(&count) {
+        return Err(err(StatusCode::BAD_REQUEST, "Nombre de darks : 1 à 30"));
+    }
+    let last = *state.last_preview.read().await;
+    let (iso, shutter_us) = match (req.iso, req.shutter_us, last) {
+        (Some(i), Some(s), _) => (i, s),
+        (None, None, Some(p)) => (p.iso, p.shutter_us),
+        _ => return Err(err(StatusCode::BAD_REQUEST, "Faites d'abord une preview, ou indiquez ISO et temps de pose")),
+    };
+    if !(1..=25_600).contains(&iso) || !(1..=240_000_000).contains(&shutter_us) {
+        return Err(err(StatusCode::BAD_REQUEST, "ISO ou temps de pose hors limites"));
+    }
+    if state.darks.read().await.as_ref().map(|d| d.running).unwrap_or(false) {
+        return Err(err(StatusCode::CONFLICT, "Une série de darks est déjà en cours"));
+    }
+    let camera = state.camera_lock.clone().try_lock_owned()
+        .map_err(|_| err(StatusCode::CONFLICT, "Caméra occupée (preview en cours)"))?;
+
+    let progress = crate::web::DarkProgress { done: 0, total: count, iso, shutter_us, running: true, error: None };
+    *state.darks.write().await = Some(progress.clone());
+    state.add_log(format!("Darks : {} poses ISO {} / {:.1} s (bouchon en place)", count, iso, shutter_us as f64 / 1e6)).await;
+
+    let st = state.clone();
+    tokio::spawn(async move {
+        let _camera = camera;
+        let mount = FsPath::new(&st.config.read().await.storage.mount_point).join("darks");
+        let tmp = st.paths.tmp_dir.join("aurion_dark.jpg");
+        let tmp_dng = tmp.with_extension("dng");
+        let date = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+        let mut error = None;
+        for n in 0..count {
+            let shutter = shutter_us.to_string();
+            let gain = format!("{:.2}", iso as f64 / 100.0);
+            let out = tmp.to_string_lossy().to_string();
+            let _ = std::fs::remove_file(&tmp_dng);
+            let timeout = Duration::from_secs(shutter_us.div_ceil(1_000_000) * 3 + 20);
+            let res = crate::sys::run(
+                "rpicam-still",
+                &["--nopreview", "--raw", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain,
+                  "--awb", "daylight", "--denoise", "off", "--thumb", "none"],
+                timeout,
+            )
+            .await
+            .and_then(|_| std::fs::read(&tmp_dng).map_err(|e| format!("DNG absent: {}", e)))
+            .and_then(|dng| {
+                let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
+                std::fs::create_dir_all(&mount).map_err(|e| e.to_string())?;
+                crate::core::config::write_atomic(&mount.join(name), &dng, 0o644).map_err(|e| e.to_string())
+            });
+            if let Err(e) = res {
+                error = Some(e);
+                break;
+            }
+            if let Some(p) = st.darks.write().await.as_mut() {
+                p.done = n + 1;
+            }
+        }
+        let msg = match &error {
+            None => format!("Darks terminés ({} fichiers dans darks/)", count),
+            Some(e) => format!("Darks interrompus : {}", e),
+        };
+        if let Some(p) = st.darks.write().await.as_mut() {
+            p.running = false;
+            p.error = error;
+        }
+        st.add_log(msg).await;
+    });
+
+    Ok(Json(progress))
+}
+
+pub async fn get_darks(State(state): State<AppState>) -> Json<Option<crate::web::DarkProgress>> {
+    Json(state.darks.read().await.clone())
 }
 
 // ─── Disconnect ────────────────────────────────────────────

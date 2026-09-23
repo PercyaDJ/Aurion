@@ -16,6 +16,8 @@ Trois possibilités, au choix (détails dans le [README](README.md)) :
 
 | Depuis | Commande |
 |---|---|
+| le Pi, par git (recommandé) | `git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion && sudo ~/aurion/install.sh` |
+| le Pi, paquet Debian | `sudo apt install ./aurion_1.5.0_arm64.deb` |
 | le Pi, avec internet | `curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh \| sudo bash` |
 | un PC Windows | `.\scripts\deploy.ps1 utilisateur@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` |
 | un PC Linux / macOS | `scripts/deploy.sh utilisateur@aurion.local aurion-1.5.0-rpi-arm64.tar.gz` |
@@ -25,7 +27,7 @@ ou onglet *Actions*, artefact `aurion-rpi-arm64`).
 
 ### Ce que fait `install.sh`
 
-1. Installe les paquets nécessaires : `rpicam-apps`, `iw`, `nftables` (+ `hostapd`/`dnsmasq` si NetworkManager est absent).
+1. Installe les paquets nécessaires : `rpicam-apps`, `iw`, `nftables`, `dosfstools`, `exfatprogs` (+ `hostapd`/`dnsmasq` si NetworkManager est absent).
 2. Copie le binaire dans `/opt/aurion` (l'interface web est incluse dedans).
 3. Crée `/opt/aurion/config/aurion.json` avec **un mot de passe Wi-Fi unique** (ou reprend la config existante,
    y compris celle d'une ancienne installation `~/Aurion`).
@@ -34,6 +36,7 @@ ou onglet *Actions*, artefact `aurion-rpi-arm64`).
 6. Prépare le hotspot et le portail captif.
 7. Optimise le système pour le terrain (désactivable avec `--no-hardening`) : journaux en RAM,
    `noatime`, pas de mises à jour automatiques, watchdog matériel, arrêt propre en cas de sous-tension persistante.
+   Économie d'énergie (désactivable avec `--no-power-saving`) : Bluetooth, audio et LED coupés.
 8. Active et démarre `aurion.service`, puis affiche le Wi-Fi et son mot de passe.
 
 > Quand le service démarre, le hotspot prend le Wi-Fi du Pi : une session SSH ouverte par le Wi-Fi

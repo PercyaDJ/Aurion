@@ -51,6 +51,7 @@ ko    "$HELPER" set-timezone "Europe/Paris;reboot"
 
 # usb
 has   "systemd-mount" env AURION_FAKE_FSTYPE=exfat "$HELPER" usb-add sda1
+has   "--fsck=yes" env AURION_FAKE_FSTYPE=exfat "$HELPER" usb-add sda1
 has   "flush" env AURION_FAKE_FSTYPE=vfat "$HELPER" usb-add sdb
 ko    env AURION_FAKE_FSTYPE=ext4 "$HELPER" usb-add sda1
 ko    "$HELPER" usb-add "../../dev/mmcblk0"

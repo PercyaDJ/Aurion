@@ -266,6 +266,87 @@ pub async fn get_gallery_sessions(State(state): State<AppState>) -> Json<Vec<Ses
     Json(tokio::task::spawn_blocking(move || compute_sessions(&mount)).await.unwrap_or_default())
 }
 
+// ─── Strongest auroras ─────────────────────────────────────
+
+/// `aurora_YYYYMMDD_HHMMSS_NNNNN...` → frame number NNNNN.
+pub fn parse_frame_number(name: &str) -> Option<u64> {
+    name.get(23..28).filter(|_| name.starts_with("aurora_")).and_then(|n| n.parse().ok())
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct BestAurora {
+    pub session: String,
+    /// JPEG to display (may be absent in RAW-only mode).
+    pub jpg: Option<String>,
+    /// DNG to edit.
+    pub dng: Option<String>,
+    pub score: f64,
+    pub color: String,
+    pub timestamp: String,
+}
+
+#[derive(Deserialize)]
+pub struct BestQuery {
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// Rank the saved frames of every session by aurora score (read from the
+/// `event.jsonl` log): the photographer picks the strongest ones to edit.
+pub fn best_auroras(mount: &FsPath, limit: usize) -> Vec<BestAurora> {
+    let sessions = session_names(mount);
+    let images: Vec<String> = list_images(mount).into_iter().map(|(i, _)| i.filename).collect();
+    let grouped = assign_images_to_sessions(&sessions, &images);
+    let mut out = Vec::new();
+
+    for (session, files) in grouped {
+        let Ok(log) = std::fs::read_to_string(mount.join("sessions").join(&session).join("event.jsonl")) else {
+            continue;
+        };
+        // frame number → (score, colour, timestamp)
+        let mut scores: BTreeMap<u64, (f64, String, String)> = BTreeMap::new();
+        for line in log.lines() {
+            let Ok(ev) = serde_json::from_str::<crate::core::models::SessionEvent>(line) else { continue };
+            if let Some(n) = ev.frame_number {
+                scores.insert(n, (ev.aurora_score, ev.aurora_color, ev.timestamp));
+            }
+        }
+        // Group the JPG and DNG of the same frame (stacked images excluded)
+        let mut frames: BTreeMap<u64, (Option<String>, Option<String>)> = BTreeMap::new();
+        for f in files.iter().filter(|f| !f.contains("_STACK")) {
+            let Some(n) = parse_frame_number(f) else { continue };
+            let entry = frames.entry(n).or_default();
+            match validate::extension_lower(f).as_deref() {
+                Some("dng") | Some("raw") => entry.1 = Some(f.clone()),
+                _ => entry.0 = Some(f.clone()),
+            }
+        }
+        for (n, (jpg, dng)) in frames {
+            if let Some((score, color, timestamp)) = scores.get(&n) {
+                if *score > 0.0 {
+                    out.push(BestAurora {
+                        session: session.clone(),
+                        jpg,
+                        dng,
+                        score: *score,
+                        color: color.clone(),
+                        timestamp: timestamp.clone(),
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(limit);
+    out
+}
+
+pub async fn get_best_auroras(State(state): State<AppState>, Query(q): Query<BestQuery>) -> Json<Vec<BestAurora>> {
+    let mount = mount_point(&state).await;
+    let limit = q.limit.unwrap_or(30).clamp(1, 500);
+    Json(tokio::task::spawn_blocking(move || best_auroras(&mount, limit)).await.unwrap_or_default())
+}
+
 // ─── Single image ──────────────────────────────────────────
 
 fn content_type_for(name: &str) -> &'static str {
@@ -576,6 +657,14 @@ mod tests {
         assert_eq!(g["2026-03-05_21-30"].len(), 3);
         assert_eq!(g["2026-03-06_22-00"], s(&["aurora_20260306_215800_00000.jpg", "aurora_20260306_230000_00001.dng"]));
         assert!(g["notes"].is_empty());
+    }
+
+    #[test]
+    fn frame_numbers() {
+        assert_eq!(parse_frame_number("aurora_20260305_213100_00042_AURORA.dng"), Some(42));
+        assert_eq!(parse_frame_number("aurora_20260305_213100_00042.jpg"), Some(42));
+        assert_eq!(parse_frame_number("aurora_2026.jpg"), None);
+        assert_eq!(parse_frame_number("IMG_20260305_213100_00042.jpg"), None);
     }
 
     #[test]

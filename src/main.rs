@@ -31,6 +31,13 @@ enum Commands {
     Simulate,
     /// Check the configuration file and print it (password masked)
     CheckConfig,
+    /// Measure the CPU cost of the image treatments on this machine
+    Bench {
+        #[arg(long, default_value_t = 4056)]
+        width: u32,
+        #[arg(long, default_value_t = 3040)]
+        height: u32,
+    },
 }
 
 fn config_dir(cli: &Cli) -> PathBuf {
@@ -79,7 +86,9 @@ async fn shutdown_signal() {
     }
 }
 
-#[tokio::main]
+// Two worker threads are plenty (camera and web requests mostly wait):
+// fewer threads, fewer CPU wake-ups on battery.
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -114,7 +123,12 @@ async fn main() -> anyhow::Result<()> {
 
             // Hardware adapters
             #[cfg(feature = "rpi")]
-            let camera = aurion::adapters::rpi::CameraRpi::new();
+            let camera = {
+                let cfg = state.config.read().await;
+                aurion::adapters::rpi::CameraRpi::new()
+                    .with_isp_denoise(&cfg.capture.denoise.isp_denoise)
+                    .with_awb(&cfg.capture.awb)
+            };
             #[cfg(not(feature = "rpi"))]
             let camera = aurion::adapters::pc::CameraMock::synthetic();
 
@@ -197,6 +211,10 @@ async fn main() -> anyhow::Result<()> {
         // ─── SIMULATE: PC mock simulation ───────────────────
         Commands::Simulate => {
             aurion::cli::simulate::run_simulation().await?;
+        }
+
+        Commands::Bench { width, height } => {
+            aurion::cli::bench::run_bench(width, height)?;
         }
 
         Commands::CheckConfig => {

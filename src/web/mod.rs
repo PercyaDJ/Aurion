@@ -84,6 +84,21 @@ pub struct AppState {
     /// Allow real system actions (shutdown, Wi-Fi, clock) through the
     /// privileged helper. False on PC builds and in tests.
     pub system_actions: bool,
+    /// Exposure of the last preview (default settings for dark frames).
+    pub last_preview: Arc<RwLock<Option<crate::core::models::ExposureSettings>>>,
+    /// Progress of a dark frame series: (done, total, last error).
+    pub darks: Arc<RwLock<Option<DarkProgress>>>,
+}
+
+/// Progress of the dark frame capture (see `api::capture_darks`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DarkProgress {
+    pub done: u32,
+    pub total: u32,
+    pub iso: u32,
+    pub shutter_us: u64,
+    pub running: bool,
+    pub error: Option<String>,
 }
 
 impl AppState {
@@ -102,6 +117,8 @@ impl AppState {
             update: Arc::new(UpdateSettings { target: None, restart: true }),
             camera_lock: Arc::new(Mutex::new(())),
             system_actions: cfg!(feature = "rpi"),
+            last_preview: Arc::new(RwLock::new(None)),
+            darks: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -145,6 +162,7 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/presets/:name/apply", post(api::apply_preset))
         .route("/api/presets/:name", delete(api::delete_preset))
         .route("/api/disconnect", post(api::disconnect))
+        .route("/api/darks", get(api::get_darks).post(api::capture_darks))
         .route("/api/storage", get(api::get_storage))
         .route("/api/logs", get(api::get_logs))
         .route("/api/diagnostics", get(api::get_diagnostics))
@@ -163,6 +181,7 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/gallery", get(gallery::get_gallery))
         .route("/api/gallery/sessions", get(gallery::get_gallery_sessions))
         .route("/api/gallery/stats", get(gallery::get_gallery_stats))
+        .route("/api/gallery/best", get(gallery::get_best_auroras))
         .route("/api/gallery/delete", post(gallery::delete_gallery_images))
         .route("/api/gallery/download-zip", post(gallery::download_gallery_zip))
         .route("/api/gallery/sessions/:name/download", get(gallery::download_gallery_session_zip))

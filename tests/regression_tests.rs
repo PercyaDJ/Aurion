@@ -160,3 +160,14 @@ fn legacy_config_file_loads_with_defaults() {
     assert!(cfg.detection.moon_mask_enabled);
     assert!(!cfg.detection.detection_capture_enabled);
 }
+
+/// Timelapse: the white balance must be fixed by default (auto WB made the
+/// colours flicker from one frame to the next, JPEG and DNG "as shot").
+#[test]
+fn white_balance_is_fixed_by_default() {
+    assert_eq!(AppConfig::default().capture.awb, "daylight");
+    let shipped = AppConfig::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/default.json")).unwrap();
+    assert_eq!(shipped.capture.awb, "daylight");
+    assert_eq!(shipped.capture.output_format, aurion::core::models::OutputFormat::RawAndJpg, "RAW kept for editing");
+    assert!(!shipped.capture.denoise.hot_pixels, "no costly JPEG re-encoding by default");
+}

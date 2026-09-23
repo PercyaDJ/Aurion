@@ -313,7 +313,9 @@ cmd_usb_add() {
   [[ "$fstype" == "ntfs" ]] && fstype=ntfs3
   opts=$(mount_opts "$fstype") || die "système de fichiers non géré: ${fstype:-inconnu} (formatez la clé en exFAT ou FAT32)"
   run mkdir -p "$MOUNT_POINT" 2>/dev/null || true
-  run systemd-mount --no-block --collect -t "$fstype" -o "$opts" "/dev/$dev" "$MOUNT_POINT"
+  # --fsck=yes: after a power cut the FAT/exFAT is checked and repaired
+  # before being mounted (needs dosfstools / exfatprogs).
+  run systemd-mount --no-block --collect --fsck=yes -t "$fstype" -o "$opts" "/dev/$dev" "$MOUNT_POINT"
 }
 
 cmd_mount_usb() {

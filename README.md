@@ -3,34 +3,33 @@
 Caméra autonome de capture d'aurores boréales pour Raspberry Pi 4/5 et HQ Camera (IMX477).
 Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit, puis on récupère les photos.
 
-## Installation sur le Raspberry Pi (5 minutes, sans compilation)
+## Installation sur le Raspberry Pi (clé en main, sans compilation)
 
-Prérequis : Raspberry Pi OS **64 bits** (Lite ou Desktop), caméra branchée, clé USB en exFAT ou FAT32.
+Prérequis : Raspberry Pi OS **64 bits** (Lite ou Desktop), caméra HQ branchée, clé USB en exFAT ou FAT32.
 
-**Option A : depuis le Pi (avec internet)**
+**Le plus simple : cloner la branche prête à l'emploi**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh | sudo bash
+git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion
+sudo ~/aurion/install.sh
 ```
-Dépôt privé : voir l'en-tête de `scripts/get.sh` (jeton GitHub en lecture seule).
+Mise à jour : `cd ~/aurion && git pull && sudo ./install.sh`. La branche `rpi` contient le binaire compilé ; elle est
+republiée automatiquement par GitHub Actions à chaque modification de `main`. Dépôt privé : mettre un jeton dans l'URL
+(`https://<JETON>@github.com/...`).
 
-**Option B : depuis le PC**
-1. Télécharger `aurion-<version>-rpi-arm64.tar.gz` dans l'onglet *Releases* du dépôt.
-2. Windows (PowerShell) : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz`
-   Linux / macOS : `scripts/deploy.sh pi@aurion.local aurion-1.5.0-rpi-arm64.tar.gz`
+**Ou le paquet Debian** (onglet *Releases*) : `sudo apt install ./aurion_1.5.0_arm64.deb`
 
-**Option C : à la main**
-```bash
-tar xzf aurion-1.5.0-rpi-arm64.tar.gz
-sudo ./aurion-1.5.0-rpi-arm64/install.sh
-```
+**Ou depuis un clone de `main`** : `sudo ./install.sh` télécharge l'archive précompilée de la dernière release
+(ou compile sur le Pi en dernier recours).
+
+**Ou depuis le PC** : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` (Windows),
+`scripts/deploy.sh pi@aurion.local` (Linux / macOS).
 
 À la fin, l'installeur affiche **le nom et le mot de passe du Wi-Fi** (générés pour cet appareil) : notez-les.
 Réinstaller par-dessus une version existante conserve la configuration.
 
-**Mise à jour sans câble ni SSH** : Diagnostics, *Mise à jour du logiciel*, choisir le fichier `aurion` de la nouvelle archive.
-Le binaire est vérifié (format, architecture, démarrage) avant d'être installé, et l'ancien est gardé en secours (`/opt/aurion/aurion.prev`).
+**Mise à jour sans câble ni SSH** : Diagnostics, *Mise à jour du logiciel*, fichier `aurion` de la nouvelle archive.
 
-Guide détaillé et dépannage : [DEPLOY_RPI.md](DEPLOY_RPI.md).
+Guide détaillé et dépannage : [DEPLOY_RPI.md](DEPLOY_RPI.md). Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
 
 ## Utilisation sur le terrain
 
@@ -78,18 +77,20 @@ Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && b
 | `tests/install_test.sh` | installation, mise à jour, réparation, désinstallation |
 | `tests/e2e/ui_test.mjs` | les 9 pages dans un navigateur réel |
 
+Détail, chiffres et couverture : [docs/TESTS.md](docs/TESTS.md).
+
 ## Architecture
 
 Hexagonale (ports / adapters) : le cœur est testable sans matériel.
 
 ```
 src/
-├── core/        config, validation, exposition, détection, machine d'état, orchestrateur
+├── core/        config, validation, exposition, détection, débruitage, JPEG/EXIF, orchestrateur
 ├── ports/       traits caméra, stockage, horloge, réseau, système
 ├── adapters/    pc/ (mocks) et rpi/ (rpicam-still, clé USB, hotspot, arrêt)
 ├── web/         API Axum, sécurité HTTP, galerie, portail captif, pages embarquées
 ├── sys.rs       commandes système (helper root via sudo, espace disque)
-└── cli/         simulation
+└── cli/         simulation, bench (coût des traitements sur le Pi)
 scripts/         install.sh, aurion-helper, package.sh, deploy.sh/.ps1, get.sh, setup.sh
 deploy/          aurion.service, règle udev de montage USB
 ```
@@ -105,16 +106,19 @@ Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Princip
 |---|---|---|---|
 | exposure | `iso_min` / `iso_max` | 100 / 3200 | plage ISO |
 | | `shutter_min_us` / `shutter_max_us` | 1 s / 30 s | plage d'obturation |
+| | `lock_in_run` | false | exposition figée pendant la capture (timelapse sans scintillement) |
 | detection | `detection_capture_enabled` | false | false = SAFE, true = FILTER |
 | | `roi_top_percent` | 65 | part haute de l'image analysée (50 à 99) |
 | | `consecutive_required` | 2 | détections consécutives pour confirmer |
-| capture | `output_format` | Jpg | `Jpg`, `RawDng` ou `RawAndJpg` |
+| capture | `output_format` | RawAndJpg | `Jpg`, `RawDng` ou `RawAndJpg` |
+| | `awb` | daylight | balance des blancs fixe (pas de scintillement en timelapse) |
+| | `denoise.stack_frames` | 0 | JPEG empilé toutes les N images (0 = non) |
 | | `capture_interval_secs` | 10 | cadence du timelapse |
 | time_range | `start` / `end` | 21:00 / 06:00 | plage horaire (heure locale) |
 | | `duration_hours` | null | minuteur, prioritaire sur la plage |
 | network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |
 
-Rapport de la revue de code et de sécurité : [docs/AUDIT.md](docs/AUDIT.md).
+Rapports (audit de code, audit de sécurité, tests, énergie, plan d'action) : [docs/](docs/README.md).
 
 ## Licence
 

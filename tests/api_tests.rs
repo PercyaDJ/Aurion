@@ -247,3 +247,62 @@ async fn captive_portal_redirects_every_os() {
         assert_eq!(res.header("location"), "http://192.168.4.1:8080/", "{}", probe);
     }
 }
+
+#[tokio::test]
+async fn dark_frames_rules() {
+    let t = common::env();
+    // No preview yet and no explicit settings
+    t.server.post("/api/darks").json(&json!({})).await.assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/darks").json(&json!({"count": 0, "iso": 800, "shutter_us": 5_000_000})).await
+        .assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/darks").json(&json!({"count": 50, "iso": 800, "shutter_us": 5_000_000})).await
+        .assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/darks").json(&json!({"iso": 800, "shutter_us": 999_000_000})).await
+        .assert_status(StatusCode::BAD_REQUEST);
+    // Never during the night
+    *t.state.phase.write().await = aurion::core::models::Phase::Run;
+    t.server.post("/api/darks").json(&json!({"iso": 800, "shutter_us": 5_000_000})).await
+        .assert_status(StatusCode::CONFLICT);
+    // Status endpoint
+    t.server.get("/api/darks").await.assert_status_ok();
+}
+
+#[tokio::test]
+async fn dark_frames_start_in_background() {
+    let t = common::env();
+    let res = t.server.post("/api/darks").json(&json!({"count": 2, "iso": 800, "shutter_us": 1_000_000})).await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    assert_eq!(body["total"], 2);
+    assert_eq!(body["running"], true);
+    // Second series refused while the first one runs (or fails fast without camera)
+    for _ in 0..50 {
+        let st: Value = t.server.get("/api/darks").await.json();
+        if st["running"] == false {
+            // No camera on the test machine: a clear error is reported
+            assert!(st["error"].is_string());
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("dark series never finished");
+}
+
+#[tokio::test]
+async fn best_auroras_endpoint() {
+    let t = common::env();
+    let dir = t.add_session("2026-03-05_21-30");
+    let ev = |n: u64, score: f64| format!(
+        "{{\"timestamp\":\"2026-03-05T22:0{}:00\",\"phase\":\"Run\",\"capture_mode\":\"SAFE\",\"exposure_us\":5000000,\"iso\":800,\"format\":\"RawAndJpg\",\"roi_excluded_percent\":35,\"aurora_score\":{},\"aurora_detected\":true,\"aurora_color\":\"green\",\"consecutive_hits\":0,\"moon_mask_active\":false,\"frame_number\":{}}}\n", n, score, n);
+    std::fs::write(dir.join("event.jsonl"), format!("{}{}{}", ev(0, 1.2), ev(1, 3.5), ev(2, 0.0))).unwrap();
+    for n in 0..3 {
+        t.add_file(&format!("aurora_20260305_220{}00_0000{}_AURORA.jpg", n, n), b"j");
+        t.add_file(&format!("aurora_20260305_220{}00_0000{}_AURORA.dng", n, n), b"d");
+    }
+    let best: Value = t.server.get("/api/gallery/best").await.json();
+    let arr = best.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "score 0 excluded");
+    assert_eq!(arr[0]["score"], 3.5);
+    assert_eq!(arr[0]["dng"], "aurora_20260305_220100_00001_AURORA.dng");
+    assert_eq!(arr[0]["jpg"], "aurora_20260305_220100_00001_AURORA.jpg");
+}

@@ -3,7 +3,6 @@ use tracing::{info, error};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
-use image::GenericImageView;
 use crate::core::models::{CaptureFormat, CaptureFrame, ExposureSettings, FrameMetadata};
 use crate::ports::camera::{CameraError, CameraPort};
 
@@ -14,7 +13,14 @@ use crate::ports::camera::{CameraError, CameraPort};
 pub struct CameraRpi {
     /// Whether the camera has been detected
     connected: bool,
+    /// `rpicam-still --denoise` mode (ISP noise reduction)
+    isp_denoise: String,
+    /// `rpicam-still --awb` mode
+    awb: String,
 }
+
+/// Width used when a capture has no EXIF thumbnail and must be decoded.
+const ANALYSIS_MAX_WIDTH: u32 = 640;
 
 impl Default for CameraRpi {
     fn default() -> Self {
@@ -37,7 +43,23 @@ impl CameraRpi {
             error!("CameraRpi: rpicam-still NOT found — camera unavailable");
         }
 
-        Self { connected }
+        Self { connected, isp_denoise: "cdn_hq".into(), awb: "daylight".into() }
+    }
+
+    /// Choose the white balance mode (validated by the config).
+    pub fn with_awb(mut self, mode: &str) -> Self {
+        if crate::core::config::AWB_MODES.contains(&mode) {
+            self.awb = mode.to_string();
+        }
+        self
+    }
+
+    /// Choose the ISP denoise mode (validated by the config).
+    pub fn with_isp_denoise(mut self, mode: &str) -> Self {
+        if crate::core::config::ISP_DENOISE_MODES.contains(&mode) {
+            self.isp_denoise = mode.to_string();
+        }
+        self
     }
 
     fn build_capture_command(
@@ -58,9 +80,15 @@ impl CameraRpi {
         let gain = exposure.iso as f64 / 100.0;
         cmd.arg("--gain").arg(format!("{:.1}", gain));
 
-        // Auto white balance (safe default)
-        cmd.arg("--awb").arg("auto");
+        // Fixed white balance by default: same colours on every frame
+        cmd.arg("--awb").arg(&self.awb);
         cmd.arg("--ev").arg("0");
+
+        // Colour noise reduction of the ISP (applies to the JPEG, not to the DNG)
+        cmd.arg("--denoise").arg(&self.isp_denoise);
+        // Small JPEG embedded in the EXIF block: analysed instead of the
+        // 12 MP image (≈150× less CPU per frame, i.e. battery life)
+        cmd.arg("--thumb").arg("320:240:70");
 
         if raw {
             cmd.arg("--raw");
@@ -116,17 +144,13 @@ impl CameraPort for CameraRpi {
         let data = std::fs::read(&tmp_path)
             .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_path, e)))?;
 
-        // Decode to get dimensions
-        let img = image::load_from_memory(&data)
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
-
-        let rgb = img.to_rgb8();
-        let (w, h) = rgb.dimensions();
-
-        info!("CameraRpi: captured JPG {}x{}", w, h);
+        let (rgb, w, h, from_thumb) = crate::core::jpeg::decode_for_analysis(&data, ANALYSIS_MAX_WIDTH)
+            .ok_or_else(|| CameraError::CaptureFailed("JPEG illisible".into()))?;
+        info!("CameraRpi: captured JPG ({} bytes), analysis {}x{}{}", data.len(), w, h,
+            if from_thumb { " (EXIF thumbnail)" } else { "" });
 
         Ok(CaptureFrame {
-            data: rgb.into_raw(),
+            data: rgb,
             width: w,
             height: h,
             format: CaptureFormat::Jpg,
@@ -176,19 +200,13 @@ impl CameraPort for CameraRpi {
         let dng_data = std::fs::read(&tmp_dng)
             .map_err(|e| CameraError::CaptureFailed(format!("DNG read failed from {:?}: {}", tmp_dng, e)))?;
 
-        // Read actual dimensions from the accompanying JPG
-        let jpg_data = std::fs::read(&tmp_jpg).ok();
-        let (w, h) = jpg_data
-            .and_then(|d| image::load_from_memory(&d).ok())
-            .map(|img| img.dimensions())
-            .unwrap_or((4056, 3040)); // fallback: IMX477 full res
+        info!("CameraRpi: captured RAW DNG ({} bytes)", dng_data.len());
 
-        info!("CameraRpi: captured RAW DNG ({} bytes, {}x{})", dng_data.len(), w, h);
-
+        // No pixel decoding here: the DNG is saved as is, analysis uses the JPG.
         Ok(CaptureFrame {
-            data: dng_data.clone(),
-            width: w,
-            height: h,
+            data: Vec::new(),
+            width: 0,
+            height: 0,
             format: CaptureFormat::RawDng,
             metadata: FrameMetadata {
                 iso: exposure.iso,
@@ -215,13 +233,11 @@ impl CameraPort for CameraRpi {
         let jpg_data = std::fs::read(&tmp_jpg)
             .map_err(|e| CameraError::CaptureFailed(format!("JPG read failed from {:?}: {}", tmp_jpg, e)))?;
 
-        let img = image::load_from_memory(&jpg_data)
-            .map_err(|e| CameraError::CaptureFailed(e.to_string()))?;
-        let rgb = img.to_rgb8();
-        let (w, h) = rgb.dimensions();
+        let (rgb, w, h, _) = crate::core::jpeg::decode_for_analysis(&jpg_data, ANALYSIS_MAX_WIDTH)
+            .ok_or_else(|| CameraError::CaptureFailed("JPEG illisible".into()))?;
 
         let jpg = CaptureFrame {
-            data: rgb.into_raw(),
+            data: rgb,
             width: w,
             height: h,
             format: CaptureFormat::Jpg,

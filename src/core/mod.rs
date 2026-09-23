@@ -6,3 +6,5 @@ pub mod exposure;
 pub mod session_logger;
 pub mod orchestrator;
 pub mod validate;
+pub mod denoise;
+pub mod jpeg;

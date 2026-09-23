@@ -1,0 +1,59 @@
+# Stratégie et résultats des tests
+
+Résultat au 23/09/2026 : **tous les tests passent.**
+
+| Type de test | Où | Nombre | Ce qui est vérifié |
+|---|---|---|---|
+| Unitaires | `src/**` (`#[cfg(test)]`) | 95 | validation des entrées, config, exposition, détection, débruitage, JPEG/EXIF, machine d'état, sécurité HTTP, stockage, parseurs |
+| Intégration | `tests/integration_tests.rs` | 7 | cycle de vie complet avec les simulateurs |
+| Contrat d'API | `tests/api_tests.rs` | 20 | chaque route utilisée par les pages répond avec les champs attendus ; règles métier (darks, presets, heure) |
+| Sécurité | `tests/security_tests.rs` | 19 | traversée de chemin, injection Wi-Fi, CSRF, DNS rebinding, fuite du mot de passe, taille des requêtes, mise à jour OTA |
+| Galerie | `tests/gallery_tests.rs` | 9 | liste, miniatures, sessions, ZIP (contenu vérifié), suppression |
+| Simulation | `tests/simulation_tests.rs` | 16 | nuits entières en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne ou absente, disque plein, RAW, rechargement à chaud, hotspot, captures façon Pi (JPEG 1280×960 + EXIF), pixels chauds, empilement, verrou d'exposition, classement des aurores |
+| Non-régression | `tests/regression_tests.rs` | 11 | un test par bug corrigé + valeurs de référence de la détection (écart toléré 5 %) |
+| Helper root | `tests/helper_test.sh` | 42 cas | arguments valides et malveillants, commandes générées, crochets ignorés sous sudo |
+| Installeur | `tests/install_test.sh` | 38 contrôles | installation dans une fausse racine, mise à jour, mode paquet, réparation d'une config invalide, désinstallation |
+| Interface (bout en bout) | `tests/e2e/ui_test.mjs` | 24 étapes | les 9 pages dans Chromium, format téléphone : aucune erreur JavaScript, réglages enregistrés sur disque, presets, galerie, meilleures aurores, darks, lancement de la nuit |
+| Fumée ARM | manuel (qemu) | - | le binaire arm64 final démarre, sert les pages et l'API, bloque le CSRF |
+| Analyse statique | clippy, shellcheck | - | 0 avertissement en mode `-D warnings` |
+| Dépendances | cargo audit | 233 crates | aucune vulnérabilité ; voir AUDIT_SECURITE.md |
+| Couverture | cargo llvm-cov | - | 82,4 % des lignes |
+
+Total Rust : **177 tests**, dont 16 simulations de nuit qui s'exécutent en environ 25 s grâce au temps virtuel
+(`tokio::time::pause` : chaque attente de l'orchestrateur avance l'horloge instantanément).
+
+## Lancer les tests
+
+```bash
+cargo test                                          # 177 tests Rust
+cargo clippy --all-targets -- -D warnings           # analyse statique (ajouter --features rpi)
+bash tests/helper_test.sh                           # helper root
+sudo -E bash tests/install_test.sh target/debug/aurion   # installeur (fausse racine, root requis)
+cd tests/e2e && npm install && node ui_test.mjs     # navigateur (après cargo build)
+cargo llvm-cov --summary-only                       # couverture (cargo install cargo-llvm-cov)
+cargo audit                                         # dépendances (cargo install cargo-audit)
+```
+
+La CI GitHub Actions (`.github/workflows/ci.yml`) exécute tout cela à chaque push, puis construit l'archive et le
+paquet Raspberry Pi.
+
+## Principes
+
+- **Aucun test ne touche la machine** : dossiers temporaires, simulateurs de caméra / stockage / réseau / système,
+  helper en simulation, installeur dans une fausse racine.
+- **Temps virtuel** pour l'orchestrateur : horloge injectée (`TokioClock`), nuits de 8 h testées en quelques secondes.
+- **Injection de pannes** : caméra qui échoue N fois, caméra absente, clé qui se remplit, config invalide.
+- **Valeurs de référence** : les scores de détection sur ciel synthétique sont figés ; tout changement d'algorithme se voit.
+- **Un test par bug** : chaque défaut corrigé a son test de non-régression.
+
+## Ce que les tests ne couvrent pas (matériel requis)
+
+| Point | Comment le valider |
+|---|---|
+| `rpicam-still` réel (options `--thumb`, `--denoise`, `--awb`, `--raw`) | preview puis courte nuit, vérifier les DNG et la miniature de galerie |
+| Hotspot NetworkManager et portail captif | se connecter au Wi-Fi « Aurion » depuis iOS et Android |
+| Montage USB udev + réparation `--fsck` | brancher une clé, débrancher l'alimentation pendant une capture, rebrancher |
+| Économie d'énergie (`config.txt`) | mesurer le courant avec un testeur USB avant / après |
+| Temps de traitement sur Pi | `/opt/aurion/aurion bench` |
+
+Protocole conseillé pour le premier essai : voir PLAN_ACTION.md, tâche V1.

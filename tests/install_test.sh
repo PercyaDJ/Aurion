@@ -67,6 +67,9 @@ check "surveillance alimentation corrigée (bit 0 seulement)" 'grep -q "t & 0x1"
 check "journald en RAM" 'grep -q "Storage=volatile" "$R/etc/systemd/journald.conf.d/aurion.conf"'
 check "service activé et démarré" 'grep -q "systemctl enable aurion.service" "$WORK/calls.log" && grep -q "systemd-run.*restart aurion.service" "$WORK/calls.log"'
 check "paquets installés" 'grep -q "apt-get install.*rpicam-apps" "$WORK/calls.log"'
+check "outils de réparation de la clé USB installés" 'grep -q "apt-get install.*dosfstools exfatprogs" "$WORK/calls.log"'
+check "économie d énergie : Bluetooth, audio, LED" 'grep -q "^dtoverlay=disable-bt" "$R/boot/firmware/config.txt" && grep -q "^dtparam=audio=off" "$R/boot/firmware/config.txt" && grep -q "^dtparam=act_led_trigger=none" "$R/boot/firmware/config.txt"'
+check "services inutiles désactivés" 'grep -q "systemctl disable --now bluetooth.service" "$WORK/calls.log"'
 
 echo "▶ réinstallation (mise à jour)"
 bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody >"$WORK/out2.log" 2>&1 || { cat "$WORK/out2.log"; exit 1; }
@@ -75,6 +78,12 @@ PW2=$(grep -o '"password": *"[^"]*"' "$CFG" | sed 's/.*: *"//; s/"$//')
 check "mot de passe conservé" '[[ "$PW" == "$PW2" ]]'
 check "ancienne version gardée en secours" '[[ -f "$R/opt/aurion/aurion.prev" ]]'
 check "pas de doublon dans config.txt" '[[ $(grep -c "^dtparam=watchdog=on" "$R/boot/firmware/config.txt") -eq 1 ]]'
+check "bloc énergie non dupliqué" '[[ $(grep -c "^dtoverlay=disable-bt" "$R/boot/firmware/config.txt") -eq 1 ]]'
+
+echo "▶ mode paquet (.deb) : pas d apt"
+: >"$WORK/calls.log"
+bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --no-packages >"$WORK/out2b.log" 2>&1 || { cat "$WORK/out2b.log"; exit 1; }
+check "aucun appel apt en mode paquet" '! grep -q "^apt-get" "$WORK/calls.log"'
 check "pas de doublon noatime" '! grep -q "noatime,noatime" "$R/etc/fstab"'
 
 echo "▶ configuration invalide réparée"
@@ -89,6 +98,7 @@ check "service supprimé" '[[ ! -f "$R/etc/systemd/system/aurion.service" ]]'
 check "sudoers supprimé" '[[ ! -f "$R/etc/sudoers.d/aurion" ]]'
 check "helper supprimé" '[[ ! -f "$R/usr/local/sbin/aurion-helper" ]]'
 check "configuration conservée" '[[ -f "$CFG" ]]'
+check "bloc énergie retiré de config.txt" '! grep -q "disable-bt" "$R/boot/firmware/config.txt" && grep -q "^arm_64bit=1" "$R/boot/firmware/config.txt"'
 
 echo
 if [[ $fails -eq 0 ]]; then echo "install.sh : tous les contrôles OK"; else echo "install.sh : $fails échec(s)"; exit 1; fi

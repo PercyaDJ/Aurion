@@ -68,8 +68,20 @@ impl StoragePort for StorageRpi {
                 StorageError::WriteFailed(e.to_string())
             }
         };
-        std::fs::write(&tmp, data).map_err(to_err)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp).map_err(to_err)?;
+            f.write_all(data).map_err(to_err)?;
+            // Data on the key BEFORE the file gets its final name: after a
+            // power cut an image is either complete or absent, never half.
+            f.sync_all().map_err(to_err)?;
+        }
         std::fs::rename(&tmp, &full_path).map_err(to_err)?;
+        if let Some(parent) = full_path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
         Ok(())
     }
 

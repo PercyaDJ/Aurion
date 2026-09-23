@@ -10,6 +10,8 @@
 #   --user <nom>         utilisateur du service (défaut : celui qui lance sudo)
 #   --country <XX>       pays Wi-Fi (défaut : FR)
 #   --no-hardening       ne pas optimiser le système pour la carte SD
+#   --no-power-saving    garder Bluetooth, audio et LED actifs
+#   --no-packages        ne pas lancer apt (installation depuis le paquet .deb)
 #   --no-start           ne pas démarrer le service à la fin
 #
 # Réinstaller par-dessus une version existante conserve la configuration
@@ -31,6 +33,8 @@ BINARY=""
 SERVICE_USER="${SUDO_USER:-}"
 COUNTRY="FR"
 HARDENING=1
+POWER_SAVING=1
+PACKAGES=1
 START=1
 UNINSTALL=0
 
@@ -44,10 +48,12 @@ while [[ $# -gt 0 ]]; do
     --user) SERVICE_USER="$2"; shift 2 ;;
     --country) COUNTRY="$2"; shift 2 ;;
     --no-hardening) HARDENING=0; shift ;;
+    --no-power-saving) POWER_SAVING=0; shift ;;
+    --no-packages) PACKAGES=0; shift ;;
     --no-start) START=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     -y|--yes) shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "Option inconnue : $1" ;;
   esac
 done
@@ -95,7 +101,8 @@ preflight() {
 
 install_packages() {
   info "Installation des paquets système"
-  local pkgs=(rpicam-apps iw nftables rfkill)
+  # dosfstools / exfatprogs: repair of the USB key after a power cut
+  local pkgs=(rpicam-apps iw nftables rfkill dosfstools exfatprogs)
   if systemctl is-active --quiet NetworkManager 2>/dev/null; then
     pkgs+=(dnsmasq-base)
   else
@@ -343,6 +350,40 @@ EOF
   systemctl enable --now aurion-flush.timer aurion-power-watch.timer >/dev/null 2>&1 || true
 }
 
+# ─── Battery: switch off what a field camera does not need ───
+
+POWER_BEGIN="# >>> Aurion : économie d'énergie (retiré par install.sh --uninstall)"
+POWER_END="# <<< Aurion"
+
+power_saving() {
+  info "Économie d'énergie : Bluetooth, audio et LED désactivés"
+  local boot_cfg="$R/boot/firmware/config.txt"
+  [[ -f "$boot_cfg" ]] || boot_cfg="$R/boot/config.txt"
+  if [[ -f "$boot_cfg" ]]; then
+    backup_file "$boot_cfg"
+    # Replace a previous block (idempotent)
+    sed -i "/^$POWER_BEGIN/,/^$POWER_END/d" "$boot_cfg"
+    cat >>"$boot_cfg" <<CFG
+$POWER_BEGIN
+# Bluetooth et audio inutiles sur le terrain
+dtoverlay=disable-bt
+dtparam=audio=off
+# LED éteintes : moins de consommation, aucune lumière parasite près de l'objectif
+dtparam=act_led_trigger=none
+dtparam=act_led_activelow=off
+dtparam=pwr_led_trigger=none
+dtparam=pwr_led_activelow=off
+$POWER_END
+CFG
+  else
+    warn "config.txt introuvable : économie d'énergie matérielle non appliquée"
+  fi
+  local svc
+  for svc in bluetooth.service hciuart.service ModemManager.service triggerhappy.service triggerhappy.socket; do
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+  done
+}
+
 # ─── Uninstall ───────────────────────────────────────────────
 
 uninstall() {
@@ -352,6 +393,10 @@ uninstall() {
   "$HELPER" ap-stop >/dev/null 2>&1 || true
   rm -f "$R"/etc/systemd/system/aurion.service "$R"/etc/systemd/system/aurion-flush.* "$R"/etc/systemd/system/aurion-power-watch.*
   rm -f "$R/etc/sudoers.d/aurion" "$R/etc/udev/rules.d/99-aurion-usb.rules" "$R/etc/aurion.env" "$HELPER" "$R/usr/local/sbin/aurion-power-watch"
+  local bc
+  for bc in "$R/boot/firmware/config.txt" "$R/boot/config.txt"; do
+    [[ -f "$bc" ]] && sed -i "/^$POWER_BEGIN/,/^$POWER_END/d" "$bc"
+  done
   rm -f "$R/etc/NetworkManager/dnsmasq-shared.d/aurion-captive.conf" "$R/etc/systemd/journald.conf.d/aurion.conf" "$R/etc/systemd/system.conf.d/aurion-watchdog.conf"
   nmcli connection delete aurion-ap >/dev/null 2>&1 || true
   systemctl daemon-reload
@@ -376,13 +421,14 @@ main() {
   systemctl is-active --quiet aurion.service 2>/dev/null && was_running=1
   [[ $was_running -eq 1 ]] && { info "Arrêt de la version en cours"; systemctl stop aurion.service || true; }
 
-  install_packages
+  [[ $PACKAGES -eq 1 ]] && install_packages
   install_files
   install_sudoers
   install_usb_automount
   install_network
   install_service
   [[ $HARDENING -eq 1 ]] && harden_system
+  [[ $POWER_SAVING -eq 1 ]] && power_saving
 
   local ssid password
   ssid=$(grep -o '"ssid": *"[^"]*"' "$CONFIG_DIR/aurion.json" | sed 's/.*: *"//; s/"$//')

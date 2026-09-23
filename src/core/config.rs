@@ -89,6 +89,10 @@ pub struct ExposureConfig {
     /// Reject pixels above this value (0-255) from metering (default 250.0)
     #[serde(default = "default_saturation_reject")]
     pub saturation_reject: f64,
+    /// Freeze the exposure once the capture (RUN) has started: no flicker
+    /// in timelapses. Default false (slow adaptation, 3-5 % per frame).
+    #[serde(default)]
+    pub lock_in_run: bool,
 }
 
 fn default_detect_alpha() -> f64 { 0.08 }
@@ -150,9 +154,66 @@ pub struct CaptureConfig {
     pub focal_length_mm: f64,
     #[serde(default = "default_capture_interval")]
     pub capture_interval_secs: u32,
+    /// Noise reduction applied to the saved JPEG images.
+    #[serde(default)]
+    pub denoise: DenoiseConfig,
+    /// White balance of the camera. A fixed mode ("daylight") keeps the
+    /// same colours on every frame: no colour flicker in timelapses, and
+    /// the DNG "as shot" white balance is identical across the sequence.
+    #[serde(default = "default_awb")]
+    pub awb: String,
 }
 
+fn default_awb() -> String { "daylight".into() }
+
+/// Accepted values for `rpicam-still --awb`.
+pub const AWB_MODES: [&str; 7] = ["daylight", "cloudy", "auto", "incandescent", "tungsten", "fluorescent", "indoor"];
+
 fn default_capture_interval() -> u32 { 10 }
+
+/// Noise reduction settings (see `core::denoise`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DenoiseConfig {
+    /// Remove isolated hot pixels from the saved JPEG (default false: it
+    /// costs a full decode + re-encode per frame, i.e. battery and sensor
+    /// heat; the DNG is never modified).
+    #[serde(default)]
+    pub hot_pixels: bool,
+    /// Brightness excess over the neighbours that marks a hot pixel (default 40).
+    #[serde(default = "default_hot_pixel_threshold")]
+    pub hot_pixel_threshold: u8,
+    /// Also save an average of N consecutive frames (`_STACKn.jpg`), 0 = off.
+    /// 4 to 8 frames divide the noise by 2 to 3 (fast-moving aurora gets blurred).
+    #[serde(default)]
+    pub stack_frames: u32,
+    /// Denoise of the camera ISP: "cdn_hq" (best), "cdn_fast", "cdn_off", "off", "auto".
+    #[serde(default = "default_isp_denoise")]
+    pub isp_denoise: String,
+}
+
+fn default_hot_pixel_threshold() -> u8 { 40 }
+fn default_isp_denoise() -> String { "cdn_hq".into() }
+
+/// Accepted values for `rpicam-still --denoise`.
+pub const ISP_DENOISE_MODES: [&str; 5] = ["auto", "off", "cdn_off", "cdn_fast", "cdn_hq"];
+
+impl Default for DenoiseConfig {
+    fn default() -> Self {
+        Self {
+            hot_pixels: false,
+            hot_pixel_threshold: default_hot_pixel_threshold(),
+            stack_frames: 0,
+            isp_denoise: default_isp_denoise(),
+        }
+    }
+}
+
+impl DenoiseConfig {
+    /// Does any treatment require decoding the full-resolution image?
+    pub fn needs_full_decode(&self) -> bool {
+        self.hot_pixels || self.stack_frames >= 2
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRangeConfig {
@@ -322,6 +383,28 @@ impl AppConfig {
                 "L'intervalle de capture ne peut pas dépasser l'intervalle d'observation".into(),
             ));
         }
+        if self.capture.denoise.stack_frames == 1 || self.capture.denoise.stack_frames > 16 {
+            return Err(ConfigError::ValidationError(
+                "L'empilement doit être désactivé (0) ou compter entre 2 et 16 images".into(),
+            ));
+        }
+        if !ISP_DENOISE_MODES.contains(&self.capture.denoise.isp_denoise.as_str()) {
+            return Err(ConfigError::ValidationError(format!(
+                "Débruitage capteur inconnu (valeurs : {})",
+                ISP_DENOISE_MODES.join(", ")
+            )));
+        }
+        if !AWB_MODES.contains(&self.capture.awb.as_str()) {
+            return Err(ConfigError::ValidationError(format!(
+                "Balance des blancs inconnue (valeurs : {})",
+                AWB_MODES.join(", ")
+            )));
+        }
+        if self.capture.denoise.hot_pixel_threshold < 10 {
+            return Err(ConfigError::ValidationError(
+                "Le seuil des pixels chauds doit être d'au moins 10".into(),
+            ));
+        }
         if self.capture.focal_length_mm <= 0.0 {
             return Err(ConfigError::ValidationError(
                 "La longueur focale doit être > 0 mm".into(),
@@ -395,6 +478,7 @@ impl Default for AppConfig {
                 target_percentile: 0.80,
                 target_brightness: 60.0,
                 saturation_reject: 250.0,
+                lock_in_run: false,
             },
             detection: DetectionConfig {
                 roi_top_percent: 65,
@@ -417,6 +501,8 @@ impl Default for AppConfig {
                 output_format: OutputFormat::RawDng,
                 focal_length_mm: 2.7,
                 capture_interval_secs: 10,
+                denoise: DenoiseConfig::default(),
+                awb: default_awb(),
             },
             time_range: TimeRangeConfig {
                 start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
@@ -671,6 +757,23 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/default.json");
         let cfg = AppConfig::load(&path).expect("config/default.json doit être valide");
         assert_eq!(cfg.web.port, 8080);
+    }
+
+    #[test]
+    fn test_denoise_validation() {
+        let mut config = AppConfig::default();
+        assert!(!config.capture.denoise.hot_pixels, "off by default (battery, sensor heat)");
+        config.capture.awb = "rainbow".into();
+        assert!(config.validate().is_err());
+        config.capture.awb = "daylight".into();
+        config.capture.denoise.stack_frames = 1;
+        assert!(config.validate().is_err());
+        config.capture.denoise.stack_frames = 17;
+        assert!(config.validate().is_err());
+        config.capture.denoise.stack_frames = 4;
+        assert!(config.validate().is_ok());
+        config.capture.denoise.isp_denoise = "magic; rm -rf /".into();
+        assert!(config.validate().is_err());
     }
 
     #[test]

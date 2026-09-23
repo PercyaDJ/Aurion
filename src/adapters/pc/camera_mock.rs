@@ -29,7 +29,16 @@ pub struct CameraMock {
     failures_left: Mutex<u32>,
     /// Total number of capture attempts.
     attempts: Mutex<u32>,
+    /// Produce Pi-like captures: full-resolution JPEG (with hot pixels) in
+    /// `raw_bytes` + EXIF thumbnail used for analysis.
+    jpeg_output: bool,
 }
+
+/// Size of the full-resolution JPEG produced in `jpeg_output` mode.
+const MOCK_FULL_W: u32 = 1280;
+const MOCK_FULL_H: u32 = 960;
+/// Hot pixels added to each full-resolution mock capture.
+pub const MOCK_HOT_PIXELS: usize = 50;
 
 impl CameraMock {
     pub fn new(test_dir: PathBuf) -> Self {
@@ -40,7 +49,38 @@ impl CameraMock {
             pattern: SkyPattern::Intermittent,
             failures_left: Mutex::new(0),
             attempts: Mutex::new(0),
+            jpeg_output: false,
         }
+    }
+
+    /// Produce captures like `rpicam-still` (see [`CameraMock::jpeg_output`]).
+    pub fn with_jpeg_output(mut self) -> Self {
+        self.jpeg_output = true;
+        self
+    }
+
+    /// Turn a 320×240 synthetic frame into a Pi-like capture.
+    fn to_pi_capture(&self, mut frame: CaptureFrame, index: usize) -> CaptureFrame {
+        use crate::core::jpeg;
+        let small = image::RgbImage::from_raw(frame.width, frame.height, frame.data.clone())
+            .expect("synthetic frame size");
+        let mut full = image::imageops::resize(&small, MOCK_FULL_W, MOCK_FULL_H, image::imageops::FilterType::Triangle);
+        // Hot pixels: same sensor positions on every frame
+        let mut rng = crate::core::denoise::XorShift::new(42);
+        for _ in 0..MOCK_HOT_PIXELS {
+            let x = 4 + rng.next_u32() % (MOCK_FULL_W - 8);
+            let y = 4 + rng.next_u32() % (MOCK_FULL_H - 8);
+            full.put_pixel(x, y, image::Rgb([255, 255, 255]));
+        }
+        let _ = index;
+        let full_jpeg = crate::core::orchestrator::encode_jpeg(full.as_raw(), MOCK_FULL_W, MOCK_FULL_H).expect("encode");
+        let thumb = crate::core::orchestrator::encode_jpeg(&frame.data, frame.width, frame.height).expect("encode");
+        frame.raw_bytes = jpeg::insert_segment(&full_jpeg, &jpeg::build_exif_with_thumbnail(&thumb, true));
+        let (rgb, w, h, _) = jpeg::decode_for_analysis(&frame.raw_bytes, 640).expect("decode");
+        frame.data = rgb;
+        frame.width = w;
+        frame.height = h;
+        frame
     }
 
     /// Create a mock that generates synthetic frames (no test data needed).
@@ -191,7 +231,8 @@ impl CameraPort for CameraMock {
         } else {
             // No test data: use synthetic frame
             info!("CameraMock: generating synthetic frame #{}", index);
-            Ok(self.generate_synthetic_frame(exposure, index))
+            let frame = self.generate_synthetic_frame(exposure, index);
+            Ok(if self.jpeg_output { self.to_pi_capture(frame, index) } else { frame })
         }
     }
 
@@ -214,7 +255,7 @@ impl CameraPort for CameraMock {
             height: raw.height,
             format: CaptureFormat::Jpg,
             metadata: raw.metadata.clone(),
-            raw_bytes: vec![],
+            raw_bytes: raw.raw_bytes.clone(),
         };
         Ok((raw, jpg))
     }

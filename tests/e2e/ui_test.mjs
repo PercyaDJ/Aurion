@@ -29,7 +29,12 @@ const cfg = JSON.parse(fs.readFileSync(path.join(repo, 'config/default.json'), '
 cfg.storage.mount_point = capture;
 cfg.web.port = port;
 fs.writeFileSync(path.join(configDir, 'aurion.json'), JSON.stringify(cfg, null, 2));
-fs.writeFileSync(path.join(capture, 'sessions/2026-03-05_21-30/event.jsonl'), '{"aurora_detected":true}\n');
+const ev = (n, score) => JSON.stringify({
+  timestamp: `2026-03-05T2${n + 1}:31:00`, phase: 'Run', capture_mode: 'SAFE', exposure_us: 5000000, iso: 800,
+  format: 'Jpg', roi_excluded_percent: 35, aurora_score: score, aurora_detected: score > 1, aurora_color: 'green',
+  consecutive_hits: 0, moon_mask_active: false, frame_number: n,
+});
+fs.writeFileSync(path.join(capture, 'sessions/2026-03-05_21-30/event.jsonl'), ev(0, 1.1) + '\n' + ev(1, 4.2) + '\n');
 
 // ─── Server ─────────────────────────────────────────────────
 const server = spawn(binary, ['--config-dir', configDir, 'serve', '--port', String(port)], {
@@ -140,6 +145,27 @@ try {
     assert(saved.network.password === 'NouveauMotDePasse2026', 'password not saved');
   });
 
+  await step('réglages photo : balance des blancs, verrou d\'exposition, empilement', async () => {
+    await page.goto(base + '/settings_advanced.html');
+    await page.waitForLoadState('networkidle');
+    assert(await page.inputValue('#awbMode') === 'daylight', 'daylight by default');
+    await page.selectOption('#awbMode', 'cloudy');
+    await page.check('#lockInRun');
+    await page.fill('#stackFrames', '4');
+    await page.evaluate(() => saveAdvanced());
+    await page.waitForSelector('.toast.success');
+    const saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
+    assert(saved.capture.awb === 'cloudy' && saved.exposure.lock_in_run === true && saved.capture.denoise.stack_frames === 4,
+      JSON.stringify([saved.capture.awb, saved.exposure.lock_in_run, saved.capture.denoise]));
+  });
+
+  await step('preview : darks refusés sans preview préalable', async () => {
+    await page.goto(base + '/preview.html');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => captureDarks());
+    await page.waitForSelector('.toast.error');
+  });
+
   await step('presets : créer, appliquer, supprimer', async () => {
     await page.goto(base + '/presets.html');
     await page.waitForSelector('.preset-card');
@@ -164,6 +190,15 @@ try {
     await page.waitForFunction(() => document.getElementById('lightboxImg').naturalWidth > 0);
     await page.evaluate(() => closeLightbox());
     await page.evaluate(() => switchTab ? switchTab('sessions') : null).catch(() => {});
+  });
+
+  await step('galerie : onglet meilleures aurores', async () => {
+    await page.goto(base + '/gallery.html');
+    await page.waitForSelector('.gallery-item');
+    await page.click('#tabBest');
+    await page.waitForSelector('#bestContent .gallery-item[data-best]');
+    const first = await page.locator('#bestContent .item-info').first().textContent();
+    assert(first.includes('score 4.20'), 'strongest first: ' + first);
   });
 
   await step('galerie : sessions listées sans suppression (non-régression)', async () => {

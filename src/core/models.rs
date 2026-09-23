@@ -54,7 +54,9 @@ impl fmt::Display for OutputFormat {
 
 #[derive(Debug, Clone)]
 pub struct CaptureFrame {
-    /// Decoded RGB pixels for analysis (exposure, detection, thumbnail)
+    /// Decoded RGB pixels for analysis (exposure, detection, gallery
+    /// thumbnail). On the Pi this is the small EXIF thumbnail of the
+    /// capture, NOT the full-resolution image (which stays in `raw_bytes`).
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
@@ -217,6 +219,10 @@ pub struct SessionEvent {
     pub aurora_color: String,
     pub consecutive_hits: u32,
     pub moon_mask_active: bool,
+    /// Number of the saved image (`aurora_..._NNNNN`) when this frame was
+    /// written to the key. Lets the gallery rank images by aurora strength.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_number: Option<u64>,
 }
 
 // ─── Time Range ────────────────────────────────────────────

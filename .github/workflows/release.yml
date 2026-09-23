@@ -30,5 +30,6 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/*.deb
             dist/*.sha256
           generate_release_notes: true
