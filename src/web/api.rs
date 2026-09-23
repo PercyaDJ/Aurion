@@ -759,7 +759,7 @@ pub fn parse_wifi_scan(output: &str) -> Vec<WifiNetwork> {
         .collect();
     networks.sort_by(|a, b| a.ssid.cmp(&b.ssid).then(b.signal.cmp(&a.signal)));
     networks.dedup_by(|a, b| a.ssid == b.ssid);
-    networks.sort_by(|a, b| b.signal.cmp(&a.signal));
+    networks.sort_by_key(|n| std::cmp::Reverse(n.signal));
     networks
 }
 
