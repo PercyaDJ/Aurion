@@ -309,7 +309,12 @@ cmd_usb_add() {
   if [[ "$DRYRUN" != "1" ]] && mountpoint -q "$MOUNT_POINT"; then
     echo "$MOUNT_POINT déjà monté"; return 0
   fi
-  fstype=$(blkid -o value -s TYPE "/dev/$dev" 2>/dev/null || echo "${AURION_FAKE_FSTYPE:-}")
+  if [[ "$DRYRUN" == "1" ]]; then
+    # Tests: never probe the disks of the machine running them
+    fstype="${AURION_FAKE_FSTYPE:-}"
+  else
+    fstype=$(blkid -o value -s TYPE "/dev/$dev" 2>/dev/null || true)
+  fi
   [[ "$fstype" == "ntfs" ]] && fstype=ntfs3
   opts=$(mount_opts "$fstype") || die "système de fichiers non géré: ${fstype:-inconnu} (formatez la clé en exFAT ou FAT32)"
   run mkdir -p "$MOUNT_POINT" 2>/dev/null || true
