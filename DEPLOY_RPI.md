@@ -1,150 +1,76 @@
-# Déploiement Aurion sur Raspberry Pi
+# Déployer Aurion sur un Raspberry Pi
 
-Guide détaillé pour déployer Aurion sur une Raspberry Pi 4.
+## 1. Préparer la carte SD
 
-## Pré-requis
+Avec **Raspberry Pi Imager** :
+- Système : *Raspberry Pi OS Lite (64-bit)* (Bookworm ou Trixie).
+- Réglages avancés (roue dentée) : nom d'hôte `aurion`, utilisateur et mot de passe, **SSH activé**,
+  Wi-Fi de la maison (pour l'installation), fuseau horaire.
 
-### Matériel
-- Raspberry Pi 4 (4 Go RAM recommandé)
-- Carte SD (16 Go minimum)
-- Clé USB formatée en **vfat** ou **exfat** (pour les captures)
-- RPi HQ Camera (IMX477) connectée au port CSI
-- Alimentation USB-C 5V/3A stable
+Brancher la caméra (nappe CSI), la clé USB (exFAT ou FAT32), démarrer.
+Le Pi est joignable en `ssh utilisateur@aurion.local` au bout d'une minute environ.
 
-### Logiciel
-- [Raspberry Pi OS Lite (64-bit)](https://www.raspberrypi.com/software/) flashé sur la carte SD
-- Accès SSH ou clavier/écran pour le premier démarrage
+## 2. Installer
 
----
+Trois possibilités, au choix (détails dans le [README](README.md)) :
 
-## Étape 1 — Premier démarrage
+| Depuis | Commande |
+|---|---|
+| le Pi, par git (recommandé) | `git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion && sudo ~/aurion/install.sh` |
+| le Pi, paquet Debian | `sudo apt install ./aurion_1.5.0_arm64.deb` |
+| le Pi, avec internet | `curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh \| sudo bash` |
+| un PC Windows | `.\scripts\deploy.ps1 utilisateur@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` |
+| un PC Linux / macOS | `scripts/deploy.sh utilisateur@aurion.local aurion-1.5.0-rpi-arm64.tar.gz` |
 
-```bash
-# Mise à jour système
-sudo apt update && sudo apt upgrade -y
+L'archive `aurion-<version>-rpi-arm64.tar.gz` est construite par GitHub Actions (onglet *Releases*,
+ou onglet *Actions*, artefact `aurion-rpi-arm64`).
 
-# Activer la caméra (si pas fait dans le Pi Imager)
-sudo raspi-config
-# → Interface Options → Camera → Enable → Reboot
-```
+### Ce que fait `install.sh`
 
-## Étape 2 — Cloner le repo
+1. Installe les paquets nécessaires : `rpicam-apps`, `iw`, `nftables`, `dosfstools`, `exfatprogs` (+ `hostapd`/`dnsmasq` si NetworkManager est absent).
+2. Copie le binaire dans `/opt/aurion` (l'interface web est incluse dedans).
+3. Crée `/opt/aurion/config/aurion.json` avec **un mot de passe Wi-Fi unique** (ou reprend la config existante,
+   y compris celle d'une ancienne installation `~/Aurion`).
+4. Installe `/usr/local/sbin/aurion-helper`, **seul** programme que le service peut lancer en root.
+5. Configure le montage automatique de **n'importe quelle** clé USB sur `/mnt/capture`.
+6. Prépare le hotspot et le portail captif.
+7. Optimise le système pour le terrain (désactivable avec `--no-hardening`) : journaux en RAM,
+   `noatime`, pas de mises à jour automatiques, watchdog matériel, arrêt propre en cas de sous-tension persistante.
+   Économie d'énergie (désactivable avec `--no-power-saving`) : Bluetooth, audio et LED coupés.
+8. Active et démarre `aurion.service`, puis affiche le Wi-Fi et son mot de passe.
 
-Le repo étant privé, il faut un **Personal Access Token** GitHub :
-1. Sur GitHub : **Settings → Developer settings → Personal access tokens → Tokens (classic)**
-2. Cliquer **Generate new token** → cocher `repo` → copier le token
+> Quand le service démarre, le hotspot prend le Wi-Fi du Pi : une session SSH ouverte par le Wi-Fi
+> de la maison se coupe. C'est normal. Le résumé (avec le mot de passe) est affiché avant.
+> Pour revenir en SSH : se connecter au Wi-Fi Aurion (`ssh utilisateur@192.168.4.1`), utiliser un câble
+> réseau, ou *Diagnostics, Connexion Wi-Fi (maintenance)* dans l'interface.
 
-```bash
-sudo apt install -y git
-git clone https://<TON_TOKEN>@github.com/PercyaDJ/Aurion.git ~/Aurion
-cd ~/Aurion
-```
+## 3. Mettre à jour
 
-## Étape 3 — Bootstrap
+- Depuis le téléphone : *Diagnostics, Mise à jour du logiciel*, fichier `aurion` de la nouvelle archive.
+- Ou relancer l'installation avec la nouvelle archive (la configuration est conservée).
+- Retour arrière : `sudo cp /opt/aurion/aurion.prev /opt/aurion/aurion && sudo systemctl restart aurion`.
 
-Le script `bootstrap.sh` harden le système pour une utilisation terrain :
-
-```bash
-sudo bash scripts/bootstrap.sh
-```
-
-**Ce que fait le bootstrap :**
-- ✅ Log2ram (logs en RAM, préserve la carte SD)
-- ✅ `/tmp` en tmpfs
-- ✅ Root filesystem en `noatime,commit=60`
-- ✅ Journald volatile (50 Mo max en RAM)
-- ✅ Désactivation des mises à jour automatiques APT
-- ✅ Détection automatique de la clé USB (UUID) + automount `/mnt/capture`
-- ✅ Timer `aurion-flush` (sync disque toutes les 2 min)
-- ✅ Timer `aurion-power-watch` (arrêt propre si undervoltage)
-- ❓ Désactivation optionnelle de zram (prompt interactif)
-
-> **Important** : Insérez la clé USB **avant** de lancer le bootstrap.
-> Le script la détecte automatiquement et configure le montage permanent.
+## 4. Commandes utiles
 
 ```bash
-# Reboot obligatoire après le bootstrap
-sudo reboot
+sudo systemctl status aurion          # état
+sudo journalctl -u aurion -f          # journal en direct
+sudo systemctl restart aurion         # redémarrer
+/opt/aurion/aurion --config-dir /opt/aurion/config check-config   # vérifier la config
+sudo ./install.sh --uninstall            # depuis le dossier de l'archive : désinstaller (photos conservées)
 ```
 
-## Étape 4 — Installation
+## 5. Dépannage
 
-```bash
-bash ~/Aurion/scripts/install.sh
-```
+| Problème | Piste |
+|---|---|
+| Pas de Wi-Fi « Aurion » | `sudo journalctl -u aurion -n 50` ; vérifier le pays Wi-Fi (`sudo raspi-config`, *Localisation*) |
+| La page ne s'ouvre pas seule | ouvrir `http://192.168.4.1:8080` |
+| « Clé USB non détectée » | clé en exFAT/FAT32 ? `lsblk -f` ; rebrancher la clé (montage automatique) |
+| Caméra indisponible | `rpicam-hello --list-cameras` ; nappe CSI dans le bon sens |
+| Heure fausse | ouvrir l'interface depuis le téléphone : l'heure est synchronisée à l'ouverture |
+| Le Pi s'éteint seul | sous-tension : alimentation 5 V / 3 A officielle ou batterie de qualité |
 
-**Ce que fait l'install :**
-1. Installe Rust via rustup
-2. Installe les dépendances : `build-essential`, `libssl-dev`, `rpicam-apps`, `hostapd`, `dnsmasq`
-3. Compile le projet : `cargo build --release --features rpi` (~15-30 min)
-4. Configure hostapd/dnsmasq (désactivés au boot, gérés par l'app)
-5. Configure sudoers (commandes hardware sans mot de passe)
-6. Crée et active le service systemd `aurion.service`
-7. Génère `config/aurion.json` depuis les valeurs par défaut
+## Compiler sur le Pi (secours)
 
-## Étape 5 — Démarrer
-
-```bash
-# Démarrer le service
-sudo systemctl start aurion
-
-# Vérifier le statut
-sudo systemctl status aurion
-```
-
----
-
-## Commandes utiles
-
-```bash
-sudo systemctl start aurion      # Démarrer
-sudo systemctl stop aurion       # Arrêter
-sudo systemctl restart aurion    # Redémarrer
-sudo systemctl status aurion     # Statut
-sudo journalctl -u aurion -f     # Logs en temps réel
-```
-
-## Test manuel (sans service)
-
-```bash
-cd ~/Aurion
-./target/release/aurion serve --port 8080
-# Ouvrir http://<IP_RPI>:8080 dans un navigateur
-```
-
----
-
-## Utilisation terrain
-
-1. Brancher la Raspberry Pi (alimentation USB-C)
-2. Le service `aurion` démarre automatiquement
-3. Connecter un smartphone au Wi-Fi **Aurion** (mot de passe : `aurora2024`)
-4. Le portail captif s'ouvre automatiquement avec l'interface Aurion
-5. Choisir le mode :
-   - 🌙 **Capture** : configurer les paramètres, cliquer "Déconnexion" → la capture nocturne démarre
-   - 📸 **Récupération** : parcourir la galerie, télécharger les images
-
-### Portail captif
-
-Aurion redirige **toutes** les requêtes DNS vers le Pi (via dnsmasq) et répond
-aux URLs de détection captive portal de chaque OS :
-
-| OS | URL testée | Réponse |
-|---|---|---|
-| iOS/macOS | `/hotspot-detect.html` | Redirect → Dashboard |
-| Android | `/generate_204` | Redirect → Dashboard |
-| Windows | `/connecttest.txt` | Redirect → Dashboard |
-| Firefox | `/canonical.html` | Redirect → Dashboard |
-
----
-
-## Troubleshooting
-
-| Problème | Solution |
-|----------|----------|
-| Service ne démarre pas | `sudo journalctl -u aurion -n 50` pour voir les erreurs |
-| Caméra non détectée | Vérifier le câble CSI, `rpicam-hello --list-cameras` |
-| Wi-Fi ne se crée pas | `sudo journalctl -u aurion -f`, vérifier hostapd |
-| USB non montée | `lsblk` pour vérifier, `sudo mount -a` pour forcer le montage |
-| Compilation échoue (RAM) | Le script crée un swap temporaire de 2 Go automatiquement |
-| Portail captif ne s'ouvre pas | Se connecter manuellement à `http://192.168.4.1:8080` |
+Sans archive : `git clone` du dépôt puis `bash scripts/setup.sh` (installe Rust, compile 15 à 30 min, puis installe).

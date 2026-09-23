@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Réglages avancés</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
 </head>
 
 <body>
@@ -181,6 +181,52 @@
             </div>
         </div>
 
+        <!-- Photo quality: timelapse & noise -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Qualité photo et timelapse</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Balance des blancs</label>
+                <select class="form-input" id="awbMode">
+                    <option value="daylight">Lumière du jour (fixe, recommandé timelapse)</option>
+                    <option value="cloudy">Nuageux (fixe)</option>
+                    <option value="auto">Automatique (varie d'une image à l'autre)</option>
+                    <option value="incandescent">Incandescent (fixe)</option>
+                    <option value="tungsten">Tungstène (fixe)</option>
+                    <option value="fluorescent">Fluorescent (fixe)</option>
+                    <option value="indoor">Intérieur (fixe)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" style="display:flex;gap:0.5rem;align-items:center;">
+                    <input type="checkbox" id="lockInRun"> Verrouiller l'exposition pendant la capture
+                </label>
+                <span class="form-hint">Aucun scintillement dans le timelapse ; le lissage d'exposition se fait ensuite en post-traitement.</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Débruitage du capteur (JPEG uniquement, le RAW reste brut)</label>
+                <select class="form-input" id="ispDenoise">
+                    <option value="cdn_hq">Haute qualité</option>
+                    <option value="cdn_fast">Rapide</option>
+                    <option value="cdn_off">Chrominance désactivée</option>
+                    <option value="off">Désactivé</option>
+                    <option value="auto">Automatique</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" style="display:flex;gap:0.5rem;align-items:center;">
+                    <input type="checkbox" id="hotPixels"> Corriger les pixels chauds des JPEG
+                </label>
+                <span class="form-hint">Consomme du CPU et de la batterie à chaque image. Le DNG n'est jamais modifié (utilisez les darks).</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Empilement JPEG (0 = désactivé, 2 à 16 images)</label>
+                <input type="number" class="form-input" id="stackFrames" min="0" max="16" value="0">
+                <span class="form-hint">Ajoute une image moyenne toutes les N poses (bruit ÷ 2 à 3 pour 4 à 8 images). Flou si l'aurore bouge vite.</span>
+            </div>
+        </div>
+
         <!-- Preview Settings -->
         <div class="card fade-in">
             <div class="card-header">
@@ -314,7 +360,10 @@
                 document.getElementById('storageCritical').value = cfg.storage.critical_percent;
 
                 document.getElementById('wifiSsid').value = cfg.network.ssid;
-                document.getElementById('wifiPassword').value = cfg.network.password;
+                // Le mot de passe n'est jamais renvoyé par le serveur : laisser le
+                // champ vide conserve le mot de passe actuel.
+                document.getElementById('wifiPassword').value = '';
+                document.getElementById('wifiPassword').placeholder = 'Inchangé (laisser vide)';
 
                 // New detection params
                 if (cfg.detection.red_threshold !== undefined) {
@@ -336,6 +385,13 @@
                 if (cfg.detection.moon_mask_enabled !== undefined) {
                     document.getElementById('moonMask').checked = cfg.detection.moon_mask_enabled;
                 }
+                // Photo quality
+                document.getElementById('awbMode').value = cfg.capture.awb || 'daylight';
+                document.getElementById('lockInRun').checked = !!cfg.exposure.lock_in_run;
+                const dn = cfg.capture.denoise || {};
+                document.getElementById('ispDenoise').value = dn.isp_denoise || 'cdn_hq';
+                document.getElementById('hotPixels').checked = !!dn.hot_pixels;
+                document.getElementById('stackFrames').value = dn.stack_frames || 0;
                 // New exposure params
                 if (cfg.exposure.target_brightness !== undefined) {
                     document.getElementById('targetBrightness').value = cfg.exposure.target_brightness;
@@ -346,12 +402,6 @@
                     document.getElementById('satRejectVal').textContent = cfg.exposure.saturation_reject;
                 }
 
-                // Load real WiFi password from separate endpoint
-                try {
-                    const pwdRes = await fetch('/api/config/wifi-password');
-                    const pwdData = await pwdRes.json();
-                    document.getElementById('wifiPassword').value = pwdData.password;
-                } catch (_) { /* fallback: keep masked value */ }
             } catch (e) {
                 showToast('Erreur chargement config', 'error');
             }
@@ -376,7 +426,14 @@
                 cfg.storage.critical_percent = parseInt(document.getElementById('storageCritical').value);
 
                 cfg.network.ssid = document.getElementById('wifiSsid').value;
-                cfg.network.password = document.getElementById('wifiPassword').value;
+                const newPwd = document.getElementById('wifiPassword').value;
+                if (newPwd) {
+                    if (newPwd.length < 10 || newPwd.length > 63) {
+                        showToast('Le mot de passe Wi-Fi doit faire entre 10 et 63 caractères', 'error');
+                        return;
+                    }
+                    cfg.network.password = newPwd;
+                }
 
                 // New detection params
                 cfg.detection.red_threshold = parseFloat(document.getElementById('redThreshold').value);
@@ -388,16 +445,24 @@
                 // New exposure params
                 cfg.exposure.target_brightness = parseFloat(document.getElementById('targetBrightness').value);
                 cfg.exposure.saturation_reject = parseFloat(document.getElementById('satReject').value);
+                // Photo quality
+                cfg.capture.awb = document.getElementById('awbMode').value;
+                cfg.exposure.lock_in_run = document.getElementById('lockInRun').checked;
+                cfg.capture.denoise = cfg.capture.denoise || {};
+                cfg.capture.denoise.isp_denoise = document.getElementById('ispDenoise').value;
+                cfg.capture.denoise.hot_pixels = document.getElementById('hotPixels').checked;
+                cfg.capture.denoise.stack_frames = parseInt(document.getElementById('stackFrames').value) || 0;
 
-                await fetch('/api/config', {
+                await apiFetch('/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(cfg),
                 });
 
+                document.getElementById('wifiPassword').value = '';
                 showToast('Configuration sauvegardée ✅', 'success');
             } catch (e) {
-                showToast('Erreur de sauvegarde', 'error');
+                showToast('Erreur de sauvegarde : ' + e.message, 'error');
             }
         }
 

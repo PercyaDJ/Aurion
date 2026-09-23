@@ -5,9 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Galerie</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
     <style>
         .gallery-header {
             display: flex;
@@ -287,6 +286,9 @@
             <button id="tabSessions" class="tab-btn"
                 style="background:none;border:none;color:var(--text-secondary);font-weight:500;padding:0.25rem 0.75rem;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;font-size:0.9rem;"
                 onclick="switchTab('sessions')">Par session</button>
+            <button id="tabBest" class="tab-btn"
+                style="background:none;border:none;color:var(--text-secondary);font-weight:500;padding:0.25rem 0.75rem;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;font-size:0.9rem;"
+                onclick="switchTab('best')">Meilleures aurores</button>
             <div style="flex:1;"></div>
             <button id="sortBtn" class="btn btn-outline"
                 style="padding:0.25rem 0.5rem;font-size:0.8rem;border-color:var(--border);" onclick="toggleSort()">
@@ -313,6 +315,17 @@
                     <div class="empty-icon">⏳</div>
                     <p>Chargement de la galerie...</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- Tab: strongest auroras (ranked by detection score) -->
+        <div id="paneBest" style="display:none;">
+            <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+                <span class="form-hint" style="flex:1;">Images classées par force d'aurore (score de détection), pour choisir les RAW à retoucher.</span>
+                <button class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);" onclick="downloadBest()">Télécharger les RAW (top)</button>
+            </div>
+            <div id="bestContent">
+                <div class="empty-state"><div class="empty-icon">⏳</div><p>Chargement…</p></div>
             </div>
         </div>
 
@@ -382,8 +395,73 @@
             }
         }
 
+        let bestAuroras = [];
+
+        async function loadBest() {
+            const container = document.getElementById('bestContent');
+            try {
+                const res = await apiFetch('/api/gallery/best?limit=30');
+                bestAuroras = await res.json();
+                if (bestAuroras.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🌙</div><p>Aucune aurore détectée pour le moment.</p></div>';
+                    return;
+                }
+                let html = '<div class="gallery-grid">';
+                bestAuroras.forEach((b, i) => {
+                    const img = b.jpg ? `<img src="/api/gallery/thumbnail/${encodeURIComponent(b.jpg)}" loading="lazy" alt="">`
+                        : '<div class="raw-placeholder"><span class="raw-icon">🎞️</span><span>RAW</span></div>';
+                    html += `<div class="gallery-item" data-best="${i}">${img}
+                        <div class="item-info">#${i + 1} · score ${b.score.toFixed(2)} · ${aurionEscape(b.color)}<br>${aurionEscape(b.timestamp.replace('T', ' '))}${b.dng ? ' · RAW' : ''}</div></div>`;
+                });
+                container.innerHTML = html + '</div>';
+                container.querySelectorAll('.gallery-item[data-best]').forEach(el => {
+                    const b = bestAuroras[Number(el.dataset.best)];
+                    el.onclick = () => b.jpg
+                        ? openLightbox(b.jpg, 'score ' + b.score.toFixed(2), b.timestamp.replace('T', ' '), false)
+                        : openLightbox(b.dng, 'score ' + b.score.toFixed(2), b.timestamp.replace('T', ' '), true);
+                });
+            } catch (e) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><p>' + aurionEscape(e.message) + '</p></div>';
+            }
+        }
+
+        function downloadBest() {
+            const files = bestAuroras.flatMap(b => [b.dng, b.jpg]).filter(Boolean);
+            if (files.length === 0) { showToast('Aucune image', 'info'); return; }
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/api/gallery/download-zip';
+            form.style.display = 'none';
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'filenames';
+            input.value = files.join(',');
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+            setTimeout(() => document.body.removeChild(form), 1000);
+            showToast('Téléchargement de ' + bestAuroras.length + ' aurores lancé', 'success');
+        }
+
         function switchTab(tab) {
             currentTab = tab;
+            const paneBest = document.getElementById('paneBest');
+            const tabBest = document.getElementById('tabBest');
+            paneBest.style.display = tab === 'best' ? '' : 'none';
+            tabBest.style.color = tab === 'best' ? 'var(--accent)' : 'var(--text-secondary)';
+            tabBest.style.borderBottom = tab === 'best' ? '2px solid var(--accent)' : '2px solid transparent';
+            if (tab === 'best') {
+                document.getElementById('paneImages').style.display = 'none';
+                document.getElementById('paneSessions').style.display = 'none';
+                document.getElementById('toolbar').style.display = 'none';
+                for (const id of ['tabImages', 'tabSessions']) {
+                    const t = document.getElementById(id);
+                    t.style.color = 'var(--text-secondary)';
+                    t.style.borderBottom = '2px solid transparent';
+                }
+                loadBest();
+                return;
+            }
             const paneImages = document.getElementById('paneImages');
             const paneSessions = document.getElementById('paneSessions');
             const tabImages = document.getElementById('tabImages');
@@ -775,11 +853,15 @@
                 img.src = '';
                 img.style.display = 'none';
             } else {
-                img.src = `/api/gallery/thumbnail/${filename}`;
+                // Miniature d'abord (instantané), puis l'image complète
+                img.src = `/api/gallery/thumbnail/${encodeURIComponent(filename)}`;
+                const full = new Image();
+                full.onload = () => { if (currentLightboxFile === filename) img.src = full.src; };
+                full.src = `/api/gallery/${encodeURIComponent(filename)}?inline=1`;
                 img.style.display = 'block';
             }
 
-            info.innerHTML = `<strong>${filename}</strong><br>${size} — ${modified}`;
+            info.innerHTML = `<strong>${aurionEscape(filename)}</strong><br>${aurionEscape(size)} — ${aurionEscape(modified)}`;
             download.href = `/api/gallery/${filename}`;
             download.download = filename;
             deleteBtn.onclick = () => { closeLightbox(); confirmDeleteSingle(filename); };

@@ -17,7 +17,7 @@
   "capture": {
     "watch_interval_secs": 60,
     "preview_interval_secs": 30,
-    "output_format": "Jpg",
+    "output_format": "RawAndJpg",
     "focal_length_mm": 2.7,
     "capture_interval_secs": 10
   },

@@ -26,6 +26,7 @@ pub struct AuroraDetector {
 }
 
 impl AuroraDetector {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         roi_top_percent: u32,
         green_threshold: f64,

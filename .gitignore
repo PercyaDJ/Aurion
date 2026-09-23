@@ -17,3 +17,9 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Release archives
+/dist/
+
+# E2E test dependencies
+/tests/e2e/node_modules/

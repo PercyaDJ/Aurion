@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# aurion-helper : the ONLY program the Aurion service may run as root
+# (sudoers: "<user> ALL=(root) NOPASSWD: /usr/local/sbin/aurion-helper").
+#
+# Every argument is re-validated here: the web service is never trusted.
+# Secrets (Wi-Fi passwords) are read from stdin, never from argv.
+#
+#   aurion-helper ap-start <ssid> <channel>     (password on stdin)
+#   aurion-helper ap-stop
+#   aurion-helper wifi-scan                     → "signal<TAB>security<TAB>ssid"
+#   aurion-helper wifi-connect <ssid>           (password on stdin) → IP
+#   aurion-helper set-time <unix-epoch-seconds>
+#   aurion-helper set-timezone <Area/City>
+#   aurion-helper shutdown
+#   aurion-helper mount-usb | umount-usb
+#   aurion-helper usb-add <kernel-name>         (called by the udev rule)
+#
+# Network: NetworkManager when it manages wlan0 (Raspberry Pi OS
+# Bookworm/Trixie), hostapd + dnsmasq otherwise.
+# ─────────────────────────────────────────────────────────────
+set -euo pipefail
+umask 077
+export LC_ALL=C
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Test hooks, ignored when called through sudo.
+if [[ -n "${SUDO_USER:-}" ]]; then
+  unset AURION_HELPER_DRYRUN AURION_ENV_FILE
+fi
+ENV_FILE="${AURION_ENV_FILE:-/etc/aurion.env}"
+DRYRUN="${AURION_HELPER_DRYRUN:-0}"
+
+AURION_USER="aurion"
+MOUNT_POINT="/mnt/capture"
+WEB_PORT="8080"
+WLAN="wlan0"
+AP_IP="192.168.4.1"
+# shellcheck source=/dev/null
+[[ -r "$ENV_FILE" ]] && source "$ENV_FILE"
+
+RUN_DIR=/run/aurion
+# Dry-run (tests): never write into the real /run
+[[ "$DRYRUN" == "1" ]] && RUN_DIR="${AURION_RUN_DIR:-${TMPDIR:-/tmp}/aurion-helper-dryrun.$$}"
+AP_CON=aurion-ap
+
+die() { echo "aurion-helper: $*" >&2; exit 1; }
+
+# Run a command (or print it in dry-run mode).
+run() {
+  if [[ "$DRYRUN" == "1" ]]; then
+    { printf 'DRY:'; printf ' %q' "$@"; printf '\n'; } >&2
+    return 0
+  fi
+  "$@"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+nm_manages_wlan() {
+  [[ "$DRYRUN" == "1" ]] && { [[ "${AURION_FAKE_NM:-1}" == "1" ]]; return; }
+  have nmcli || return 1
+  systemctl is-active --quiet NetworkManager || return 1
+  local state
+  state=$(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$WLAN" '$1==d{print $2}')
+  [[ -n "$state" && "$state" != "unmanaged" ]]
+}
+
+# ─── Validation ──────────────────────────────────────────────
+
+valid_ssid() {
+  local s="$1"
+  (( ${#s} >= 1 && ${#s} <= 32 )) || die "SSID invalide (1 à 32 caractères)"
+  [[ "$s" =~ [[:cntrl:]] ]] && die "SSID invalide (caractère de contrôle)"
+  [[ "$s" == " "* || "$s" == *" " ]] && die "SSID invalide (espace en début ou fin)"
+  return 0
+}
+
+valid_psk() {
+  local p="$1"
+  [[ "$p" =~ ^[[:print:]]{8,63}$ ]] || die "Mot de passe Wi-Fi invalide (8 à 63 caractères ASCII)"
+}
+
+valid_channel() {
+  [[ "$1" =~ ^([1-9]|1[0-3])$ ]] || die "Canal invalide (1 à 13)"
+}
+
+read_secret() {
+  local secret=""
+  IFS= read -r secret || true
+  printf '%s' "$secret"
+}
+
+# ─── Captive portal (DNS answered by the AP, port 80 → web UI) ─
+
+captive_on() {
+  have nft || [[ "$DRYRUN" == "1" ]] || { echo "nft absent: redirection du port 80 ignorée" >&2; return 0; }
+  local rules
+  rules=$(cat <<EOF
+table ip aurion_nat
+delete table ip aurion_nat
+table ip aurion_nat {
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+    iifname "$WLAN" tcp dport 80 redirect to :$WEB_PORT
+  }
+}
+EOF
+)
+  if [[ "$DRYRUN" == "1" ]]; then echo "DRY: nft -f - (redirect 80 -> $WEB_PORT)"; else nft -f - <<<"$rules"; fi
+}
+
+captive_off() {
+  run nft delete table ip aurion_nat 2>/dev/null || true
+}
+
+# ─── Access point ────────────────────────────────────────────
+
+ap_start_nm() {
+  local ssid="$1" channel="$2" psk="$3"
+  run nmcli radio wifi on
+  run nmcli connection delete "$AP_CON" >/dev/null 2>&1 || true
+  run nmcli connection add type wifi ifname "$WLAN" con-name "$AP_CON" autoconnect no ssid "$ssid" \
+    802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel "$channel" \
+    ipv4.method shared ipv4.addresses "$AP_IP/24" ipv6.method disabled \
+    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk" \
+    wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp >/dev/null
+  run nmcli --wait 30 connection up "$AP_CON" >/dev/null
+}
+
+ap_start_legacy() {
+  local ssid="$1" channel="$2" psk="$3"
+  have hostapd || [[ "$DRYRUN" == "1" ]] || die "hostapd absent (installez-le ou utilisez NetworkManager)"
+  mkdir -p "$RUN_DIR"
+  ap_stop_legacy
+  cat >"$RUN_DIR/hostapd.conf" <<EOF
+interface=$WLAN
+driver=nl80211
+ssid=$ssid
+hw_mode=g
+channel=$channel
+wmm_enabled=1
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=$psk
+EOF
+  chmod 600 "$RUN_DIR/hostapd.conf"
+  run rfkill unblock wifi || true
+  run ip link set "$WLAN" up
+  run ip addr flush dev "$WLAN"
+  run ip addr add "$AP_IP/24" dev "$WLAN"
+  run hostapd -B -P "$RUN_DIR/hostapd.pid" "$RUN_DIR/hostapd.conf"
+  run dnsmasq --conf-file=/dev/null --interface="$WLAN" --bind-interfaces --except-interface=lo \
+    --dhcp-range=192.168.4.10,192.168.4.50,255.255.255.0,12h \
+    --address=/#/"$AP_IP" --no-resolv --no-hosts --pid-file="$RUN_DIR/dnsmasq.pid"
+}
+
+ap_stop_legacy() {
+  local f
+  for f in "$RUN_DIR/hostapd.pid" "$RUN_DIR/dnsmasq.pid"; do
+    if [[ -f "$f" ]]; then
+      run kill "$(cat "$f")" 2>/dev/null || true
+      rm -f "$f"
+    fi
+  done
+}
+
+cmd_ap_start() {
+  local ssid="${1:-}" channel="${2:-}" psk
+  valid_ssid "$ssid"
+  valid_channel "$channel"
+  psk=$(read_secret)
+  valid_psk "$psk"
+  run rfkill unblock wifi 2>/dev/null || true
+  if nm_manages_wlan; then
+    ap_start_nm "$ssid" "$channel" "$psk"
+  else
+    ap_start_legacy "$ssid" "$channel" "$psk"
+  fi
+  captive_on
+  echo "AP $ssid actif sur $AP_IP"
+}
+
+cmd_ap_stop() {
+  captive_off
+  if nm_manages_wlan; then
+    run nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
+    # Radio off for the night: saves power, no radiation next to the sensor
+    run nmcli radio wifi off
+  else
+    ap_stop_legacy
+    run ip addr flush dev "$WLAN" 2>/dev/null || true
+    run ip link set "$WLAN" down 2>/dev/null || true
+  fi
+  echo "AP arrêté"
+}
+
+# ─── Wi-Fi client (maintenance) ──────────────────────────────
+
+cmd_wifi_scan() {
+  if nm_manages_wlan; then
+    local line signal rest security ssid
+    run nmcli radio wifi on >/dev/null 2>&1 || true
+    while IFS= read -r line; do
+      signal=${line%%:*}; rest=${line#*:}
+      security=${rest%%:*}; ssid=${rest#*:}
+      ssid=${ssid//\\:/:}; ssid=${ssid//\\\\/\\}
+      [[ -n "$ssid" && "$signal" =~ ^[0-9]+$ ]] || continue
+      printf '%s\t%s\t%s\n' "$signal" "${security:---}" "$ssid"
+    done < <(nmcli -g SIGNAL,SECURITY,SSID device wifi list --rescan yes ifname "$WLAN" 2>/dev/null || true)
+  else
+    iw dev "$WLAN" scan 2>/dev/null | awk '
+      /^BSS / { if (ssid != "") print sig "\t" sec "\t" ssid; ssid=""; sig=0; sec="--" }
+      /signal:/ { dbm=$2+0; q=2*(dbm+100); if (q>100) q=100; if (q<0) q=0; sig=int(q) }
+      /SSID:/ { sub(/^[ \t]*SSID: /, ""); ssid=$0 }
+      /RSN:|WPA:/ { sec="WPA2" }
+      END { if (ssid != "") print sig "\t" sec "\t" ssid }'
+  fi
+}
+
+cmd_wifi_connect() {
+  local ssid="${1:-}" psk ip=""
+  valid_ssid "$ssid"
+  psk=$(read_secret)
+  valid_psk "$psk"
+  captive_off
+  if nm_manages_wlan; then
+    run nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
+    run nmcli radio wifi on
+    run nmcli --wait 45 device wifi connect "$ssid" password "$psk" ifname "$WLAN" >/dev/null
+  else
+    ap_stop_legacy
+    mkdir -p "$RUN_DIR"
+    local ssid_hex psk_hex
+    ssid_hex=$(printf '%s' "$ssid" | od -An -tx1 | tr -d ' \n')
+    psk_hex=$(printf '%s\n' "$psk" | wpa_passphrase "$ssid" | awk -F= '/^[[:space:]]*psk=/{print $2}')
+    [[ "$psk_hex" =~ ^[0-9a-f]{64}$ ]] || die "calcul de la clé WPA impossible"
+    printf 'ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev\nnetwork={\n  ssid=%s\n  psk=%s\n  key_mgmt=WPA-PSK\n}\n' \
+      "$ssid_hex" "$psk_hex" >"$RUN_DIR/wpa.conf"
+    run ip addr flush dev "$WLAN"
+    run wpa_supplicant -B -i "$WLAN" -c "$RUN_DIR/wpa.conf" -P "$RUN_DIR/wpa.pid"
+    if have dhcpcd; then run dhcpcd -w "$WLAN"; else run dhclient "$WLAN"; fi
+  fi
+  [[ "$DRYRUN" == "1" ]] && { echo "192.0.2.10"; return 0; }
+  for _ in $(seq 1 15); do
+    ip=$(ip -4 -o addr show "$WLAN" | awk '{print $4}' | cut -d/ -f1 | head -n1)
+    [[ -n "$ip" ]] && break
+    sleep 1
+  done
+  [[ -n "$ip" ]] || die "connecté mais aucune adresse IP obtenue"
+  echo "$ip"
+}
+
+# ─── Clock ───────────────────────────────────────────────────
+
+cmd_set_time() {
+  local epoch="${1:-}"
+  [[ "$epoch" =~ ^[0-9]{10}$ ]] || die "date invalide"
+  (( epoch >= 1704067200 && epoch < 4102444800 )) || die "date hors limites"
+  run date -u -s "@$epoch" >/dev/null
+  # Next boot starts from this time instead of the last shutdown time
+  if have fake-hwclock; then run fake-hwclock save >/dev/null 2>&1 || true; fi
+  echo "heure réglée"
+}
+
+cmd_set_timezone() {
+  local tz="${1:-}"
+  [[ "$tz" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}$ ]] || die "fuseau invalide"
+  [[ "$tz" == *..* ]] && die "fuseau invalide"
+  if [[ "$DRYRUN" != "1" ]]; then
+    [[ -f "/usr/share/zoneinfo/$tz" ]] || die "fuseau inconnu: $tz"
+  fi
+  if have timedatectl && [[ "$DRYRUN" != "1" ]] && timedatectl set-timezone "$tz" 2>/dev/null; then
+    :
+  else
+    run ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime
+    if [[ "$DRYRUN" == "1" ]]; then echo "DRY: echo $tz > /etc/timezone"; else echo "$tz" >/etc/timezone; fi
+  fi
+  echo "fuseau $tz"
+}
+
+# ─── Power ───────────────────────────────────────────────────
+
+cmd_shutdown() {
+  run sync
+  run systemctl poweroff
+}
+
+# ─── USB capture drive ───────────────────────────────────────
+
+mount_opts() {
+  local fstype="$1" uid gid
+  uid=$(id -u "$AURION_USER" 2>/dev/null || echo 1000)
+  gid=$(id -g "$AURION_USER" 2>/dev/null || echo 1000)
+  case "$fstype" in
+    vfat)  echo "uid=$uid,gid=$gid,umask=0022,noatime,flush" ;;
+    exfat) echo "uid=$uid,gid=$gid,umask=0022,noatime" ;;
+    ntfs|ntfs3) echo "uid=$uid,gid=$gid,umask=0022,noatime" ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_usb_add() {
+  local dev="${1:-}" fstype opts
+  [[ "$dev" =~ ^sd[a-z]+[0-9]*$ ]] || die "périphérique invalide"
+  if [[ "$DRYRUN" != "1" ]] && mountpoint -q "$MOUNT_POINT"; then
+    echo "$MOUNT_POINT déjà monté"; return 0
+  fi
+  if [[ "$DRYRUN" == "1" ]]; then
+    # Tests: never probe the disks of the machine running them
+    fstype="${AURION_FAKE_FSTYPE:-}"
+  else
+    fstype=$(blkid -o value -s TYPE "/dev/$dev" 2>/dev/null || true)
+  fi
+  [[ "$fstype" == "ntfs" ]] && fstype=ntfs3
+  opts=$(mount_opts "$fstype") || die "système de fichiers non géré: ${fstype:-inconnu} (formatez la clé en exFAT ou FAT32)"
+  run mkdir -p "$MOUNT_POINT" 2>/dev/null || true
+  # --fsck=yes: after a power cut the FAT/exFAT is checked and repaired
+  # before being mounted (needs dosfstools / exfatprogs).
+  run systemd-mount --no-block --collect --fsck=yes -t "$fstype" -o "$opts" "/dev/$dev" "$MOUNT_POINT"
+}
+
+cmd_mount_usb() {
+  # Replay the udev "add" events: the rule mounts the first USB key found
+  run udevadm trigger --action=add --subsystem-match=block
+  run udevadm settle --timeout=10 || true
+  [[ "$DRYRUN" == "1" ]] && return 0
+  for _ in $(seq 1 10); do
+    mountpoint -q "$MOUNT_POINT" && { echo "clé montée sur $MOUNT_POINT"; return 0; }
+    sleep 1
+  done
+  die "aucune clé USB montée sur $MOUNT_POINT"
+}
+
+cmd_umount_usb() {
+  run sync
+  if have systemd-umount; then run systemd-umount "$MOUNT_POINT"; else run umount "$MOUNT_POINT"; fi
+}
+
+# ─── Dispatch ────────────────────────────────────────────────
+
+[[ $EUID -eq 0 || "$DRYRUN" == "1" ]] || die "doit être lancé en root (sudo)"
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  ap-start)      cmd_ap_start "$@" ;;
+  ap-stop)       cmd_ap_stop ;;
+  wifi-scan)     cmd_wifi_scan ;;
+  wifi-connect)  cmd_wifi_connect "$@" ;;
+  set-time)      cmd_set_time "$@" ;;
+  set-timezone)  cmd_set_timezone "$@" ;;
+  shutdown)      cmd_shutdown ;;
+  usb-add)       cmd_usb_add "$@" ;;
+  mount-usb)     cmd_mount_usb ;;
+  umount-usb)    cmd_umount_usb ;;
+  *) die "commande inconnue: ${cmd:-<vide>}" ;;
+esac

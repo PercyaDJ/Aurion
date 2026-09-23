@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Tests (unitaires, API, sécurité, simulation, non-régression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (PC)
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Clippy (Raspberry Pi)
+        run: cargo clippy --locked --all-targets --features rpi -- -D warnings
+      - name: Tests Rust
+        run: cargo test --locked
+
+      - name: ShellCheck
+        run: shellcheck -S warning scripts/*.sh scripts/aurion-helper tests/*.sh
+      - name: Tests aurion-helper (validation des arguments root)
+        run: bash tests/helper_test.sh
+      - name: Simulation de l'installeur
+        run: cargo build --locked && sudo -E bash tests/install_test.sh target/debug/aurion
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests navigateur de l'interface
+        working-directory: tests/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright-core install --with-deps chromium
+          node ui_test.mjs
+
+  package:
+    name: Archive Raspberry Pi (arm64)
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: Cross-compilation
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          bash scripts/package.sh
+      - name: Contrôle du paquet .deb
+        run: dpkg-deb -I dist/aurion_*_arm64.deb && dpkg-deb -c dist/aurion_*_arm64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurion-rpi-arm64
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.sha256
+
+      # Branche "rpi" = contenu de l'archive, prêt à l'emploi :
+      #   git clone -b rpi <dépôt> ~/aurion && sudo ~/aurion/install.sh
+      - name: Publication de la branche rpi (push sur main uniquement)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir=$(ls -d dist/aurion-*-rpi-arm64 | head -n1)
+          cd "$dir"
+          git init -q -b rpi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          cp LISEZMOI.txt README.md
+          git add README.md
+          git commit -q -m "$(basename "$PWD") (main ${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rpi

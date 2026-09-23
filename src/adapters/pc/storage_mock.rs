@@ -44,7 +44,7 @@ impl StorageMock {
             output_dir,
             mounted: Mutex::new(false),
             total_bytes: 128_000_000_000,
-            used_bytes: Mutex::new(120_000_000_000), // ~94% used, will fill soon
+            used_bytes: Mutex::new(121_000_000_000), // ~94.5% used, will fill soon
             simulate_full: true,
         }
     }
@@ -91,7 +91,7 @@ impl StoragePort for StorageMock {
         {
             let mut used = self.used_bytes.lock().unwrap();
             if self.simulate_full {
-                *used += data_size * 100; // Accelerate fill for testing
+                *used += data_size * 1000; // Accelerate fill for testing
             } else {
                 *used += data_size;
             }

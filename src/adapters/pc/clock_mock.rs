@@ -32,7 +32,7 @@ impl ClockMock {
     /// Advance the virtual clock by a given duration.
     pub fn advance(&self, duration: Duration) {
         let mut offset = self.offset.lock().unwrap();
-        *offset = *offset + duration;
+        *offset += duration;
     }
 
     /// Advance by seconds (convenience).
@@ -53,8 +53,36 @@ impl ClockPort for ClockMock {
     }
 }
 
+/// Virtual clock driven by the Tokio timer: `now = start + elapsed tokio
+/// time`. With `#[tokio::test(start_paused = true)]` every `sleep` of the
+/// orchestrator advances this clock instantly, so a whole night can be
+/// simulated in milliseconds.
+pub struct TokioClock {
+    start: DateTime<Utc>,
+    origin: tokio::time::Instant,
+}
+
+impl TokioClock {
+    pub fn new(start: DateTime<Utc>) -> Self {
+        Self { start, origin: tokio::time::Instant::now() }
+    }
+}
+
+impl ClockPort for TokioClock {
+    fn now(&self) -> DateTime<Utc> {
+        let elapsed = tokio::time::Instant::now().duration_since(self.origin);
+        self.start + Duration::from_std(elapsed).unwrap_or(Duration::zero())
+    }
+}
+
 /// Real system clock (used in production).
 pub struct ClockReal;
+
+impl Default for ClockReal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ClockReal {
     pub fn new() -> Self {
@@ -83,6 +111,14 @@ mod tests {
         clock.advance_secs(3600); // +1 hour
         let expected = Utc.with_ymd_and_hms(2025, 1, 15, 22, 0, 0).unwrap();
         assert_eq!(clock.now(), expected);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_tokio_clock_follows_virtual_time() {
+        let start = Utc.with_ymd_and_hms(2025, 1, 15, 21, 0, 0).unwrap();
+        let clock = TokioClock::new(start);
+        tokio::time::sleep(std::time::Duration::from_secs(3 * 3600)).await;
+        assert_eq!(clock.now(), start + Duration::hours(3));
     }
 
     #[test]

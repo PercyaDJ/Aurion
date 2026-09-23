@@ -1,6 +1,6 @@
 [package]
 name = "aurion"
-version = "1.4.13"
+version = "1.5.0"
 edition = "2021"
 description = "Aurion — Autonomous aurora camera for Raspberry Pi"
 authors = ["Aurion"]
@@ -14,19 +14,35 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
-tower-http = { version = "0.5", features = ["fs", "cors"] }
+tower-http = { version = "0.5", features = ["set-header"] }
 tower = "0.4"
 async-trait = "0.1"
 anyhow = "1"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
-tokio-util = { version = "0.7.18", features = ["io"] }
+tokio-util = { version = "0.7.18", features = ["io", "compat"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+libc = "0.2"
 
 [dev-dependencies]
 axum-test = "15"
+tempfile = "3"
+futures-lite = "2"
+tokio = { version = "1", features = ["full", "test-util"] }
+
+# Optimise dependencies even in debug/test builds: image encoding in the
+# night simulations is 10x faster, our own code stays quick to compile.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "unwind"

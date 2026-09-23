@@ -1,235 +1,125 @@
-# 🌌 Aurion
+# Aurion
 
-> Caméra autonome de capture d'aurores boréales pour Raspberry Pi 4
+Caméra autonome de capture d'aurores boréales pour Raspberry Pi 4/5 et HQ Camera (IMX477).
+Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit, puis on récupère les photos.
 
-Aurion transforme un Raspberry Pi 4 équipé d'une HQ Camera (IMX477) en station de capture d'aurores boréales totalement autonome. L'interface web permet de configurer, lancer et récupérer les captures depuis un smartphone.
+## Installation sur le Raspberry Pi (clé en main, sans compilation)
 
----
+Prérequis : Raspberry Pi OS **64 bits** (Lite ou Desktop), caméra HQ branchée, clé USB en exFAT ou FAT32.
 
-## ✨ Fonctionnalités
+**Le plus simple : cloner la branche prête à l'emploi**
+```bash
+git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion
+sudo ~/aurion/install.sh
+```
+Mise à jour : `cd ~/aurion && git pull && sudo ./install.sh`. La branche `rpi` contient le binaire compilé ; elle est
+republiée automatiquement par GitHub Actions à chaque modification de `main`. Dépôt privé : mettre un jeton dans l'URL
+(`https://<JETON>@github.com/...`).
 
-### Capture intelligente
-- **Détection multi-couleur** — Vert, rouge, violet avec seuils indépendants
-- **Masque lune** — Exclusion automatique des blobs lumineux (lune, lampadaires)
-- **Hystérésis** — Transitions on/off anti-flickering pour éviter les faux positifs
-- **Vérification spatiale** — Anti phares (détection de dispersion des sources lumineuses)
-- **2 modes** : SAFE (capture toute la nuit) ou FILTER (détection → capture)
+**Ou le paquet Debian** (onglet *Releases*) : `sudo apt install ./aurion_1.5.0_arm64.deb`
 
-### Exposition adaptative
-- **Auto-exposition EMA** avec lissage pour des timelapses fluides
-- **Rate limiting par phase** — 3-5% en Run vs 15-20% en Calibration
-- **Priorité shutter → ISO** — Shutter d'abord, ISO en compensation
-- **Calibration** automatique au démarrage (3 frames)
+**Ou depuis un clone de `main`** : `sudo ./install.sh` télécharge l'archive précompilée de la dernière release
+(ou compile sur le Pi en dernier recours).
 
-### Interface web
-- **9 pages** — Dashboard, Preview, Settings, Réglages avancés, Presets, Stockage, Galerie, Diagnostics
-- **Mobile-first** — Design dark premium, responsive
-- **PWA** — Installable sur l'écran d'accueil (manifest + icône)
-- **Toasts** — Notifications visuelles sur actions et erreurs
-- **Portail captif** — Ouverture automatique sur iOS, Android, Windows, Firefox
+**Ou depuis le PC** : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` (Windows),
+`scripts/deploy.sh pi@aurion.local` (Linux / macOS).
 
-### Stockage et récupération
-- **Sauvegarde USB** — Images JPEG, RAW (DNG), ou les deux
-- **Thumbnails** — Pré-générés en 320×240 pour la galerie
-- **Galerie** — Sélection multiple, aperçu, suppression avec confirmation
-- **ZIP download** — Téléchargement batch nommé `aurion_YYYY-MM-DD.zip`
-- **Session events** — Logging NDJSON de chaque capture (ISO, shutter, détection)
+À la fin, l'installeur affiche **le nom et le mot de passe du Wi-Fi** (générés pour cet appareil) : notez-les.
+Réinstaller par-dessus une version existante conserve la configuration.
 
-### Réseau
-- **Hotspot Wi-Fi** — Créé au démarrage, coupé en capture
-- **Portail captif** — Redirige tous les OS vers le dashboard
-- **Sécurité** — Mot de passe WiFi masqué dans l'API
+**Mise à jour sans câble ni SSH** : Diagnostics, *Mise à jour du logiciel*, fichier `aurion` de la nouvelle archive.
 
-### Robustesse terrain
-- **Hardening SD** — Log2ram, tmpfs, noatime, journald volatil
-- **Warning USB** — Alerte si la clé USB n'est pas montée
-- **Intervalle configurable** — Pour des timelapses à cadence régulière
-- **Arrêt propre** — Sync + unmount + shutdown système
+Guide détaillé et dépannage : [DEPLOY_RPI.md](DEPLOY_RPI.md). Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
 
----
+## Utilisation sur le terrain
 
-## 🚀 Quick Start
+1. Brancher le Pi (USB-C 5 V / 3 A) avec la clé USB.
+2. Se connecter au Wi-Fi **Aurion** : la page s'ouvre toute seule (portail captif), sinon `http://192.168.4.1:8080`.
+   L'heure du Pi est réglée automatiquement sur celle du téléphone (le Pi n'a pas d'horloge sauvegardée).
+3. **Capture** : régler, puis *Déconnexion, lancer la capture*. Le Wi-Fi se coupe au bout de 15 s, la nuit se déroule seule et le Pi s'éteint à la fin.
+4. **Récupération** : rallumer, aller dans *Galerie*, télécharger une nuit complète en ZIP.
 
-### Raspberry Pi
+Deux modes :
+- **SAFE** (défaut) : capture toute la nuit, les images avec aurore sont marquées `_AURORA`.
+- **FILTER** : surveille le ciel et ne commence à enregistrer qu'après N détections consécutives.
+
+## Développement sur PC
 
 ```bash
-# 1. Flash Raspberry Pi OS Lite (64-bit) sur la carte SD
-# 2. Insérer la SD + clé USB + caméra CSI, démarrer
-# 3. Se connecter en SSH
-
-# Mise à jour + clone
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y git
-git clone https://<TOKEN>@github.com/PercyaDJ/Aurion.git ~/Aurion
-
-# Installation Tout-en-un (Bootstrap + Compilation + Reboot auto)
-bash ~/Aurion/scripts/setup.sh
+cargo run -- serve --port 8080      # interface web avec caméra simulée
+cargo run -- simulate               # nuit simulée dans la console
+cargo test                          # tous les tests Rust
 ```
 
-### Développement PC
-
+Tests complets (comme la CI) :
 ```bash
-# Serveur web avec mocks caméra
-cargo run -- serve --port 8080
-
-# Simulation cycle nuit complet
-cargo run -- simulate
-
-# Tests
-cargo test    # 39 tests
+cargo clippy --all-targets -- -D warnings
+bash tests/helper_test.sh                         # helper root, validation des arguments
+sudo -E bash tests/install_test.sh target/debug/aurion   # installeur simulé dans une fausse racine
+cd tests/e2e && npm install && node ui_test.mjs   # interface dans Chromium
 ```
 
----
+Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && bash scripts/package.sh`
+(binaire statique musl : fonctionne sur Bullseye, Bookworm et Trixie). Pousser un tag `vX.Y.Z` publie l'archive automatiquement.
 
-## 📱 Utilisation terrain
+## Tests
 
-1. **Brancher** la Raspberry Pi (USB-C 5V/3A)
-2. **Connecter** le téléphone au Wi-Fi **Aurion** (mdp: `aurora2024`)
-3. Le **portail captif** s'ouvre automatiquement
-4. Choisir :
-   - 🌙 **Mode Capture** — Configurer → Déconnexion → Capture autonome toute la nuit
-   - 📸 **Mode Récupération** — Parcourir la galerie, sélectionner, télécharger en ZIP
+| Suite | Contenu |
+|---|---|
+| `src/**` (unitaires) | validation, config, exposition, détection, machine d'état, sécurité HTTP, stockage |
+| `tests/api_tests.rs` | contrat de l'API utilisé par chaque page |
+| `tests/security_tests.rs` | traversée de chemin, injection Wi-Fi, CSRF, DNS rebinding, fuite du mot de passe, mise à jour OTA |
+| `tests/gallery_tests.rs` | galerie, miniatures, sessions, ZIP, suppression |
+| `tests/simulation_tests.rs` | nuits complètes en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne, disque plein, RAW |
+| `tests/regression_tests.rs` | un test par bug corrigé + valeurs de référence de la détection |
+| `tests/integration_tests.rs` | cycle de vie avec les mocks |
+| `tests/helper_test.sh` | `aurion-helper` (seul programme exécuté en root) |
+| `tests/install_test.sh` | installation, mise à jour, réparation, désinstallation |
+| `tests/e2e/ui_test.mjs` | les 9 pages dans un navigateur réel |
 
----
+Détail, chiffres et couverture : [docs/TESTS.md](docs/TESTS.md).
 
-## 🏗️ Architecture
+## Architecture
 
-Architecture hexagonale (ports/adapters) — le cœur métier est testable sans matériel.
+Hexagonale (ports / adapters) : le cœur est testable sans matériel.
 
 ```
 src/
-├── core/               # Logique pure (0 dépendance I/O)
-│   ├── config.rs       # 7 structs de config, 3 presets builtin
-│   ├── models.rs       # CaptureFrame, Phase, DetectionResult, etc.
-│   ├── state_machine.rs # Boot → Arm → Disconnect → Calibration → Watch/Run → Shutdown
-│   ├── detection.rs    # Multi-couleur, moon mask, hystérésis, spatial spread
-│   ├── exposure.rs     # EMA auto-exposure, histogramme, rate limiting
-│   ├── orchestrator.rs # Boucle principale, sauvegarde, thumbnails
-│   └── session_logger.rs # NDJSON event logger
-├── ports/              # Traits abstraits
-│   ├── camera.rs       # CameraPort (capture_jpg, capture_raw)
-│   ├── storage.rs      # StoragePort (save_file, mount, sync)
-│   ├── system.rs       # SystemPort (shutdown)
-│   ├── network.rs      # NetworkApPort (start_ap, stop_ap)
-│   └── clock.rs        # ClockPort (now)
-├── adapters/
-│   ├── pc/             # Mocks pour développement local
-│   └── rpi/            # Raspberry Pi (rpicam-still, hostapd, mount)
-├── web/                # Serveur Axum + 35 routes API
-│   ├── api.rs          # Endpoints REST
-│   ├── mod.rs          # Router + static files
-│   └── static/         # 9 pages HTML, CSS, JS
-└── cli/                # Commandes (run, serve, simulate)
+├── core/        config, validation, exposition, détection, débruitage, JPEG/EXIF, orchestrateur
+├── ports/       traits caméra, stockage, horloge, réseau, système
+├── adapters/    pc/ (mocks) et rpi/ (rpicam-still, clé USB, hotspot, arrêt)
+├── web/         API Axum, sécurité HTTP, galerie, portail captif, pages embarquées
+├── sys.rs       commandes système (helper root via sudo, espace disque)
+└── cli/         simulation, bench (coût des traitements sur le Pi)
+scripts/         install.sh, aurion-helper, package.sh, deploy.sh/.ps1, get.sh, setup.sh
+deploy/          aurion.service, règle udev de montage USB
 ```
 
-### Machine d'état
+Sur le Pi : `/opt/aurion/aurion` (binaire unique, interface incluse), `/opt/aurion/config/aurion.json`,
+`/usr/local/sbin/aurion-helper` (seul accès root autorisé), photos sur la clé montée en `/mnt/capture`.
 
-```
-Boot → Arm → Disconnect → Calibration ─┬→ Watch ─→ Run → Shutdown
-                                        └→ Run (SAFE mode) → Shutdown
-```
+## Configuration
 
----
+Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Principaux paramètres :
 
-## ⚙️ Configuration
+| Section | Paramètre | Défaut | Rôle |
+|---|---|---|---|
+| exposure | `iso_min` / `iso_max` | 100 / 3200 | plage ISO |
+| | `shutter_min_us` / `shutter_max_us` | 1 s / 30 s | plage d'obturation |
+| | `lock_in_run` | false | exposition figée pendant la capture (timelapse sans scintillement) |
+| detection | `detection_capture_enabled` | false | false = SAFE, true = FILTER |
+| | `roi_top_percent` | 65 | part haute de l'image analysée (50 à 99) |
+| | `consecutive_required` | 2 | détections consécutives pour confirmer |
+| capture | `output_format` | RawAndJpg | `Jpg`, `RawDng` ou `RawAndJpg` |
+| | `awb` | daylight | balance des blancs fixe (pas de scintillement en timelapse) |
+| | `denoise.stack_frames` | 0 | JPEG empilé toutes les N images (0 = non) |
+| | `capture_interval_secs` | 10 | cadence du timelapse |
+| time_range | `start` / `end` | 21:00 / 06:00 | plage horaire (heure locale) |
+| | `duration_hours` | null | minuteur, prioritaire sur la plage |
+| network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |
 
-Fichier : `config/aurion.json`
+Rapports (audit de code, audit de sécurité, tests, énergie, plan d'action) : [docs/](docs/README.md).
 
-| Section | Paramètre | Défaut | Description |
-|---------|-----------|--------|-------------|
-| **Exposure** | `iso_min` / `iso_max` | 100 / 3200 | Plage ISO |
-| | `shutter_min_us` / `shutter_max_us` | 1M / 30M | Plage obturateur (µs) |
-| | `target_brightness` | 60 | Luminosité cible histogramme |
-| **Detection** | `green_threshold` | 15.0 | Seuil dominance verte |
-| | `red_threshold` / `blue_threshold` | 10.0 / 8.0 | Seuils rouge et violet |
-| | `roi_top_percent` | 65 | Zone d'analyse (% du haut) |
-| | `consecutive_required` | 2 | Détections consécutives pour confirmer |
-| | `detection_capture_enabled` | false | `false` = SAFE, `true` = FILTER |
-| | `moon_mask_enabled` | true | Masque lune (anti faux positifs) |
-| **Capture** | `watch_interval_secs` | 60 | Intervalle en Watch (s) |
-| | `capture_interval_secs` | 10 | Intervalle en Run pour timelapse (s) |
-| | `output_format` | RawDng | `Jpg`, `RawDng`, ou `RawAndJpg` |
-| **Time Range** | `start` / `end` | 21:00 / 06:00 | Plage horaire de surveillance |
-| | `duration_hours` | null | Mode minuteur (alternative à plage) |
-| **Storage** | `mount_point` | /mnt/capture | Point de montage USB |
-| | `warning_percent` | 15 | Seuil alerte stockage (%) |
-| **Network** | `ssid` | Aurion | Nom du hotspot Wi-Fi |
-| | `password` | aurora2024 | Mot de passe Wi-Fi |
-
-### Presets builtin
-
-| Preset | ISO max | Shutter max | Seuil vert | Usage |
-|--------|---------|-------------|------------|-------|
-| **FullDark** | 3200 | 30s | 15 | Ciel noir, pas de pollution |
-| **SemiPolluted** | 1600 | 15s | 20 | Pollution lumineuse modérée |
-| **Moonlight** | 800 | 10s | 25 | Pleine lune |
-
----
-
-## 🌐 API REST
-
-| Méthode | Route | Description |
-|---------|-------|-------------|
-| GET | `/api/status` | Phase, heure, stockage, warnings, USB |
-| GET | `/api/config` | Configuration (password masqué) |
-| POST | `/api/config` | Mise à jour configuration |
-| GET | `/api/config/wifi-password` | Mot de passe WiFi réel |
-| GET | `/api/preview` | Dernière preview (JPEG) |
-| POST | `/api/preview/capture` | Capturer une preview |
-| GET | `/api/presets` | Liste des presets |
-| POST | `/api/presets` | Sauvegarder un preset |
-| POST | `/api/presets/{name}/apply` | Appliquer un preset |
-| POST | `/api/disconnect` | Déconnexion → lancer capture |
-| GET | `/api/storage` | Info stockage |
-| GET | `/api/logs` | Logs temps réel |
-| GET | `/api/gallery` | Liste des images |
-| GET | `/api/gallery/stats` | Statistiques galerie |
-| GET | `/api/gallery/{file}` | Télécharger une image |
-| GET | `/api/gallery/thumbnail/{file}` | Thumbnail d'une image |
-| POST | `/api/gallery/delete` | Supprimer des images |
-| POST | `/api/gallery/download-zip` | Télécharger un ZIP |
-| GET | `/api/diagnostics` | Infos système (CPU, RAM, uptime) |
-| POST | `/api/system/time` | Régler l'heure système |
-| POST | `/api/system/shutdown` | Arrêt système |
-| GET | `/api/wifi/scan` | Scanner les réseaux WiFi |
-| POST | `/api/wifi/connect` | Se connecter à un réseau |
-| GET | `/api/wifi/status` | Statut connexion WiFi |
-
----
-
-## 📋 Pré-requis matériel
-
-| Composant | Détail |
-|-----------|--------|
-| Raspberry Pi | 4 Model B (4 Go RAM recommandé) |
-| Caméra | RPi HQ Camera (IMX477) + objectif grand angle |
-| Stockage | Clé USB (vfat/exfat, 64 Go+ recommandé) |
-| Alimentation | 5V/3A USB-C stable (batterie externe recommandée) |
-| Carte SD | 16 Go minimum (Raspberry Pi OS Lite) |
-
----
-
-## 🧪 Tests
-
-```bash
-cargo test
-# running 39 tests
-# test result: ok. 39 passed; 0 failed
-```
-
-Tests couvrant : config (validation, serialization), state machine (lifecycle, transitions), detection (multi-couleur, lune, hystérésis, spatial), exposure (EMA, rate limiting, histogramme), orchestrator (intégration), adapters (mocks).
-
----
-
-## 📖 Documentation
-
-- [Déploiement RPi détaillé](DEPLOY_RPI.md) — Guide étape par étape
-- `config/default.json` — Configuration par défaut
-- `scripts/bootstrap.sh` — Hardening OS + automount USB
-- `scripts/install.sh` — Installation complète (Rust, compilation, service)
-
----
-
-## 📄 Licence
+## Licence
 
 MIT

@@ -2,6 +2,44 @@ use serde::{Deserialize, Serialize};
 use chrono::NaiveTime;
 use std::path::{Path, PathBuf};
 use crate::core::models::OutputFormat;
+use crate::core::validate;
+
+/// Factory Wi-Fi password. The installer replaces it by a random one; the UI
+/// warns while it is still in use.
+pub const DEFAULT_WIFI_PASSWORD: &str = "aurora2024";
+
+/// Placeholder returned by the API instead of the real Wi-Fi password.
+pub const PASSWORD_MASK: &str = "********";
+
+/// Minimum Wi-Fi password length enforced by Aurion (WPA2 allows 8).
+pub const MIN_WIFI_PASSWORD_LEN: usize = 10;
+
+/// Write `data` to `path` atomically with the given Unix permissions.
+pub fn write_atomic(path: &Path, data: &[u8], mode: u32) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = parent.join(format!(".{}.tmp.{}", file_name, std::process::id()));
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(mode)
+            .open(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    // Best effort: persist the rename itself.
+    if let Ok(dir) = std::fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
 
 // ─── Main Config ───────────────────────────────────────────
 
@@ -51,6 +89,10 @@ pub struct ExposureConfig {
     /// Reject pixels above this value (0-255) from metering (default 250.0)
     #[serde(default = "default_saturation_reject")]
     pub saturation_reject: f64,
+    /// Freeze the exposure once the capture (RUN) has started: no flicker
+    /// in timelapses. Default false (slow adaptation, 3-5 % per frame).
+    #[serde(default)]
+    pub lock_in_run: bool,
 }
 
 fn default_detect_alpha() -> f64 { 0.08 }
@@ -112,9 +154,66 @@ pub struct CaptureConfig {
     pub focal_length_mm: f64,
     #[serde(default = "default_capture_interval")]
     pub capture_interval_secs: u32,
+    /// Noise reduction applied to the saved JPEG images.
+    #[serde(default)]
+    pub denoise: DenoiseConfig,
+    /// White balance of the camera. A fixed mode ("daylight") keeps the
+    /// same colours on every frame: no colour flicker in timelapses, and
+    /// the DNG "as shot" white balance is identical across the sequence.
+    #[serde(default = "default_awb")]
+    pub awb: String,
 }
 
+fn default_awb() -> String { "daylight".into() }
+
+/// Accepted values for `rpicam-still --awb`.
+pub const AWB_MODES: [&str; 7] = ["daylight", "cloudy", "auto", "incandescent", "tungsten", "fluorescent", "indoor"];
+
 fn default_capture_interval() -> u32 { 10 }
+
+/// Noise reduction settings (see `core::denoise`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DenoiseConfig {
+    /// Remove isolated hot pixels from the saved JPEG (default false: it
+    /// costs a full decode + re-encode per frame, i.e. battery and sensor
+    /// heat; the DNG is never modified).
+    #[serde(default)]
+    pub hot_pixels: bool,
+    /// Brightness excess over the neighbours that marks a hot pixel (default 40).
+    #[serde(default = "default_hot_pixel_threshold")]
+    pub hot_pixel_threshold: u8,
+    /// Also save an average of N consecutive frames (`_STACKn.jpg`), 0 = off.
+    /// 4 to 8 frames divide the noise by 2 to 3 (fast-moving aurora gets blurred).
+    #[serde(default)]
+    pub stack_frames: u32,
+    /// Denoise of the camera ISP: "cdn_hq" (best), "cdn_fast", "cdn_off", "off", "auto".
+    #[serde(default = "default_isp_denoise")]
+    pub isp_denoise: String,
+}
+
+fn default_hot_pixel_threshold() -> u8 { 40 }
+fn default_isp_denoise() -> String { "cdn_hq".into() }
+
+/// Accepted values for `rpicam-still --denoise`.
+pub const ISP_DENOISE_MODES: [&str; 5] = ["auto", "off", "cdn_off", "cdn_fast", "cdn_hq"];
+
+impl Default for DenoiseConfig {
+    fn default() -> Self {
+        Self {
+            hot_pixels: false,
+            hot_pixel_threshold: default_hot_pixel_threshold(),
+            stack_frames: 0,
+            isp_denoise: default_isp_denoise(),
+        }
+    }
+}
+
+impl DenoiseConfig {
+    /// Does any treatment require decoding the full-resolution image?
+    pub fn needs_full_decode(&self) -> bool {
+        self.hot_pixels || self.stack_frames >= 2
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRangeConfig {
@@ -170,16 +269,40 @@ impl AppConfig {
     }
 
     /// Save config to a JSON file.
+    ///
+    /// The write is atomic (temporary file + fsync + rename) so a power cut
+    /// in the field can never leave a truncated config behind, and the file
+    /// is created with mode 0600 because it contains the Wi-Fi password.
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ConfigError::IoError(e.to_string()))?;
-        }
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
-        std::fs::write(path, content)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
-        Ok(())
+        write_atomic(path, content.as_bytes(), 0o600)
+            .map_err(|e| ConfigError::IoError(e.to_string()))
+    }
+
+    /// Build a new config from a preset: only the camera/detection/schedule
+    /// parameters come from the preset. Network, web and storage settings are
+    /// machine specific and always kept from `self` (a preset must never
+    /// reset the Wi-Fi password to its default value).
+    pub fn with_preset(&self, preset: &AppConfig, preset_name: &str) -> AppConfig {
+        AppConfig {
+            exposure: preset.exposure.clone(),
+            detection: preset.detection.clone(),
+            capture: preset.capture.clone(),
+            time_range: preset.time_range.clone(),
+            storage: self.storage.clone(),
+            network: self.network.clone(),
+            web: self.web.clone(),
+            preset_name: preset_name.to_string(),
+        }
+    }
+
+    /// Copy of the config safe to expose or store in a preset file
+    /// (Wi-Fi password replaced by the mask).
+    pub fn masked(&self) -> AppConfig {
+        let mut cfg = self.clone();
+        cfg.network.password = PASSWORD_MASK.to_string();
+        cfg
     }
 
     /// Validate configuration bounds.
@@ -195,6 +318,24 @@ impl AppConfig {
                 "Obturateur min doit être ≤ obturateur max".into(),
             ));
         }
+        if self.exposure.iso_min < 1 || self.exposure.iso_max > 25_600 {
+            return Err(ConfigError::ValidationError(
+                "ISO doit être entre 1 et 25600".into(),
+            ));
+        }
+        if self.exposure.shutter_min_us < 1 || self.exposure.shutter_max_us > 240_000_000 {
+            return Err(ConfigError::ValidationError(
+                "L'obturateur doit être entre 1 µs et 240 s".into(),
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.exposure.target_percentile)
+            || !(1.0..=255.0).contains(&self.exposure.target_brightness)
+            || !(1.0..=255.0).contains(&self.exposure.saturation_reject)
+        {
+            return Err(ConfigError::ValidationError(
+                "Paramètres de mesure d'exposition hors bornes".into(),
+            ));
+        }
         if self.exposure.ev_step_max <= 0.0 || self.exposure.ev_step_max > 2.0 {
             return Err(ConfigError::ValidationError(
                 "EV step max doit être entre 0 et 2".into(),
@@ -202,9 +343,14 @@ impl AppConfig {
         }
 
         // ─── Detection ───────────────────────────────────────
-        if self.detection.roi_top_percent < 30 || self.detection.roi_top_percent > 100 {
+        if self.detection.roi_top_percent < 50 || self.detection.roi_top_percent > 99 {
             return Err(ConfigError::ValidationError(
-                "ROI doit être entre 30% et 100%".into(),
+                "ROI doit être entre 50% et 99%".into(),
+            ));
+        }
+        if self.detection.consecutive_required < 1 || self.detection.consecutive_required > 100 {
+            return Err(ConfigError::ValidationError(
+                "Le nombre de détections consécutives doit être entre 1 et 100".into(),
             ));
         }
         if self.detection.hysteresis_off >= self.detection.hysteresis_on {
@@ -237,18 +383,61 @@ impl AppConfig {
                 "L'intervalle de capture ne peut pas dépasser l'intervalle d'observation".into(),
             ));
         }
+        if self.capture.denoise.stack_frames == 1 || self.capture.denoise.stack_frames > 16 {
+            return Err(ConfigError::ValidationError(
+                "L'empilement doit être désactivé (0) ou compter entre 2 et 16 images".into(),
+            ));
+        }
+        if !ISP_DENOISE_MODES.contains(&self.capture.denoise.isp_denoise.as_str()) {
+            return Err(ConfigError::ValidationError(format!(
+                "Débruitage capteur inconnu (valeurs : {})",
+                ISP_DENOISE_MODES.join(", ")
+            )));
+        }
+        if !AWB_MODES.contains(&self.capture.awb.as_str()) {
+            return Err(ConfigError::ValidationError(format!(
+                "Balance des blancs inconnue (valeurs : {})",
+                AWB_MODES.join(", ")
+            )));
+        }
+        if self.capture.denoise.hot_pixel_threshold < 10 {
+            return Err(ConfigError::ValidationError(
+                "Le seuil des pixels chauds doit être d'au moins 10".into(),
+            ));
+        }
         if self.capture.focal_length_mm <= 0.0 {
             return Err(ConfigError::ValidationError(
                 "La longueur focale doit être > 0 mm".into(),
             ));
         }
 
-        // ─── Réseau ──────────────────────────────────────────
-        if self.network.password.len() < 10 {
+        if let Some(hours) = self.time_range.duration_hours {
+            if !(hours > 0.0 && hours <= 48.0) {
+                return Err(ConfigError::ValidationError(
+                    "La durée du minuteur doit être entre 0 et 48 heures".into(),
+                ));
+            }
+        }
+
+        // ─── Stockage ────────────────────────────────────────
+        if self.storage.warning_percent > 100
+            || self.storage.critical_percent >= self.storage.warning_percent
+        {
             return Err(ConfigError::ValidationError(
-                "Le mot de passe Wi-Fi doit faire au moins 10 caractères (WPA2)".into(),
+                "Le seuil critique doit être inférieur au seuil d'alerte (≤ 100 %)".into(),
             ));
         }
+        if !self.storage.mount_point.starts_with('/') && !self.storage.mount_point.starts_with('.') {
+            return Err(ConfigError::ValidationError(
+                "Le point de montage doit être un chemin".into(),
+            ));
+        }
+
+        // ─── Réseau ──────────────────────────────────────────
+        validate::validate_ssid(&self.network.ssid).map_err(ConfigError::ValidationError)?;
+        validate::validate_wpa_passphrase(&self.network.password, MIN_WIFI_PASSWORD_LEN)
+            .map_err(ConfigError::ValidationError)?;
+        validate::validate_channel(self.network.channel).map_err(ConfigError::ValidationError)?;
 
         // ─── Web ─────────────────────────────────────────────
         if self.web.port < 1024 {
@@ -289,6 +478,7 @@ impl Default for AppConfig {
                 target_percentile: 0.80,
                 target_brightness: 60.0,
                 saturation_reject: 250.0,
+                lock_in_run: false,
             },
             detection: DetectionConfig {
                 roi_top_percent: 65,
@@ -311,6 +501,8 @@ impl Default for AppConfig {
                 output_format: OutputFormat::RawDng,
                 focal_length_mm: 2.7,
                 capture_interval_secs: 10,
+                denoise: DenoiseConfig::default(),
+                awb: default_awb(),
             },
             time_range: TimeRangeConfig {
                 start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
@@ -324,7 +516,7 @@ impl Default for AppConfig {
             },
             network: NetworkConfig {
                 ssid: "Aurion".into(),
-                password: "aurora2024".into(),
+                password: DEFAULT_WIFI_PASSWORD.into(),
                 channel: 6,
             },
             web: WebConfig { port: 8080 },
@@ -471,6 +663,116 @@ mod tests {
     fn test_zero_focal_length() {
         let mut config = AppConfig::default();
         config.capture.focal_length_mm = 0.0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_ssid_injection_rejected() {
+        let mut config = AppConfig::default();
+        config.network.ssid = "Aurion\nwpa=0".into();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_password_too_long_or_non_ascii() {
+        let mut config = AppConfig::default();
+        config.network.password = "x".repeat(64);
+        assert!(config.validate().is_err());
+        config.network.password = "motdepasseé1".into();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_channel() {
+        let mut config = AppConfig::default();
+        config.network.channel = 0;
+        assert!(config.validate().is_err());
+        config.network.channel = 165;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_storage_thresholds_order() {
+        let mut config = AppConfig::default();
+        config.storage.warning_percent = 5;
+        config.storage.critical_percent = 10;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_timer_bounds() {
+        let mut config = AppConfig::default();
+        config.time_range.duration_hours = Some(0.0);
+        assert!(config.validate().is_err());
+        config.time_range.duration_hours = Some(100.0);
+        assert!(config.validate().is_err());
+        config.time_range.duration_hours = Some(8.0);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_all_builtin_presets_are_valid() {
+        for preset in AppConfig::builtin_presets() {
+            assert!(preset.config.validate().is_ok(), "preset {} invalide", preset.name);
+        }
+    }
+
+    #[test]
+    fn test_with_preset_keeps_machine_settings() {
+        let mut current = AppConfig::default();
+        current.network.password = "MonSuperMotDePasse".into();
+        current.network.ssid = "Aurion-Nord".into();
+        current.storage.mount_point = "/media/usb".into();
+        let preset = AppConfig::preset_moonlight();
+        let merged = current.with_preset(&preset, "Moonlight");
+        assert_eq!(merged.network.password, "MonSuperMotDePasse");
+        assert_eq!(merged.network.ssid, "Aurion-Nord");
+        assert_eq!(merged.storage.mount_point, "/media/usb");
+        assert_eq!(merged.exposure.iso_max, 800);
+        assert_eq!(merged.preset_name, "Moonlight");
+    }
+
+    #[test]
+    fn test_save_is_atomic_and_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub/aurion.json");
+        let config = AppConfig::default();
+        config.save(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(loaded.network.ssid, config.network.ssid);
+        // No temporary file left behind
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn test_default_json_file_loads() {
+        // Non-regression: the shipped config/default.json must stay loadable.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/default.json");
+        let cfg = AppConfig::load(&path).expect("config/default.json doit être valide");
+        assert_eq!(cfg.web.port, 8080);
+    }
+
+    #[test]
+    fn test_denoise_validation() {
+        let mut config = AppConfig::default();
+        assert!(!config.capture.denoise.hot_pixels, "off by default (battery, sensor heat)");
+        config.capture.awb = "rainbow".into();
+        assert!(config.validate().is_err());
+        config.capture.awb = "daylight".into();
+        config.capture.denoise.stack_frames = 1;
+        assert!(config.validate().is_err());
+        config.capture.denoise.stack_frames = 17;
+        assert!(config.validate().is_err());
+        config.capture.denoise.stack_frames = 4;
+        assert!(config.validate().is_ok());
+        config.capture.denoise.isp_denoise = "magic; rm -rf /".into();
         assert!(config.validate().is_err());
     }
 

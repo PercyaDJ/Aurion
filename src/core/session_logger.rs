@@ -25,7 +25,11 @@ const FLUSH_EVERY_N_LINES: u32 = 10;
 impl SessionLogger {
     /// Create a new session logger. Creates the session directory.
     pub fn new(base_dir: &Path) -> Result<Self, SessionLoggerError> {
-        let now = chrono::Local::now();
+        Self::new_at(base_dir, chrono::Local::now())
+    }
+
+    /// Create a session logger named after `now` (injected clock).
+    pub fn new_at(base_dir: &Path, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
         let session_name = now.format("%Y-%m-%d_%H-%M").to_string();
         let session_dir = base_dir.join("sessions").join(&session_name);
 
@@ -94,11 +98,15 @@ impl SessionLogger {
         let _ = self.log_writer.flush(); // immediate flush — critical messages must survive
     }
 
-    /// Force a flush of both files (call on shutdown).
+    /// Flush both files and force them onto the storage (fsync): after a
+    /// power cut, everything written before the last call is on the key.
     pub fn flush(&mut self) -> Result<(), SessionLoggerError> {
         self.writer.flush()
             .map_err(|e| SessionLoggerError::IoError(e.to_string()))?;
         let _ = self.log_writer.flush();
+        self.writer.get_ref().sync_data()
+            .map_err(|e| SessionLoggerError::IoError(e.to_string()))?;
+        let _ = self.log_writer.get_ref().sync_data();
         self.lines_since_flush = 0;
         Ok(())
     }
@@ -148,6 +156,7 @@ mod tests {
             aurora_color: "none".into(),
             consecutive_hits: 0,
             moon_mask_active: false,
+            frame_number: None,
         };
 
         logger.log_event(&event).unwrap();
@@ -183,6 +192,7 @@ mod tests {
                 aurora_color: "green".into(),
                 consecutive_hits: 2,
                 moon_mask_active: false,
+                frame_number: Some(0),
             };
             // Only 1 line (below flush threshold of 10) — relies on Drop to flush
             logger.log_event(&event).unwrap();

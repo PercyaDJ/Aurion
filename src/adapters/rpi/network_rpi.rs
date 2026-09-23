@@ -1,146 +1,61 @@
 use async_trait::async_trait;
-use std::process::Command;
+use std::time::Duration;
 use tracing::info;
 
+use crate::core::validate;
 use crate::ports::network::{NetworkApPort, NetworkError};
 
-/// Raspberry Pi network adapter using hostapd for Wi-Fi AP.
+/// Raspberry Pi Wi-Fi access point.
 ///
-/// Prerequisites:
-/// - hostapd installed: `sudo apt install hostapd`
-/// - dnsmasq installed: `sudo apt install dnsmasq`
-/// - Proper configuration files in /etc/hostapd/ and /etc/dnsmasq.conf
+/// All the work is done by the privileged helper (`aurion-helper ap-start`),
+/// which uses NetworkManager when it manages `wlan0` (Raspberry Pi OS
+/// Bookworm / Trixie) and falls back to hostapd + dnsmasq otherwise. It also
+/// sets up the captive portal (DNS → 192.168.4.1, port 80 → web port).
+/// The Wi-Fi password is passed on stdin, never on the command line.
 pub struct NetworkRpi;
 
 impl NetworkRpi {
     pub fn new() -> Self {
         Self
     }
+}
 
-    fn write_hostapd_config(&self, ssid: &str, password: &str, channel: u32) -> Result<(), NetworkError> {
-        let config = format!(
-            "interface=wlan0\n\
-             driver=nl80211\n\
-             ssid={}\n\
-             hw_mode=g\n\
-             channel={}\n\
-             wmm_enabled=0\n\
-             macaddr_acl=0\n\
-             auth_algs=1\n\
-             ignore_broadcast_ssid=0\n\
-             wpa=2\n\
-             wpa_passphrase={}\n\
-             wpa_key_mgmt=WPA-PSK\n\
-             wpa_pairwise=TKIP\n\
-             rsn_pairwise=CCMP\n",
-            ssid, channel, password
-        );
-
-        std::fs::write("/tmp/aurora_hostapd.conf", &config)
-            .map_err(|e| NetworkError::StartFailed(e.to_string()))?;
-
-        Ok(())
+impl Default for NetworkRpi {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[async_trait]
 impl NetworkApPort for NetworkRpi {
     async fn start_ap(&self, ssid: &str, password: &str, channel: u32) -> Result<(), NetworkError> {
-        info!("NetworkRpi: configuring AP '{}' on channel {}", ssid, channel);
+        validate::validate_ssid(ssid).map_err(NetworkError::StartFailed)?;
+        validate::validate_wpa_passphrase(password, 8).map_err(NetworkError::StartFailed)?;
+        validate::validate_channel(channel).map_err(NetworkError::StartFailed)?;
 
-        // Write hostapd config
-        self.write_hostapd_config(ssid, password, channel)?;
-
-        // Configure static IP for wlan0
-        let _ = Command::new("sudo")
-            .args(["ip", "addr", "flush", "dev", "wlan0"])
-            .output();
-        let _ = Command::new("sudo")
-            .args(["ip", "addr", "add", "192.168.4.1/24", "dev", "wlan0"])
-            .output();
-        let _ = Command::new("sudo")
-            .args(["ip", "link", "set", "wlan0", "up"])
-            .output();
-
-        // Start hostapd
-        let output = Command::new("sudo")
-            .args(["hostapd", "-B", "/tmp/aurora_hostapd.conf"])
-            .output()
-            .map_err(|e| NetworkError::StartFailed(e.to_string()))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(NetworkError::StartFailed(format!(
-                "hostapd failed: {}",
-                stderr
-            )));
-        }
-
-        // Start dnsmasq for DHCP + DNS redirect (captive portal)
-        // --address=/#/192.168.4.1 redirects ALL DNS queries to the Pi
-        // This makes the OS think there's no internet → triggers captive portal
-        let _ = Command::new("sudo")
-            .args([
-                "dnsmasq",
-                "--interface=wlan0",
-                "--dhcp-range=192.168.4.10,192.168.4.50,255.255.255.0,24h",
-                "--address=/#/192.168.4.1",
-                "--no-resolv",
-                "--no-hosts",
-                "--log-queries",
-            ])
-            .spawn();
-
-        // Redirect port 80 → 8080 for captive portal detection
-        // Phones check port 80 for captive portal; nftables (Trixie) handles the redirect
-        let _ = Command::new("sudo")
-            .args(["nft", "add", "table", "ip", "aurion_nat"])
-            .output();
-        let _ = Command::new("sudo")
-            .args(["nft", "add", "chain", "ip", "aurion_nat", "prerouting",
-                   "{ type nat hook prerouting priority 0 ; }"])
-            .output();
-        let _ = Command::new("sudo")
-            .args(["nft", "add", "rule", "ip", "aurion_nat", "prerouting",
-                   "tcp", "dport", "80", "redirect", "to", ":8080"])
-            .output();
-
+        info!("NetworkRpi: starting AP '{}' on channel {}", ssid, channel);
+        let channel = channel.to_string();
+        crate::sys::helper(&["ap-start", ssid, &channel], Some(password), Duration::from_secs(60))
+            .await
+            .map_err(NetworkError::StartFailed)?;
         info!("NetworkRpi: AP started — SSID: {}, IP: 192.168.4.1 (captive portal active)", ssid);
         Ok(())
     }
 
     async fn stop_ap(&self) -> Result<(), NetworkError> {
         info!("NetworkRpi: stopping AP...");
-
-        // Kill hostapd
-        let _ = Command::new("sudo")
-            .args(["killall", "hostapd"])
-            .output();
-
-        // Kill dnsmasq
-        let _ = Command::new("sudo")
-            .args(["killall", "dnsmasq"])
-            .output();
-
-        // Remove nftables redirect
-        let _ = Command::new("sudo")
-            .args(["nft", "delete", "table", "ip", "aurion_nat"])
-            .output();
-
-        // Bring down wlan0
-        let _ = Command::new("sudo")
-            .args(["ip", "link", "set", "wlan0", "down"])
-            .output();
-
+        crate::sys::helper(&["ap-stop"], None, Duration::from_secs(30))
+            .await
+            .map_err(NetworkError::StopFailed)?;
         info!("NetworkRpi: AP stopped");
         Ok(())
     }
 
     fn is_ap_active(&self) -> bool {
-        Command::new("pgrep")
-            .arg("hostapd")
+        std::process::Command::new("iw")
+            .args(["dev", "wlan0", "info"])
             .output()
-            .map(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim() == "type AP"))
             .unwrap_or(false)
     }
 }

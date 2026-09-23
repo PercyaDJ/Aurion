@@ -1,8 +1,10 @@
 use std::path::Path;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 
-use crate::core::config::AppConfig;
+use crate::core::config::{AppConfig, DenoiseConfig};
+use crate::core::denoise::Stacker;
 use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
@@ -10,6 +12,8 @@ use chrono::Datelike;
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
+use crate::ports::clock::ClockPort;
+use crate::ports::network::NetworkApPort;
 use crate::ports::storage::StoragePort;
 use crate::ports::system::SystemPort;
 use crate::web::AppState;
@@ -24,11 +28,40 @@ pub struct Orchestrator<C: CameraPort, S: StoragePort, Sys: SystemPort> {
     camera: C,
     storage: S,
     system: Sys,
+    clock: Arc<dyn ClockPort>,
+    network: Option<Box<dyn NetworkApPort>>,
 }
+
+/// Delay between the "Déconnexion" click and the hotspot shutdown, so the
+/// phone receives the answer and the user can walk away.
+const DISCONNECT_DELAY: Duration = Duration::from_secs(15);
 
 impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     pub fn new(state: AppState, camera: C, storage: S, system: Sys) -> Self {
-        Self { state, camera, storage, system }
+        Self {
+            state,
+            camera,
+            storage,
+            system,
+            clock: Arc::new(crate::adapters::pc::ClockReal::new()),
+            network: None,
+        }
+    }
+
+    /// Use another clock (tests / simulation with virtual time).
+    pub fn with_clock(mut self, clock: Arc<dyn ClockPort>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Hotspot to switch off when the night starts.
+    pub fn with_network(mut self, network: Box<dyn NetworkApPort>) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    fn now(&self) -> chrono::DateTime<chrono::Local> {
+        self.clock.now_local()
     }
 
     /// Main entry point — run the full autonomous loop.
@@ -40,15 +73,15 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.wait_for_disconnect().await;
 
         // ─── DISCONNECT timer ───────────────────────────────
+        if self.is_shutdown().await {
+            return Ok(());
+        }
         info!("Orchestrator: disconnect requested, 15s timer...");
         self.set_phase(Phase::Disconnect).await;
-        sleep(Duration::from_secs(15)).await;
+        sleep(DISCONNECT_DELAY).await;
 
         // ─── Stop AP (best-effort) ──────────────────────────
-        #[cfg(feature = "rpi")]
-        {
-            use crate::ports::network::NetworkApPort;
-            let network = crate::adapters::rpi::NetworkRpi::new();
+        if let Some(ref network) = self.network {
             if let Err(e) = network.stop_ap().await {
                 warn!("Orchestrator: failed to stop AP: {}", e);
             }
@@ -59,7 +92,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // ─── Log system clock immediately (critical for diagnosis without screen) ─
         {
-            let sys_now = chrono::Local::now();
+            let sys_now = self.now();
             let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
             info!("Orchestrator: {}", clock_msg);
             self.log(&clock_msg).await;
@@ -80,7 +113,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 if self.is_shutdown().await {
                     return Ok(());
                 }
-                let now = chrono::Local::now();
+                let now = self.now();
                 if time_range.contains(now.time()) {
                     break;
                 }
@@ -121,13 +154,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let mut storage_ok = false;
 
             // First attempt: direct write (USB already mounted via fstab/boot)
-            if std::fs::create_dir_all(&configured_path).is_ok() {
-                if std::fs::write(&probe_path, b"ok").is_ok() {
+            if std::fs::create_dir_all(&configured_path).is_ok()
+                && std::fs::write(&probe_path, b"ok").is_ok() {
                     let _ = std::fs::remove_file(&probe_path);
                     self.log(&format!("USB accessible: {}", config.storage.mount_point)).await;
                     storage_ok = true;
                 }
-            }
 
             // Second attempt: try to (re)mount then retry
             if !storage_ok {
@@ -135,13 +167,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 self.log("USB: montage en cours...").await;
                 let _ = self.storage.mount().await; // ignore if already mounted
                 sleep(Duration::from_secs(3)).await;
-                if std::fs::create_dir_all(&configured_path).is_ok() {
-                    if std::fs::write(&probe_path, b"ok").is_ok() {
+                if std::fs::create_dir_all(&configured_path).is_ok()
+                    && std::fs::write(&probe_path, b"ok").is_ok() {
                         let _ = std::fs::remove_file(&probe_path);
                         self.log(&format!("USB monte et accessible: {}", config.storage.mount_point)).await;
                         storage_ok = true;
                     }
-                }
             }
 
             if !storage_ok {
@@ -157,7 +188,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
         let storage_path: &Path = configured_path.as_path();
 
-        let mut session_logger = match SessionLogger::new(storage_path) {
+        let mut session_logger = match SessionLogger::new_at(storage_path, self.now()) {
             Ok(l) => {
                 info!("Orchestrator: session logger at {:?}", l.session_path());
                 Some(l)
@@ -173,7 +204,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.log(&format!("Mode: {}", capture_mode_str)).await;
         // Dump effective config to session.log so we can verify from SSH next morning
         if let Some(ref mut sl) = session_logger {
-            sl.log_text(&format!("=== CONFIG EFFECTIVE ==="));
+            sl.log_text("=== CONFIG EFFECTIVE ===");
             sl.log_text(&format!("Mode: {}", capture_mode_str));
             sl.log_text(&format!("Format: {:?}", config.capture.output_format));
             sl.log_text(&format!("Intervalle: {}s", config.capture.capture_interval_secs));
@@ -181,7 +212,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             sl.log_text(&format!("Minuteur: {:?}h", config.time_range.duration_hours));
             sl.log_text(&format!("detection_capture_enabled: {}", config.detection.detection_capture_enabled));
             sl.log_text(&format!("Mount point: {}", config.storage.mount_point));
-            sl.log_text(&format!("======================="));
+            sl.log_text("=======================");
         }
 
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
@@ -231,7 +262,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let deadline: Option<chrono::NaiveTime> = if let Some(hours) = config.time_range.duration_hours {
             // Timer mode: run for N hours from now
             let secs = (hours * 3600.0) as i64;
-            let end = chrono::Local::now() + chrono::Duration::seconds(secs);
+            let end = self.now() + chrono::Duration::seconds(secs);
             let msg = format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"));
             self.log(&msg).await;
             if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
@@ -246,9 +277,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // ─── Main capture loop ──────────────────────────────
         let mut consecutive_detections = 0u32;
+        let mut stacker: Option<Stacker> = None;
+        let mut iterations = 0u64;
         let mut frame_number = 0u64;
         let mut consecutive_io_errors = 0u32;
-        let loop_start = chrono::Local::now();
+        let loop_start = self.now();
         let mut has_started_range = false;
         let mut wait_iters = 0u64;
 
@@ -260,7 +293,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
 
             // Check time limit
-            let now = chrono::Local::now();
+            let now = self.now();
             let mut should_stop = false;
             let mut wait_for_start = false;
 
@@ -287,7 +320,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             };
 
             if wait_for_start {
-                if wait_iters % 30 == 0 {
+                if wait_iters.is_multiple_of(30) {
                     let wait_msg = format!(
                         "Attente du début de plage (actuel: {}, début: {})",
                         now.format("%H:%M:%S"), config.time_range.start
@@ -417,21 +450,25 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 };
             let frame = &analysis_frame;
 
-            // ROI crop
+            // ─── Exposure update (metering on the sky ROI only) ─
             let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
-            let roi_height = (frame.height as f64 * config.detection.roi_top_percent as f64 / 100.0) as u32;
-
-            // ─── Exposure update ────────────────────────────
             let hist = compute_histogram(roi_data);
-            exposure_ctrl.update(&hist, current_phase);
+            // Timelapse: optionally freeze the exposure once capturing
+            // (zero flicker; ramping can be done in post-processing).
+            if !(current_phase == Phase::Run && config.exposure.lock_in_run) {
+                exposure_ctrl.update(&hist, current_phase);
+            }
 
             // ─── Detection ──────────────────────────────────
-            let det_result = detector.analyze(roi_data, frame.width, roi_height);
+            // The detector extracts the ROI itself: give it the full frame
+            // (passing the already-cropped ROI used to shrink the analysed
+            // area to roi² — e.g. 65 % × 65 % = 42 % of the sky).
+            let det_result = detector.analyze(&frame.data, frame.width, frame.height);
 
             // ─── Session logging ────────────────────────────
             if let Some(ref mut logger) = session_logger {
                 let event = SessionEvent {
-                    timestamp: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+                    timestamp: self.now().format("%Y-%m-%dT%H:%M:%S").to_string(),
                     phase: format!("{:?}", current_phase),
                     capture_mode: capture_mode_str.to_string(),
                     exposure_us: exposure.shutter_us,
@@ -443,9 +480,20 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     aurora_color: det_result.aurora_color.to_string(),
                     consecutive_hits: consecutive_detections,
                     moon_mask_active: det_result.moon_masked,
+                    frame_number: (current_phase == Phase::Run).then_some(frame_number),
                 };
                 if let Err(e) = logger.log_event(&event) {
                     warn!("Orchestrator: log event failed: {}", e);
+                }
+            }
+
+            // ─── Power-cut safety: push the logs to the USB key every ~6 frames ─
+            iterations += 1;
+            if iterations.is_multiple_of(6) {
+                if let Some(ref mut sl) = session_logger {
+                    if let Err(e) = sl.flush() {
+                        warn!("Orchestrator: session log sync failed: {}", e);
+                    }
                 }
             }
 
@@ -471,12 +519,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     }
 
                     // Watch interval (hot-reloadable)
-                    sleep(Duration::from_secs(live_watch_interval as u64)).await;
+                    sleep(Duration::from_secs(live_watch_interval)).await;
                 }
 
                 Phase::Run => {
                     // Save the captured frame (NO double capture — raw_frame_opt already holds the DNG)
-                    self.save_frame(&config, &analysis_frame, raw_frame_opt.as_ref(), frame_number, det_result.detected).await;
+                    self.save_frame(&config, &analysis_frame, raw_frame_opt.as_ref(), frame_number, det_result.detected, &mut stacker).await;
                     frame_number += 1;
 
                     // In FILTER mode during Run, if detection drops we keep capturing
@@ -498,6 +546,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.set_phase(Phase::Shutdown).await;
         self.log("Phase: SHUTDOWN").await;
 
+        if let Some(ref mut sl) = session_logger {
+            sl.log_text("Fin de session");
+            let _ = sl.flush();
+        }
+        drop(session_logger);
+
         // Sync and unmount storage
         if let Err(e) = self.storage.sync().await {
             warn!("Orchestrator: sync failed: {}", e);
@@ -514,9 +568,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     }
 
     /// Save a captured frame to storage.
-    /// `analysis_frame` is the JPG frame used for analysis (always present).
-    /// `raw_frame` is the pre-captured DNG (Some for RawDng/RawAndJpg, None for JPG mode).
+    /// `analysis_frame` is the JPG frame used for analysis (always present);
+    /// its `raw_bytes` hold the original full-resolution JPEG on the Pi.
+    /// `raw_frame` is the pre-captured DNG (Some for RawDng/RawAndJpg).
     /// `is_aurora` controls whether `_AURORA` is appended to the filename.
+    /// `stacker` accumulates frames when stacking is enabled.
     async fn save_frame(
         &self,
         config: &AppConfig,
@@ -524,96 +580,141 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         raw_frame: Option<&CaptureFrame>,
         frame_num: u64,
         is_aurora: bool,
+        stacker: &mut Option<Stacker>,
     ) {
-
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let timestamp = self.now().format("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
+        let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
+        let denoise = &config.capture.denoise;
         info!("Orchestrator: save_frame frame={} format={:?} aurora={}", frame_num, config.capture.output_format, is_aurora);
 
-        match config.capture.output_format {
-            OutputFormat::Jpg => {
-                let filename = format!("aurora_{}_{:05}{}.jpg", timestamp, frame_num, suffix);
-                // Prefer raw_bytes (original JPEG from rpicam-still) to avoid re-encoding.
-                // Fall back to RGB re-encode only for mock/test frames where raw_bytes is empty.
-                let jpg_bytes: Vec<u8> = if !analysis_frame.raw_bytes.is_empty() {
-                    analysis_frame.raw_bytes.clone()
-                } else {
-                    self.encode_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height)
-                        .unwrap_or_default()
-                };
-                if jpg_bytes.is_empty() {
-                    error!("Orchestrator: no JPEG data to save for frame {}", frame_num);
-                } else if let Err(e) = self.storage.save_file(&filename, &jpg_bytes).await {
-                    error!("Orchestrator: save JPG failed: {}", e);
-                } else {
-                    self.generate_thumbnail(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &filename).await;
-                    info!("Orchestrator: saved {}", filename);
-                }
+        // Full-resolution processing only when a treatment is enabled.
+        let processed = self.process_jpeg(analysis_frame, denoise).await;
 
-            }
-            OutputFormat::RawDng => {
-                // Use the already-captured raw frame (no re-capture)
-                let filename = format!("aurora_{}_{:05}{}.dng", timestamp, frame_num, suffix);
-                if let Some(raw) = raw_frame {
-                    let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
-                    if let Err(e) = self.storage.save_file(&filename, dng_bytes).await {
-                        error!("Orchestrator: save RAW failed: {}", e);
+        if matches!(config.capture.output_format, OutputFormat::Jpg | OutputFormat::RawAndJpg) {
+            let filename = format!("{}.jpg", base);
+            match &processed {
+                Some(p) if !p.jpeg.is_empty() => {
+                    if let Err(e) = self.storage.save_file(&filename, &p.jpeg).await {
+                        error!("Orchestrator: save JPG failed: {}", e);
                     } else {
-                        info!("Orchestrator: saved {}", filename);
+                        self.save_thumbnail(analysis_frame, &filename).await;
+                        if p.hot_pixels_fixed > 0 {
+                            info!("Orchestrator: {} ({} pixels chauds corrigés)", filename, p.hot_pixels_fixed);
+                        }
                     }
-                } else {
-                    error!("Orchestrator: no raw frame available for RawDng format — skipping");
                 }
+                _ => error!("Orchestrator: no JPEG data to save for frame {}", frame_num),
             }
-            OutputFormat::RawAndJpg => {
-                let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
-                // Save the analysis frame as JPG (no re-capture needed)
-                let jpg_filename = format!("{}.jpg", base);
-                if let Err(e) = self.save_rgb_as_jpg(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &jpg_filename).await {
-                    error!("Orchestrator: save JPG failed: {}", e);
-                } else {
-                    self.generate_thumbnail(&analysis_frame.data, analysis_frame.width, analysis_frame.height, &jpg_filename).await;
-                }
-                // Save pre-captured DNG (no re-capture)
-                if let Some(raw) = raw_frame {
+        }
+
+        if matches!(config.capture.output_format, OutputFormat::RawDng | OutputFormat::RawAndJpg) {
+            match raw_frame {
+                Some(raw) => {
                     let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
                     if let Err(e) = self.storage.save_file(&format!("{}.dng", base), dng_bytes).await {
                         error!("Orchestrator: save RAW failed: {}", e);
                     }
-                } else {
-                    error!("Orchestrator: no raw frame for RawAndJpg format");
                 }
-                info!("Orchestrator: saved {}.jpg + .dng", base);
+                None => error!("Orchestrator: no raw frame available for {:?}", config.capture.output_format),
+            }
+        }
+
+        // ─── Stacking: one extra, less noisy image every N frames ───
+        if denoise.stack_frames >= 2 {
+            if let Some(p) = processed.and_then(|p| p.full) {
+                let (w, h, rgb) = p;
+                let st = stacker.get_or_insert_with(|| Stacker::new(w, h));
+                if st.dimensions() != (w, h) {
+                    *st = Stacker::new(w, h);
+                }
+                st.add(&rgb);
+                if st.count() >= denoise.stack_frames {
+                    let n = st.count();
+                    let result = st.result();
+                    st.reset();
+                    if let Some(stacked) = result {
+                        let name = format!("aurora_{}_{:05}_STACK{}{}.jpg", timestamp, frame_num, n, suffix);
+                        let original = analysis_frame.raw_bytes.clone();
+                        let jpeg = tokio::task::spawn_blocking(move || {
+                            encode_jpeg(&stacked, w, h).map(|j| crate::core::jpeg::transplant_exif(&original, j))
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+                        match jpeg {
+                            Some(j) => {
+                                if self.storage.save_file(&name, &j).await.is_ok() {
+                                    self.save_thumbnail(analysis_frame, &name).await;
+                                    info!("Orchestrator: saved {} ({} images empilées)", name, n);
+                                }
+                            }
+                            None => error!("Orchestrator: stack encoding failed"),
+                        }
+                    }
+                }
             }
         }
     }
 
-    /// Encode RGB data as JPEG and save to storage (fallback only).
-    async fn save_rgb_as_jpg(&self, rgb_data: &[u8], width: u32, height: u32, filename: &str) -> anyhow::Result<()> {
-        let bytes = self.encode_rgb_as_jpg(rgb_data, width, height)?;
-        self.storage.save_file(filename, &bytes).await
-            .map_err(|e| anyhow::anyhow!("{}", e))
+    /// Prepare the JPEG to save: the original bytes when no treatment is
+    /// enabled (no decode at all, lowest CPU use), otherwise decode the full
+    /// image, remove hot pixels, re-encode (quality 92) and keep the EXIF.
+    async fn process_jpeg(&self, frame: &CaptureFrame, denoise: &DenoiseConfig) -> Option<ProcessedJpeg> {
+        let original = frame.raw_bytes.clone();
+        let fallback_rgb = (frame.data.clone(), frame.width, frame.height);
+        let denoise = denoise.clone();
+        if !original.is_empty() && !denoise.needs_full_decode() {
+            return Some(ProcessedJpeg { jpeg: original, full: None, hot_pixels_fixed: 0 });
+        }
+        tokio::task::spawn_blocking(move || {
+            // Mock / test frames have no original JPEG: use the RGB pixels.
+            let (mut rgb, w, h) = if original.is_empty() {
+                fallback_rgb
+            } else {
+                match image::load_from_memory_with_format(&original, image::ImageFormat::Jpeg) {
+                    Ok(img) => {
+                        let rgb = img.to_rgb8();
+                        let (w, h) = rgb.dimensions();
+                        (rgb.into_raw(), w, h)
+                    }
+                    // Undecodable: keep the original file untouched
+                    Err(_) => return Some(ProcessedJpeg { jpeg: original, full: None, hot_pixels_fixed: 0 }),
+                }
+            };
+            let fixed = if denoise.hot_pixels {
+                crate::core::denoise::remove_hot_pixels(&mut rgb, w, h, denoise.hot_pixel_threshold)
+            } else {
+                0
+            };
+            let jpeg = if denoise.hot_pixels || original.is_empty() {
+                let encoded = encode_jpeg(&rgb, w, h)?;
+                crate::core::jpeg::transplant_exif(&original, encoded)
+            } else {
+                original
+            };
+            let full = (denoise.stack_frames >= 2).then_some((w, h, rgb));
+            Some(ProcessedJpeg { jpeg, full, hot_pixels_fixed: fixed })
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
-    /// Encode RGB pixels to JPEG bytes.
-    fn encode_rgb_as_jpg(&self, rgb_data: &[u8], width: u32, height: u32) -> anyhow::Result<Vec<u8>> {
+    /// Gallery thumbnail (thumbs/<name>): the EXIF thumbnail of the capture
+    /// when available (no encoding at all), otherwise a 320×240 resize of the
+    /// analysis pixels.
+    async fn save_thumbnail(&self, frame: &CaptureFrame, filename: &str) {
+        let thumb_name = format!("thumbs/{}", filename);
+        if let Some(thumb) = crate::core::jpeg::exif_thumbnail(&frame.raw_bytes) {
+            let _ = self.storage.save_file(&thumb_name, thumb).await;
+            return;
+        }
         use image::{ImageBuffer, Rgb};
-        let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgb_data.to_vec())
-            .ok_or_else(|| anyhow::anyhow!("Invalid image dimensions"))?;
-        let mut buf = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut buf, image::ImageFormat::Jpeg)?;
-        Ok(buf.into_inner())
-    }
-
-    /// Generate a 320×240 thumbnail and save to thumbs/ subdirectory.
-    async fn generate_thumbnail(&self, rgb_data: &[u8], width: u32, height: u32, filename: &str) {
-        use image::{ImageBuffer, Rgb};
-        if let Some(img) = ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(width, height, rgb_data.to_vec()) {
+        if let Some(img) = ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(frame.width, frame.height, frame.data.clone()) {
             let thumb = image::imageops::resize(&img, 320, 240, image::imageops::FilterType::Triangle);
-            let mut buf = std::io::Cursor::new(Vec::new());
-            if thumb.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok() {
-                let thumb_name = format!("thumbs/{}", filename);
-                let _ = self.storage.save_file(&thumb_name, buf.get_ref()).await;
+            if let Some(buf) = encode_jpeg(thumb.as_raw(), 320, 240) {
+                let _ = self.storage.save_file(&thumb_name, &buf).await;
             }
         }
     }
@@ -646,6 +747,26 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         info!("Orchestrator: {}", msg);
         self.state.add_log(msg.to_string()).await;
     }
+}
+
+/// Result of [`Orchestrator::process_jpeg`].
+struct ProcessedJpeg {
+    jpeg: Vec<u8>,
+    /// Full-resolution pixels `(w, h, rgb)`, kept only for stacking.
+    full: Option<(u32, u32, Vec<u8>)>,
+    hot_pixels_fixed: usize,
+}
+
+/// JPEG quality of re-encoded images (after noise reduction).
+const JPEG_QUALITY: u8 = 92;
+
+/// Encode RGB pixels as JPEG.
+pub fn encode_jpeg(rgb: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
+    let mut buf = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY)
+        .encode(rgb, width, height, image::ExtendedColorType::Rgb8)
+        .ok()?;
+    Some(buf)
 }
 
 /// Crop image data to ROI (top N% of the image).

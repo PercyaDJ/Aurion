@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Preview</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
 </head>
 
 <body>
@@ -84,6 +84,23 @@
             <button class="btn btn-outline" id="roiToggle" onclick="toggleRoi()">
                 📐 ROI
             </button>
+        </div>
+
+        <!-- Dark frames -->
+        <div class="card fade-in" style="margin-top:1rem;">
+            <div class="card-header">
+                <span class="card-title">Darks (bruit du capteur)</span>
+            </div>
+            <span class="form-hint" style="display:block;margin-bottom:0.75rem;">
+                Mettez le bouchon sur l'objectif : la caméra prend des poses noires en RAW aux réglages de la dernière preview
+                (même ISO, même temps de pose). À soustraire au post-traitement (Sequator, Siril…) pour retirer bruit thermique
+                et pixels chauds des DNG. Idéalement juste avant ou juste après la nuit, à la même température.
+            </span>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <input type="number" class="form-input" id="darkCount" min="1" max="30" value="10" style="width:5rem;">
+                <button class="btn btn-outline" style="flex:1;" id="darkBtn" onclick="captureDarks()">Capturer les darks</button>
+            </div>
+            <div id="darkStatus" class="form-hint" style="margin-top:0.5rem;"></div>
         </div>
     </div>
 
@@ -210,7 +227,37 @@
         // Keep overlay correct on window resize
         window.addEventListener('resize', updateRoiOverlay);
 
+        async function captureDarks() {
+            if (!confirm("Le bouchon est-il sur l'objectif ?")) return;
+            try {
+                const count = parseInt(document.getElementById('darkCount').value) || 10;
+                await apiFetch('/api/darks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count }),
+                });
+                pollDarks();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function pollDarks() {
+            try {
+                const d = await (await apiFetch('/api/darks')).json();
+                const el = document.getElementById('darkStatus');
+                const btn = document.getElementById('darkBtn');
+                if (!d) { el.textContent = ''; return; }
+                btn.disabled = d.running;
+                el.textContent = d.running
+                    ? `⏳ ${d.done}/${d.total} (ISO ${d.iso}, ${(d.shutter_us / 1e6).toFixed(1)} s)`
+                    : (d.error ? '❌ ' + d.error : `✅ ${d.done} darks enregistrés dans darks/`);
+                if (d.running) setTimeout(pollDarks, 3000);
+            } catch (_) { }
+        }
+
         loadRoi();
+        pollDarks();
         loadExisting().then(() => updateRoiOverlay());
     </script>
     <script src="/js/toast.js"></script>
