@@ -4,6 +4,7 @@
 |---|---|---|
 | [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md) | tout le monde, **commencer ici** | préparer la carte SD, brancher, première nuit, récupérer les photos, dépannage |
 | [GUIDE_PHOTO.md](GUIDE_PHOTO.md) | photographes | bruit sur les RAW, timelapse, darks, sélection des meilleures aurores |
+| [GUIDE_EXPEDITION.md](GUIDE_EXPEDITION.md) | photographes | plusieurs nuits sans toucher à la caméra : démarrage automatique, énergie, stockage, workflow RAW |
 | [SPECIFICATIONS.md](SPECIFICATIONS.md) | tous | ce que fait Aurion : exigences, règles de gestion, critères d'acceptation |
 | [UX.md](UX.md) | conception | principes d'interface, frictions supprimées, écrans, mode simple / expert |
 | [DAT.md](DAT.md) | développeurs | Dossier d'Architecture Technique : composants, déroulé de la nuit, données, réseau, sécurité, livraison, API |
@@ -17,4 +18,4 @@
 
 Installation avancée : [DEPLOY_RPI.md](../DEPLOY_RPI.md).
 
-Version couverte : **1.6.0** (23/09/2026).
+Version couverte : **1.7.0** (23/09/2026).

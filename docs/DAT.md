@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.6.0**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.7.0**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -79,19 +79,20 @@ sur le terrain ou un appareil de test à l'atelier.
 stateDiagram-v2
     [*] --> ARM: démarrage
     ARM --> ARM: nuit interrompue, attente 5 min (annulable)
-    ARM --> DISCONNECT: « Lancer la nuit » ou reprise auto
+    ARM --> DISCONNECT: « Lancer la nuit », reprise auto ou expédition (5 min sans activité)
     DISCONNECT --> CALIBRATION: 15 s puis Wi-Fi coupé
     CALIBRATION --> RUN: mode Toute la nuit (SAFE)
     CALIBRATION --> WATCH: mode Aurores seulement (FILTER)
     WATCH --> RUN: N détections consécutives
     RUN --> SHUTDOWN: fin de plage, minuteur ou clé pleine
     WATCH --> SHUTDOWN: fin de plage, minuteur ou clé pleine
-    SHUTDOWN --> [*]: sync puis extinction
+    DISCONNECT --> SHUTDOWN: Pi 5, nuit dans plus de 2 h : réveil programmé
+    SHUTDOWN --> [*]: sync, réveil programmé (Pi 5, expédition), extinction
 ```
 
 | Phase | Ce qui se passe | Code |
 |---|---|---|
-| ARM | hotspot actif, interface disponible, réglages modifiables, heure synchronisée depuis le téléphone | `main.rs`, `web/` |
+| ARM | hotspot actif, interface disponible, réglages modifiables, heure synchronisée depuis le téléphone (ou lue sur l'horloge matérielle au démarrage) ; en expédition, départ automatique 5 min après la dernière requête `/api/` si l'heure est fiable et la clé présente | `main.rs`, `web/`, `orchestrator::wait_for_start` |
 | (reprise) | si `night.json` existe et que la nuit n'est pas finie : hotspot 5 min avec compte à rebours, puis reprise | `orchestrator::resume_window`, `core/night.rs` |
 | DISCONNECT | 15 s pour que la réponse arrive au téléphone, puis arrêt du hotspot | `orchestrator::run` |
 | CALIBRATION | 3 poses d'essai pour caler ISO et temps de pose | `exposure.rs` |
@@ -132,11 +133,14 @@ Points clés :
 
 | Chemin | Contenu |
 |---|---|
-| `aurora_AAAAMMJJ_HHMMSS_NNNNN[_AURORA].jpg` / `.dng` | photos, numéro d'image sur 5 chiffres |
-| `aurora_…_STACK.jpg` | JPEG empilé (si activé) |
-| `thumbs/` | miniatures de galerie |
-| `sessions/AAAA-MM-JJ_HH-MM/event.jsonl` | un événement JSON par image (phase, exposition, score, numéro d'image) |
+| `sessions/AAAA-MM-JJ_HH-MM/JPG/aurora_AAAAMMJJ_HHMMSS_NNNNN[_AURORA].jpg` | JPEG, numéro d'image sur 5 chiffres (continu après une reprise) |
+| `sessions/…/RAW/aurora_….dng` | DNG natifs, même nom que leur JPEG |
+| `sessions/…/JPG/aurora_…_STACK.jpg` | JPEG empilé (si activé) |
+| `sessions/…/thumbs/` | miniatures de galerie |
+| `sessions/…/event.jsonl` | un événement JSON par image (phase, exposition, score, numéro d'image) |
 | `sessions/…/session.log` | journal lisible de la nuit (config effective, erreurs) |
+| `sessions/…/aurores.csv` | images avec aurore triées par score (image, heure, score, couleur, JPG, RAW), écrit en fin de nuit |
+| `aurora_*.jpg|dng`, `thumbs/` à la racine | captures des versions antérieures à 1.7, toujours affichées par la galerie |
 | `darks/` | séries de darks |
 | `aurion-reset-wifi.txt` | déposé par l'utilisateur : remet le mot de passe Wi-Fi d'usine au démarrage (renommé `.done`) |
 
@@ -185,7 +189,9 @@ n'est presque jamais écrite.
 |---|---|
 | Coupure pendant l'écriture d'une photo | fichier temporaire, fsync, renommage, fsync du dossier |
 | Clé « sale » après coupure | `systemd-mount --fsck=yes` à chaque montage |
-| Nuit interrompue (batterie vide, changée) | `night.json` : reprise automatique au redémarrage, bornée à la fin prévue, 3 fois au plus |
+| Nuit interrompue (batterie vide, changée) | `night.json` : reprise automatique au redémarrage, bornée à la fin prévue, 3 fois au plus, dans le même dossier de nuit ; fichiers `.part` nettoyés |
+| Des dizaines de milliers de photos (expédition) | un dossier par nuit ; galerie paginée (1000 images récentes, filtre par nuit) ; estimation de capacité sur un échantillon de la dernière nuit |
+| Démarrage automatique en plein jour | jamais sans heure fiable (téléphone ou horloge matérielle) ; la plage horaire décide de la capture |
 | Horloge fausse après coupure (Pi 4 sans horloge sauvegardée) | réévaluation après la fenêtre de 5 min (le téléphone corrige l'heure s'il se connecte) ; durée reprise plafonnée |
 | Blocage | watchdog systemd (`WatchdogSec=180`, battement toutes les 30 s) et watchdog matériel |
 | Sous-tension persistante | `aurion-power-watch` : 3 contrôles de suite, puis `sync` et extinction propre |
@@ -193,7 +199,8 @@ n'est presque jamais écrite.
 
 Énergie : analyse sur miniature, aucun ré-encodage par défaut, Wi-Fi coupé la nuit, Bluetooth, audio et LED
 désactivés, services inutiles arrêtés, 2 threads, rafraîchissement de l'interface suspendu quand l'écran du
-téléphone est éteint.
+téléphone est éteint. Le jour : extinction après chaque nuit ; un Pi 5 attend éteint (alarme RTC via
+`aurion-helper rtc-wake`) au lieu d'attendre allumé.
 
 ## 10. Construction et livraison
 
@@ -220,7 +227,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 
 | Route | Rôle |
 |---|---|
-| `GET /api/preflight` | vérifications avant la nuit (caméra, clé et autonomie, heure, alimentation, température, mot de passe), `ready`, compte à rebours de reprise |
+| `GET /api/preflight` | vérifications avant la nuit (caméra, clé et autonomie, heure et sa source, alimentation, température, mot de passe, expédition), `ready`, reprise, départ automatique, nuits possibles, réveil possible |
 | `GET /api/night/last` | résumé de la dernière nuit (photos, aurores, RAW, meilleur score) |
 | `POST /api/night/resume/cancel` | annuler la reprise d'une nuit interrompue |
 | `POST /api/disconnect` | lancer la nuit (ou reprendre tout de suite) |
@@ -232,7 +239,8 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
 | `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour |
 | `GET /api/wifi/scan`, `/api/wifi/status`, `POST /api/wifi/connect`, `/api/wifi/hotspot` | mode maintenance (Wi-Fi de la maison) |
-| `GET /api/gallery`, `/api/gallery/stats`, `/api/gallery/sessions`, `/api/gallery/best` | galerie |
+| `GET /api/gallery[?session=<nuit>&limit=N]` | images (1000 plus récentes par défaut, `truncated` si plus) |
+| `GET /api/gallery/stats`, `/api/gallery/sessions`, `/api/gallery/best` | galerie (sessions avec nombre de RAW) |
 | `GET /api/gallery/sessions/:name/download[?only=raw\|jpg]` | ZIP d'une nuit, tout, RAW seuls ou JPEG seuls (flux, sans fichier temporaire) |
 | `GET /api/gallery/:file`, `/api/gallery/thumbnail/:file` | image, miniature |
 | `POST /api/gallery/delete`, `/api/gallery/download-zip`, `DELETE /api/gallery/sessions/:name` | sélection |
@@ -241,6 +249,8 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 
 - Pas encore validé sur le matériel réel : hotspot NetworkManager, montage udev, options `rpicam-still`,
   seuils de détection sur de vraies aurores, premier démarrage de l'image (voir PLAN_ACTION.md, V1 à V5).
-- Sur Pi 4, l'heure après une coupure dépend de la dernière heure connue : la reprise est bornée, mais la
-  fin de nuit peut être décalée tant qu'aucun téléphone ne s'est connecté.
+- Sur Pi 4 sans module horloge, l'heure après une coupure dépend de la dernière heure connue : la reprise est
+  bornée, mais la fin de nuit peut être décalée tant qu'aucun téléphone ne s'est connecté ; le départ automatique
+  de l'expédition attend une heure fiable.
+- Réveil programmé du Pi 5 et module DS3231 non encore validés sur le matériel (PLAN_ACTION.md, V8 et V9).
 - Pas d'authentification applicative : la clé Wi-Fi fait office de mot de passe.

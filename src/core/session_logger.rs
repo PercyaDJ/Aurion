@@ -30,8 +30,16 @@ impl SessionLogger {
 
     /// Create a session logger named after `now` (injected clock).
     pub fn new_at(base_dir: &Path, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
-        let session_name = now.format("%Y-%m-%d_%H-%M").to_string();
-        let session_dir = base_dir.join("sessions").join(&session_name);
+        Self::open_named(base_dir, &now.format("%Y-%m-%d_%H-%M").to_string(), now)
+    }
+
+    /// Open (or create) the session folder `name`: a resumed night appends to
+    /// the logs of the interrupted one.
+    pub fn open_named(base_dir: &Path, session_name: &str, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
+        if !crate::core::validate::is_safe_name(session_name) {
+            return Err(SessionLoggerError::IoError(format!("Nom de session invalide: {}", session_name)));
+        }
+        let session_dir = base_dir.join("sessions").join(session_name);
 
         fs::create_dir_all(&session_dir)
             .map_err(|e| SessionLoggerError::IoError(format!("Create session dir: {}", e)))?;

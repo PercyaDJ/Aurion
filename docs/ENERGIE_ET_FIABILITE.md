@@ -12,6 +12,7 @@
 | Services inutiles arrêtés (bluetooth, ModemManager, triggerhappy) | `install.sh` | moins de réveils |
 | Runtime limité à 2 threads | `main.rs` | moins de réveils CPU |
 | Journaux en RAM | `install.sh` | pas d'écriture sur la carte SD |
+| Rien le jour : extinction à la fin de chaque nuit ; Pi 5 éteint jusqu'au soir (réveil par son horloge) au lieu d'attendre allumé | `orchestrator`, `aurion-helper rtc-wake` | toute la batterie sert aux nuits (détail : GUIDE_EXPEDITION.md) |
 | Interface : rafraîchissement suspendu quand l'écran du téléphone est éteint ou l'onglet caché | `js/common.js` (`aurionPoll`) | moins de requêtes, moins de réveils du Pi pendant la préparation |
 
 Pour aller plus loin (non appliqué automatiquement, faute de mesure sur le matériel) : débrancher l'écran HDMI, limiter la fréquence CPU
@@ -30,7 +31,9 @@ voir PLAN_ACTION.md (tâche E1, mesure réelle avec un testeur USB).
 | Carte SD | journaux en RAM, `noatime`, pas de mises à jour automatiques | très peu d'écritures, donc très peu de risque |
 | Batterie qui s'épuise | arrêt propre sur sous-tension persistante (3 contrôles de suite) | `sync` puis extinction |
 | Blocage du système | watchdog matériel (redémarrage) et watchdog systemd (relance du service) | reprise automatique |
-| Nuit interrompue (batterie vide, changée, câble arraché) | `night.json` écrit au lancement, supprimé en fin normale | au redémarrage : Wi-Fi 5 min (annulable depuis le téléphone), puis la nuit reprend seule jusqu'à la fin prévue, 3 fois au plus |
+| Nuit interrompue (batterie vide, changée, câble arraché) | `night.json` écrit au lancement, supprimé en fin normale | au redémarrage : Wi-Fi 5 min (annulable depuis le téléphone), puis la nuit reprend seule jusqu'à la fin prévue, 3 fois au plus, **dans le même dossier avec la numérotation qui continue** |
+| Fichiers incomplets d'une coupure (`.nom.part`) | jamais listés, supprimés au démarrage de la nuit suivante | la clé ne se remplit pas de fichiers inutilisables |
+| Plusieurs semaines de photos | un dossier par nuit (création de fichiers rapide même avec des dizaines de milliers d'images), galerie limitée aux images récentes par requête | pas de ralentissement ni de page figée au fil de l'expédition |
 
 ## 3. Recommandations terrain
 

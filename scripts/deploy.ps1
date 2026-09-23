@@ -2,7 +2,7 @@
 # Aurion — envoi et installation sur le Raspberry Pi depuis Windows
 # (ssh/scp sont intégrés à Windows 10 et 11).
 #
-#   .\scripts\deploy.ps1 pi@aurion.local .\aurion-1.6.0-rpi-arm64.tar.gz
+#   .\scripts\deploy.ps1 pi@aurion.local .\aurion-1.7.0-rpi-arm64.tar.gz
 #
 # L'archive se télécharge dans l'onglet "Releases" du dépôt GitHub
 # (elle est construite automatiquement par GitHub Actions).

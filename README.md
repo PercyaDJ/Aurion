@@ -18,9 +18,9 @@ Mise à jour ensuite depuis le téléphone : *Diagnostics*, *Mise à jour du log
 <details>
 <summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.6.0_arm64.deb`
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.7.0_arm64.deb`
 - Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.6.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.7.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
 Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>
@@ -41,6 +41,10 @@ Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO
 Deux modes :
 - **Toute la nuit** (SAFE, défaut, idéal timelapse) : capture toute la nuit, les images avec aurore sont marquées `_AURORA`.
 - **Aurores seulement** (FILTER) : surveille le ciel et n'enregistre qu'après N détections consécutives.
+
+Plusieurs nuits d'affilée (expédition) : cocher *Plusieurs nuits* ; chaque soir la nuit démarre seule, un Raspberry Pi 5
+se rallume même tout seul. Guide : [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md).
+Sur la clé, chaque nuit a son dossier `sessions/<nuit>/` avec `RAW/`, `JPG/` et `aurores.csv`.
 
 Coupure de courant pendant la nuit : au redémarrage, la nuit reprend seule (annulable 5 min depuis le téléphone).
 Mot de passe Wi-Fi oublié : fichier vide `aurion-reset-wifi.txt` à la racine de la clé USB, puis rallumer.
@@ -113,13 +117,14 @@ Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Princip
 | detection | `detection_capture_enabled` | false | false = SAFE, true = FILTER |
 | | `roi_top_percent` | 65 | part haute de l'image analysée (50 à 99) |
 | | `consecutive_required` | 2 | détections consécutives pour confirmer |
-| capture | `output_format` | RawAndJpg | `Jpg`, `RawDng` ou `RawAndJpg` |
+| capture | `output_format` | RawAndJpg | `Jpg`, `RawDng`, `RawAndJpg` ou `JpgAuroraRaw` (RAW pendant les aurores) |
 | | `awb` | daylight | balance des blancs fixe (pas de scintillement en timelapse) |
 | | `denoise.stack_frames` | 0 | JPEG empilé toutes les N images (0 = non) |
 | | `capture_interval_secs` | 10 | cadence du timelapse |
 | time_range | `start` / `end` | 21:00 / 06:00 | plage horaire (heure locale) |
 | | `duration_hours` | null | minuteur, prioritaire sur la plage |
 | network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |
+| expedition | `enabled` | false | démarrage automatique chaque soir, réveil programmé du Pi 5 |
 
 Documentation complète (DAT, DEX, spécifications, UX, audits, tests, énergie, plan d'action) : [docs/](docs/README.md). Nouveautés : [CHANGELOG.md](CHANGELOG.md).
 

@@ -342,3 +342,26 @@ async fn preflight_blocks_without_usb_drive() {
     assert!(pf["checks"].as_array().unwrap().iter().all(|c| c["id"] != "password"));
     assert_eq!(pf["planned_hours"], 4.0);
 }
+
+#[tokio::test]
+async fn preflight_in_expedition_mode_counts_nights_and_questions_the_clock() {
+    let t = common::env_with(|c| {
+        c.expedition.enabled = true;
+        c.capture.output_format = aurion::core::models::OutputFormat::JpgAuroraRaw;
+    });
+    let pf: Value = t.server.get("/api/preflight").await.json();
+    assert_eq!(pf["expedition"], true);
+    assert!(pf["nights_capacity"].as_f64().unwrap() > 0.0, "{}", pf);
+    let checks = pf["checks"].as_array().unwrap();
+    let exp = checks.iter().find(|c| c["id"] == "expedition").expect("expedition line");
+    assert!(exp["detail"].as_str().unwrap().contains("RAW des aurores"));
+    let clock = checks.iter().find(|c| c["id"] == "clock").unwrap();
+    assert_eq!(clock["level"], "warn", "no RTC and no phone sync yet");
+    assert_eq!(pf["ready"], true, "a warning never blocks the night");
+
+    // The phone sets the clock → trusted
+    t.state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed);
+    let pf: Value = t.server.get("/api/preflight").await.json();
+    let clock = pf["checks"].as_array().unwrap().iter().find(|c| c["id"] == "clock").unwrap().clone();
+    assert_eq!(clock["level"], "ok");
+}

@@ -79,10 +79,14 @@ try {
   });
   await maker.close();
   const jpeg = Buffer.from(b64, 'base64');
+  // Layout 1.7: one folder per night (JPG, RAW, thumbs)
+  const nightDir = path.join(capture, 'sessions/2026-03-05_21-30');
+  for (const d of ['JPG', 'RAW', 'thumbs']) fs.mkdirSync(path.join(nightDir, d), { recursive: true });
   for (const f of ['aurora_20260305_213100_00000.jpg', 'aurora_20260305_223100_00001_AURORA.jpg']) {
-    fs.writeFileSync(path.join(capture, f), jpeg);
-    fs.writeFileSync(path.join(capture, 'thumbs', f), jpeg);
+    fs.writeFileSync(path.join(nightDir, 'JPG', f), jpeg);
+    fs.writeFileSync(path.join(nightDir, 'thumbs', f), jpeg);
   }
+  fs.writeFileSync(path.join(nightDir, 'RAW', 'aurora_20260305_223100_00001_AURORA.dng'), Buffer.from('DNG'));
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } }); // phone
   const page = await context.newPage();
   const jsErrors = [];
@@ -223,7 +227,7 @@ try {
   await step('galerie : images, lightbox, session', async () => {
     await page.goto(base + '/gallery.html');
     await page.waitForSelector('.gallery-item');
-    assert(await page.locator('.gallery-item').count() === 2, 'expected 2 images');
+    assert(await page.locator('.gallery-item').count() === 3, 'expected 2 JPG + 1 RAW');
     await page.locator('.gallery-item').first().click();
     await page.waitForSelector('#lightbox.active');
     await page.waitForFunction(() => document.getElementById('lightboxImg').naturalWidth > 0);
@@ -251,7 +255,7 @@ try {
 
   await step('galerie : sessions listées sans suppression (non-régression)', async () => {
     const sessions = await (await fetch(base + '/api/gallery/sessions')).json();
-    assert(sessions.length === 1 && sessions[0].image_count === 2, JSON.stringify(sessions));
+    assert(sessions.length === 1 && sessions[0].image_count === 3 && sessions[0].raw_count === 1, JSON.stringify(sessions));
     assert(fs.existsSync(path.join(capture, 'sessions/2026-03-05_21-30/event.jsonl')), 'session log deleted');
   });
 
@@ -262,8 +266,8 @@ try {
     await page.waitForSelector('#deleteModal.active');
     await page.evaluate(() => executeDelete());
     await page.waitForSelector('.toast.success');
-    assert(!fs.existsSync(path.join(capture, 'aurora_20260305_213100_00000.jpg')), 'file still present');
-    assert(!fs.existsSync(path.join(capture, 'thumbs/aurora_20260305_213100_00000.jpg')), 'thumbnail still present');
+    assert(!fs.existsSync(path.join(nightDir, 'JPG/aurora_20260305_213100_00000.jpg')), 'file still present');
+    assert(!fs.existsSync(path.join(nightDir, 'thumbs/aurora_20260305_213100_00000.jpg')), 'thumbnail still present');
   });
 
   await step('diagnostics : version affichée', async () => {
@@ -274,6 +278,22 @@ try {
   await step('portail captif : redirection vers l\'interface', async () => {
     const res = await fetch(base + '/generate_204', { redirect: 'manual' });
     assert(res.status === 307 && res.headers.get('location').startsWith('http://192.168.4.1:'), 'status ' + res.status);
+  });
+
+  await step('accueil : mode expédition et format RAW pendant les aurores', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#checks [data-check=usb]');
+    await page.check('#expeditionToggle');
+    await page.waitForSelector('#autoStartCard:not([hidden])');
+    await page.waitForSelector('#checks [data-check=expedition]');
+    assert((await page.textContent('#autoStartText')).includes('5 minutes'), 'auto-start explained');
+    let saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
+    assert(saved.expedition.enabled === true, 'expedition saved');
+    await page.uncheck('#expeditionToggle');
+    await page.waitForSelector('#autoStartCard[hidden]', { state: 'attached' });
+    saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
+    assert(saved.expedition.enabled === false, 'expedition off');
+    assert(await page.locator('#nightFormat option[value=JpgAuroraRaw]').count() === 1, 'format offered');
   });
 
   await step('lancement de la nuit depuis l\'accueil (mode, durée, format)', async () => {

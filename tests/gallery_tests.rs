@@ -141,11 +141,12 @@ async fn session_zip_contains_images_and_logs() {
     assert_eq!(res.header("content-type"), "application/zip");
     let entries = unzip(res.as_bytes().to_vec()).await;
     let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
+    // Same tree as a night folder: <night>/JPG, <night>/RAW, logs
     assert_eq!(names, [
-        "aurora_20260305_213100_00000.jpg",
-        "aurora_20260305_223100_00001.jpg",
-        "sessions/2026-03-05_21-30/event.jsonl",
-        "sessions/2026-03-05_21-30/session.log",
+        "2026-03-05_21-30/JPG/aurora_20260305_213100_00000.jpg",
+        "2026-03-05_21-30/JPG/aurora_20260305_223100_00001.jpg",
+        "2026-03-05_21-30/event.jsonl",
+        "2026-03-05_21-30/session.log",
     ]);
     assert_eq!(entries[0].1, b"IMG-A");
     assert_eq!(entries[1].1, b"IMG-B");
@@ -191,12 +192,12 @@ async fn session_zip_raw_only_or_jpg_only() {
     assert!(res.header("content-disposition").to_str().unwrap().contains("aurion_2026-03-05_21-30_RAW.zip"));
     let names: Vec<String> = unzip(res.as_bytes().to_vec()).await.into_iter().map(|(n, _)| n).collect();
     assert!(names.iter().all(|n| !n.ends_with(".jpg")), "{:?}", names);
-    assert!(names.contains(&"aurora_20260305_223100_00001_AURORA.dng".to_string()));
+    assert!(names.contains(&"2026-03-05_21-30/RAW/aurora_20260305_223100_00001_AURORA.dng".to_string()));
 
     let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=jpg").await;
     let names: Vec<String> = unzip(res.as_bytes().to_vec()).await.into_iter().map(|(n, _)| n).collect();
     assert!(names.iter().all(|n| !n.ends_with(".dng")), "{:?}", names);
-    assert!(names.contains(&"aurora_20260305_213100_00000.jpg".to_string()));
+    assert!(names.contains(&"2026-03-05_21-30/JPG/aurora_20260305_213100_00000.jpg".to_string()));
 
     // Unknown filter value is rejected, not silently ignored
     let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=exe").await;
@@ -224,4 +225,70 @@ async fn last_night_summary() {
     assert_eq!(n["raw_count"], 1);
     assert_eq!(n["session"]["aurora_count"], 1);
     assert_eq!(n["best_score"], 6.25);
+}
+
+// ─── Night folders (layout 1.7) ─────────────────────────────
+
+fn night_file(t: &common::TestEnv, night: &str, sub: &str, name: &str, content: &[u8]) {
+    t.add_file(&format!("sessions/{}/{}/{}", night, sub, name), content);
+}
+
+#[tokio::test]
+async fn night_folders_are_listed_served_and_zipped() {
+    let t = common::env();
+    t.add_session("2026-03-05_21-30");
+    let jpg = common::tiny_jpeg(16, 16);
+    night_file(&t, "2026-03-05_21-30", "JPG", "aurora_20260305_213100_00000.jpg", &jpg);
+    night_file(&t, "2026-03-05_21-30", "JPG", "aurora_20260305_213110_00001_AURORA.jpg", &jpg);
+    night_file(&t, "2026-03-05_21-30", "RAW", "aurora_20260305_213110_00001_AURORA.dng", b"DNG");
+    night_file(&t, "2026-03-05_21-30", "thumbs", "aurora_20260305_213100_00000.jpg", &common::tiny_jpeg(4, 4));
+    night_file(&t, "2026-03-05_21-30", "RAW", ".aurora_20260305_213120_00002.dng.part", b"half");
+    // An older capture at the root of the key is still visible
+    t.add_file("aurora_20260305_223000_00050.jpg", &jpg);
+
+    let body: Value = t.server.get("/api/gallery").await.json();
+    assert_eq!(body["total_count"], 4, "partial files are never listed: {}", body);
+    assert_eq!(body["images"][0]["session"], "2026-03-05_21-30");
+
+    let one: Value = t.server.get("/api/gallery?session=2026-03-05_21-30&limit=2").await.json();
+    assert_eq!(one["total_count"], 4, "root image of the same night included");
+    assert_eq!(one["truncated"], true);
+    assert_eq!(one["images"].as_array().unwrap().len(), 2);
+    t.server.get("/api/gallery?session=../x").await.assert_status(StatusCode::BAD_REQUEST);
+
+    let res = t.server.get("/api/gallery/aurora_20260305_213110_00001_AURORA.dng").await;
+    res.assert_status_ok();
+    assert_eq!(res.as_bytes().to_vec(), b"DNG");
+    let thumb = t.server.get("/api/gallery/thumbnail/aurora_20260305_213100_00000.jpg").await;
+    thumb.assert_status_ok();
+    assert_eq!(thumb.as_bytes().to_vec(), common::tiny_jpeg(4, 4), "capture-time thumbnail of the night folder");
+
+    let sessions: Value = t.server.get("/api/gallery/sessions").await.json();
+    assert_eq!(sessions[0]["image_count"], 4);
+    assert_eq!(sessions[0]["raw_count"], 1);
+    assert_eq!(sessions[0]["aurora_count"], 1);
+
+    let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=raw").await;
+    let names: Vec<String> = unzip(res.as_bytes().to_vec()).await.into_iter().map(|(n, _)| n).collect();
+    assert_eq!(names[0], "2026-03-05_21-30/RAW/aurora_20260305_213110_00001_AURORA.dng");
+}
+
+#[tokio::test]
+async fn delete_in_night_folders() {
+    let t = common::env();
+    t.add_session("2026-03-05_21-30");
+    night_file(&t, "2026-03-05_21-30", "JPG", "aurora_20260305_213100_00000.jpg", b"J");
+    night_file(&t, "2026-03-05_21-30", "thumbs", "aurora_20260305_213100_00000.jpg", b"T");
+    night_file(&t, "2026-03-05_21-30", "JPG", "aurora_20260305_213110_00001.jpg", b"J");
+    let body: Value = t.server
+        .post("/api/gallery/delete")
+        .json(&json!({"filenames": ["aurora_20260305_213100_00000.jpg"]}))
+        .await
+        .json();
+    assert_eq!(body["deleted"], 1);
+    let dir = t.capture_dir().join("sessions/2026-03-05_21-30");
+    assert!(!dir.join("JPG/aurora_20260305_213100_00000.jpg").exists());
+    assert!(!dir.join("thumbs/aurora_20260305_213100_00000.jpg").exists());
+    t.server.delete("/api/gallery/sessions/2026-03-05_21-30").await.assert_status_ok();
+    assert!(!dir.exists());
 }

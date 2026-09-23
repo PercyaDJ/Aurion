@@ -4,29 +4,29 @@ Résultat au 23/09/2026 : **tous les tests passent.**
 
 | Type de test | Où | Nombre | Ce qui est vérifié |
 |---|---|---|---|
-| Unitaires | `src/**` (`#[cfg(test)]`) | 104 | validation des entrées, config, exposition, détection, débruitage, JPEG/EXIF, machine d'état, sécurité HTTP, stockage, parseurs, reprise de nuit, estimation de l'autonomie de la clé, réinitialisation du mot de passe par la clé |
+| Unitaires | `src/**` (`#[cfg(test)]`) | 112 | validation des entrées, config, exposition, détection, débruitage, JPEG/EXIF, machine d'état, sécurité HTTP, stockage, parseurs, reprise de nuit, estimation de l'autonomie de la clé, réinitialisation du mot de passe par la clé, rangement par nuit et `aurores.csv`, horloge matérielle (RTC) |
 | Intégration | `tests/integration_tests.rs` | 7 | cycle de vie complet avec les simulateurs |
-| Contrat d'API | `tests/api_tests.rs` | 22 | chaque route utilisée par les pages répond avec les champs attendus ; règles métier (darks, presets, heure) ; vérifications avant la nuit (prêt, clé absente) |
+| Contrat d'API | `tests/api_tests.rs` | 23 | chaque route utilisée par les pages répond avec les champs attendus ; règles métier (darks, presets, heure) ; vérifications avant la nuit (prêt, clé absente, mode expédition) |
 | Sécurité | `tests/security_tests.rs` | 19 | traversée de chemin, injection Wi-Fi, CSRF, DNS rebinding, fuite du mot de passe, taille des requêtes, mise à jour OTA |
-| Galerie | `tests/gallery_tests.rs` | 11 | liste, miniatures, sessions, ZIP (contenu vérifié, RAW seuls, JPEG seuls, filtre inconnu refusé), dernière nuit, suppression |
-| Simulation | `tests/simulation_tests.rs` | 20 | nuits entières en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne ou absente, disque plein, RAW, rechargement à chaud, hotspot, captures façon Pi (JPEG 1280×960 + EXIF), pixels chauds, empilement, verrou d'exposition, classement des aurores, **reprise après coupure** (reprise seule pour le temps restant, annulation depuis le téléphone, nuit déjà finie ignorée, marqueur présent seulement pendant la nuit) |
+| Galerie | `tests/gallery_tests.rs` | 13 | dossiers par nuit et photos des anciennes versions, liste, miniatures, sessions, ZIP (contenu vérifié, RAW seuls, JPEG seuls, filtre inconnu refusé), dernière nuit, suppression |
+| Simulation | `tests/simulation_tests.rs` | 27 | nuits entières en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne ou absente, disque plein, RAW, rechargement à chaud, hotspot, captures façon Pi (JPEG 1280×960 + EXIF), pixels chauds, empilement, verrou d'exposition, classement des aurores, **reprise après coupure** (reprise seule pour le temps restant, annulation depuis le téléphone, nuit déjà finie ignorée, marqueur présent seulement pendant la nuit, même dossier et numérotation continue), **expédition** (démarrage automatique après 5 min sans activité, jamais sans heure fiable, réveil programmé du Pi 5, veille jusqu'à la nuit puis reprise), dossier par nuit et `aurores.csv`, RAW seulement pendant les aurores |
 | Non-régression | `tests/regression_tests.rs` | 11 | un test par bug corrigé + valeurs de référence de la détection (écart toléré 5 %) |
-| Helper root | `tests/helper_test.sh` | 42 cas | arguments valides et malveillants, commandes générées, crochets ignorés sous sudo |
+| Helper root | `tests/helper_test.sh` | 48 cas | arguments valides et malveillants, commandes générées, crochets ignorés sous sudo |
 | Image carte SD | `tests/image_test.sh` | 11 contrôles | fabrication de l'image sur une copie factice de Raspberry Pi OS : partition agrandie, système de fichiers sain, Aurion et l'installation au premier démarrage présents, compte de maintenance, SSH désactivé |
 | Installeur | `tests/install_test.sh` | 39 contrôles | installation dans une fausse racine, mise à jour, mode paquet, réparation d'une config invalide, désinstallation |
-| Interface (bout en bout) | `tests/e2e/ui_test.mjs` | 28 étapes | les 8 pages dans Chromium, format téléphone : aucune erreur JavaScript, accueil (vérifications, dernière nuit, lien RAW), menu simple puis expert, redirection de l'ancien tableau de bord, mot de passe au premier démarrage, réglages enregistrés sur disque, presets, galerie, téléchargements RAW / JPG par nuit, meilleures aurores, darks, lancement de la nuit depuis l'accueil |
+| Interface (bout en bout) | `tests/e2e/ui_test.mjs` | 29 étapes | les 8 pages dans Chromium, format téléphone : aucune erreur JavaScript, accueil (vérifications, dernière nuit, lien RAW), menu simple puis expert, redirection de l'ancien tableau de bord, mot de passe au premier démarrage, réglages enregistrés sur disque, presets, galerie, téléchargements RAW / JPG par nuit, meilleures aurores, darks, mode expédition et format RAW des aurores, lancement de la nuit depuis l'accueil |
 | Fumée ARM | manuel (qemu) | - | le binaire arm64 final démarre, sert les pages et l'API, bloque le CSRF |
 | Analyse statique | clippy, shellcheck | - | 0 avertissement en mode `-D warnings` |
 | Dépendances | cargo audit | 233 crates | aucune vulnérabilité ; voir AUDIT_SECURITE.md |
 | Couverture | cargo llvm-cov | - | 82,4 % des lignes (mesure de la 1.5.0) |
 
-Total Rust : **194 tests**, dont 20 simulations de nuit qui s'exécutent en environ 25 s grâce au temps virtuel
+Total Rust : **212 tests**, dont 27 simulations de nuit qui s'exécutent en environ 25 s grâce au temps virtuel
 (`tokio::time::pause` : chaque attente de l'orchestrateur avance l'horloge instantanément).
 
 ## Lancer les tests
 
 ```bash
-cargo test                                          # 194 tests Rust
+cargo test                                          # 212 tests Rust
 cargo clippy --all-targets -- -D warnings           # analyse statique (ajouter --features rpi)
 bash tests/helper_test.sh                           # helper root
 sudo -E bash tests/install_test.sh target/debug/aurion   # installeur (fausse racine, root requis)

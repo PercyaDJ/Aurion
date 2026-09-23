@@ -43,6 +43,9 @@ RUN_DIR=/run/aurion
 # Dry-run (tests): never write into the real /run
 [[ "$DRYRUN" == "1" ]] && RUN_DIR="${AURION_RUN_DIR:-${TMPDIR:-/tmp}/aurion-helper-dryrun.$$}"
 AP_CON=aurion-ap
+RTC_DIR=/sys/class/rtc/rtc0
+# Dry-run (tests): a fake RTC folder, never the real /sys
+[[ "$DRYRUN" == "1" ]] && RTC_DIR="${AURION_FAKE_RTC:-/nonexistent/aurion-rtc}"
 
 die() { echo "aurion-helper: $*" >&2; exit 1; }
 
@@ -263,7 +266,22 @@ cmd_set_time() {
   run date -u -s "@$epoch" >/dev/null
   # Next boot starts from this time instead of the last shutdown time
   if have fake-hwclock; then run fake-hwclock save >/dev/null 2>&1 || true; fi
+  # Keep the hardware clock (Pi 5, RTC module) in step with the phone
+  if [[ -e /dev/rtc0 ]] && have hwclock; then run hwclock --systohc >/dev/null 2>&1 || true; fi
   echo "heure réglée"
+}
+
+# Power-on alarm of the Raspberry Pi 5 RTC (expedition mode): the board
+# switches itself on at this time after the next shutdown.
+cmd_rtc_wake() {
+  local epoch="${1:-}" now
+  [[ "$epoch" =~ ^[0-9]{10}$ ]] || die "heure de réveil invalide"
+  now=$(date +%s)
+  (( epoch >= now + 60 && epoch <= now + 8 * 86400 )) || die "heure de réveil hors limites (1 min à 8 jours)"
+  [[ -e "$RTC_DIR/wakealarm" ]] || die "pas d'alarme de réveil sur cette carte (Raspberry Pi 5 requis)"
+  echo 0 >"$RTC_DIR/wakealarm"
+  echo "$epoch" >"$RTC_DIR/wakealarm"
+  echo "réveil programmé"
 }
 
 cmd_set_timezone() {
@@ -353,6 +371,7 @@ case "$cmd" in
   set-time)      cmd_set_time "$@" ;;
   set-timezone)  cmd_set_timezone "$@" ;;
   shutdown)      cmd_shutdown ;;
+  rtc-wake)      cmd_rtc_wake "$@" ;;
   usb-add)       cmd_usb_add "$@" ;;
   mount-usb)     cmd_mount_usb ;;
   umount-usb)    cmd_umount_usb ;;

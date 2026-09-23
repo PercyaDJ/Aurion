@@ -42,6 +42,16 @@ has   "@1767225600" "$HELPER" set-time 1767225600
 ko    "$HELPER" set-time 0
 ko    "$HELPER" set-time "1767225600; reboot"
 ko    "$HELPER" set-time 9999999999
+# rtc-wake (Raspberry Pi 5 power-on alarm)
+RTC_FAKE=$(mktemp -d); : >"$RTC_FAKE/wakealarm"
+WAKE_AT=$(( $(date +%s) + 3600 ))
+ok    env AURION_FAKE_RTC="$RTC_FAKE" "$HELPER" rtc-wake "$WAKE_AT"
+ok    test "$(cat "$RTC_FAKE/wakealarm")" = "$WAKE_AT"
+ko    env AURION_FAKE_RTC="$RTC_FAKE" "$HELPER" rtc-wake 1704067200
+ko    env AURION_FAKE_RTC="$RTC_FAKE" "$HELPER" rtc-wake "$(( $(date +%s) + 30 * 86400 ))"
+ko    env AURION_FAKE_RTC="$RTC_FAKE" "$HELPER" rtc-wake "$WAKE_AT; reboot"
+ko    "$HELPER" rtc-wake "$WAKE_AT"
+rm -rf "$RTC_FAKE"
 ok    "$HELPER" set-timezone Europe/Paris
 ok    "$HELPER" set-timezone America/Argentina/Buenos_Aires
 ok    "$HELPER" set-timezone UTC

@@ -1,6 +1,6 @@
 # Conception de l'expérience (UX / UI)
 
-Version couverte : **1.6.0**.
+Version couverte : **1.7.0**.
 
 ## 1. Principe directeur
 
@@ -26,6 +26,9 @@ Deux niveaux d'usage coexistent :
 | Récupérer les RAW : galerie, onglet, sélection | « Dernière nuit » sur l'accueil : **Télécharger les RAW** en un geste ; boutons RAW / JPG / Tout sur chaque nuit |
 | Nuit perdue si la batterie lâche | reprise automatique, annulable depuis le téléphone |
 | Menu de 9 entrées | 5 entrées en mode simple, 8 en mode expert |
+| Expédition : relancer la nuit chaque soir depuis le téléphone | case **Plusieurs nuits (expédition)** : la nuit démarre seule quand on quitte la page ; carte explicative sur l'accueil (et raison si le départ est en attente) |
+| Des milliers de photos mélangées à la racine de la clé | un dossier par nuit avec `RAW/`, `JPG/` et `aurores.csv` à ouvrir dans un tableur |
+| Choisir entre tout en RAW (clé pleine) et JPG seul (pas de RAW) | format **JPG + RAW des aurores** ; autonomie de la clé en nuits |
 | Pendant la nuit, l'écran affichait des phases (`CALIBRATION`, `RUN`) | écran « Nuit en cours » avec trois consignes claires |
 
 ## 3. Écrans

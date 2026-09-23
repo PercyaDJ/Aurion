@@ -582,7 +582,8 @@
                     return;
                 }
 
-                countEl.textContent = `${data.total_count} images — ${data.total_size_mb.toFixed(1)} Mo`;
+                countEl.textContent = `${data.total_count} images, ${(data.total_size_mb / 1024).toFixed(1)} Go`
+                    + (data.truncated ? ` (les ${allImages.length} plus récentes affichées : les autres sont dans l'onglet Par session)` : '');
                 renderGrid();
 
             } catch (e) {

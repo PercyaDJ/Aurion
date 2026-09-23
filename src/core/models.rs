@@ -38,6 +38,20 @@ pub enum OutputFormat {
     RawDng,
     Jpg,
     RawAndJpg,
+    /// JPEG all night (timelapse), RAW only while an aurora is detected and
+    /// for [`crate::core::orchestrator::AURORA_RAW_HOLD_SECS`] after it:
+    /// several nights of capture fit on one key.
+    JpgAuroraRaw,
+}
+
+impl OutputFormat {
+    /// The camera must produce a DNG for this format.
+    pub fn captures_raw(self) -> bool {
+        !matches!(self, OutputFormat::Jpg)
+    }
+    pub fn saves_jpg(self) -> bool {
+        !matches!(self, OutputFormat::RawDng)
+    }
 }
 
 impl fmt::Display for OutputFormat {
@@ -46,6 +60,7 @@ impl fmt::Display for OutputFormat {
             OutputFormat::RawDng => write!(f, "RAW (DNG)"),
             OutputFormat::Jpg => write!(f, "JPG"),
             OutputFormat::RawAndJpg => write!(f, "RAW + JPG"),
+            OutputFormat::JpgAuroraRaw => write!(f, "JPG + RAW pendant les aurores"),
         }
     }
 }

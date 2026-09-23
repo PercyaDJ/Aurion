@@ -24,8 +24,28 @@ use crate::core::models::TimeRange;
 pub const RESUME_DELAY_SECS: u64 = 300;
 /// A failing battery must not cause an endless reboot / resume loop.
 pub const MAX_RESUMES: u32 = 3;
-/// In time-range mode, a marker older than this belongs to a past night.
-const RANGE_MAX_AGE_HOURS: i64 = 12;
+/// Expedition mode: nobody used the interface for this long → the night
+/// starts on its own.
+pub const AUTO_START_IDLE_SECS: u64 = 300;
+/// Pi 5: sleep (powered off) while the night starts in more than this.
+pub const SLEEP_IF_START_IN_SECS: i64 = 2 * 3600;
+/// Wake-up programmed this long before the start of the night (boot, then
+/// the automatic start window).
+pub const WAKE_LEAD_SECS: i64 = 10 * 60;
+
+/// Next time `t` occurs strictly after `after` (local time).
+pub fn next_occurrence(after: DateTime<Local>, t: chrono::NaiveTime) -> DateTime<Local> {
+    use chrono::TimeZone;
+    let mut day = after.date_naive();
+    loop {
+        if let Some(dt) = Local.from_local_datetime(&day.and_time(t)).earliest() {
+            if dt > after {
+                return dt;
+            }
+        }
+        day = day.succ_opt().expect("date in range");
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NightMarker {
@@ -38,6 +58,9 @@ pub struct NightMarker {
     /// Number of times this night already resumed.
     #[serde(default)]
     pub resumes: u32,
+    /// Night folder on the key: a resumed night continues in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 /// What an interrupted night should do now.
@@ -57,6 +80,7 @@ impl NightMarker {
             end_epoch_ms: duration_hours.map(|h| started + (h * 3_600_000.0) as i64),
             duration_hours,
             resumes: 0,
+            session: None,
         }
     }
 
@@ -86,9 +110,12 @@ impl NightMarker {
                 (remaining > 1.0 / 60.0).then(|| ResumePlan::Timer(remaining.min(total)))
             }
             _ => {
-                let age_h = (now_ms - self.started_epoch_ms) / 3_600_000;
-                let recent = (0..RANGE_MAX_AGE_HOURS).contains(&age_h);
-                (range.contains(now.time()) || recent).then_some(ResumePlan::Range)
+                // The night launched at `started` ends at the first range end
+                // after it (launched at 14:00 for 21:00 → 06:00 tomorrow).
+                use chrono::TimeZone;
+                let started = Local.timestamp_millis_opt(self.started_epoch_ms).single()?;
+                let cycle_end = next_occurrence(started, range.end);
+                (now < cycle_end).then_some(ResumePlan::Range)
             }
         }
     }
@@ -129,6 +156,23 @@ mod tests {
         assert_eq!(m.resume_plan(at(23, 30), &range()), Some(ResumePlan::Range));
         let next_morning = at(10, 0) + chrono::Duration::days(1);
         assert_eq!(m.resume_plan(next_morning, &range()), None, "past night");
+    }
+
+    #[test]
+    fn range_night_launched_in_the_morning_still_resumes_in_the_evening() {
+        // Pi 5 powered off until the night, or battery swapped in the afternoon
+        let m = NightMarker::new(at(7, 0), None);
+        assert_eq!(m.resume_plan(at(20, 50), &range()), Some(ResumePlan::Range));
+        assert_eq!(m.resume_plan(at(5, 59) + chrono::Duration::days(1), &range()), Some(ResumePlan::Range));
+        assert_eq!(m.resume_plan(at(6, 1) + chrono::Duration::days(1), &range()), None, "that night is over");
+    }
+
+    #[test]
+    fn next_occurrences() {
+        let t = chrono::NaiveTime::from_hms_opt(21, 0, 0).unwrap();
+        assert_eq!(next_occurrence(at(14, 0), t), at(21, 0));
+        assert_eq!(next_occurrence(at(21, 0), t), at(21, 0) + chrono::Duration::days(1), "strictly after");
+        assert_eq!(next_occurrence(at(23, 0), t), at(21, 0) + chrono::Duration::days(1));
     }
 
     #[test]

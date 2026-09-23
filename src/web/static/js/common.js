@@ -22,10 +22,7 @@ function aurionEscape(text) {
 // Le Raspberry Pi n'a ni horloge sauvegardée ni internet sur son hotspot :
 // sans cela, la plage horaire de capture serait fausse. Le serveur ignore
 // les petits écarts et ne touche jamais l'horloge pendant une capture.
-(async function aurionSyncClock() {
-    try {
-        if (sessionStorage.getItem('aurionClockSynced')) return;
-    } catch (_) { /* navigation privée */ }
+async function aurionSyncClock() {
     try {
         let timezone = null;
         try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) { }
@@ -36,13 +33,14 @@ function aurionEscape(text) {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (data.changed) {
-            if (typeof showToast === 'function') showToast("Heure synchronisée avec le téléphone", 'success');
-            document.dispatchEvent(new Event('aurion-clock'));
-        }
-        try { sessionStorage.setItem('aurionClockSynced', '1'); } catch (_) { }
+        if (data.changed && typeof showToast === 'function') showToast("Heure synchronisée avec le téléphone", 'success');
+        // The clock is now confirmed (changed or already right): refresh checks
+        document.dispatchEvent(new Event('aurion-clock'));
     } catch (_) { /* hors ligne : on réessaiera au prochain chargement */ }
-})();
+}
+// Every page load: the Pi may have rebooted since (no saved clock on a Pi 4).
+// Small drifts are ignored by the server, never during a night.
+aurionSyncClock();
 
 // ─── Menu commun et mode expert ────────────────────────────
 // Le menu est généré ici, une seule fois pour toutes les pages.

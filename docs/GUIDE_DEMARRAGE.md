@@ -69,7 +69,13 @@ la nuit jusqu'à l'heure de fin prévue.
   (nombre de photos, d'aurores, de RAW) avec trois boutons : **Voir les plus belles**, **Télécharger les RAW**,
   **Tout télécharger**. Dans *Photos*, onglet *Par session*, chaque nuit a ses boutons RAW, JPG et Tout.
 - **Sur l'ordinateur** : accueil, **Éteindre Aurion**, attendez 20 secondes, puis branchez la clé USB sur
-  l'ordinateur : les photos sont à la racine, les journaux dans `sessions/`.
+  l'ordinateur : chaque nuit a son dossier dans `sessions/` (sous-dossiers `RAW` et `JPG`, et `aurores.csv`
+  qui liste les images avec aurore, de la plus forte à la plus faible).
+
+## Plusieurs nuits d'affilée
+
+Cochez **Plusieurs nuits (expédition)** sur l'accueil : chaque soir la nuit démarre seule. Tout est expliqué dans
+[GUIDE_EXPEDITION.md](GUIDE_EXPEDITION.md).
 
 ## Menu simple et mode expert
 

@@ -1,6 +1,6 @@
 # Spécifications fonctionnelles
 
-Version couverte : **1.6.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
+Version couverte : **1.7.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
 
 ## 1. Utilisateurs
 
@@ -45,7 +45,14 @@ Version couverte : **1.6.0**. Ce document décrit **ce que fait** Aurion (le com
 | F19 | Mode simple / expert | menu réduit par défaut ; « Mode expert » affiche réglages fins, presets, stockage ; mémorisé sur le téléphone | e2e « menu » |
 | F20 | Mise à jour | depuis l'interface, fichier binaire contrôlé, refusée pendant la nuit, retour arrière possible | sécurité OTA |
 | F21 | Extinction | bouton « Éteindre Aurion » ; extinction propre | api_tests |
-| F22 | Clé pleine | la nuit s'arrête proprement sous le seuil critique (5 % ou 50 Mo libres) | simulation « disque plein » |
+| F22 | Clé pleine | la nuit s'arrête proprement sous le seuil critique (5 % ou 50 Mo libres) ; aucune photo effacée automatiquement | simulation « disque plein » |
+| F23 | Un dossier par nuit | `sessions/<nuit>/RAW`, `JPG`, `thumbs`, journaux ; ZIP d'une nuit organisé de même ; anciennes photos (racine) toujours visibles | `each_night_has_its_folder_*`, `night_folders_*` |
+| F24 | Index des aurores | `aurores.csv` en fin de nuit : une ligne par image avec aurore, de la plus forte à la plus faible, avec noms JPG et RAW | `aurora_index_lists_strongest_first` |
+| F25 | JPG + RAW des aurores | JPEG toute la nuit ; RAW à partir de la première détection et jusqu'à 10 min après la dernière ; chaque RAW a son JPEG de même nom | `raw_only_during_auroras_saves_the_key` |
+| F26 | Mode expédition | départ automatique 5 min après la dernière requête à l'interface, seulement avec heure fiable et clé présente ; raison affichée sinon | `expedition_*` |
+| F27 | Réveil programmé (Pi 5) | fin de nuit en expédition : réveil 10 min avant la plage suivante ; nuit lancée plus de 2 h avant son début : extinction et réveil, puis reprise | `pi5_*` |
+| F28 | Horloge matérielle | lue au démarrage si présente et valide ; mise à jour quand le téléphone donne l'heure ; source affichée | `rtc_detection`, api_tests |
+| F29 | Autonomie en nuits | l'accueil affiche le nombre de nuits que la clé peut contenir (mode expédition) | `preflight_in_expedition_mode_*` |
 
 ## 4. Règles de gestion
 
@@ -56,9 +63,11 @@ Version couverte : **1.6.0**. Ce document décrit **ce que fait** Aurion (le com
 | R3 | Le mot de passe Wi-Fi n'est jamais renvoyé par l'API (valeur masquée) ; renvoyer la valeur masquée le conserve |
 | R4 | Aucun réglage système (heure, Wi-Fi, mise à jour) n'est possible pendant une nuit |
 | R5 | Minuteur : une nuit reprise s'arrête à l'heure de fin prévue et ne capture jamais plus que sa durée initiale (si l'horloge du Pi retarde après la coupure, seule la seconde borne s'applique) |
-| R6 | En mode plage horaire, une nuit reprend si l'heure est dans la plage ou si elle a été lancée il y a moins de 12 h |
 | R7 | Le fichier `aurion-reset-wifi.txt` n'agit qu'une fois (renommé `.done`) |
-| R8 | La capacité affichée se base sur la taille moyenne des photos déjà sur la clé, sinon JPEG 4 Mo et DNG 24 Mo |
+| R8 | La capacité affichée se base sur la taille moyenne des photos de la dernière nuit (fichiers de moins de 200 ko ignorés), sinon JPEG 4 Mo et DNG 24 Mo |
+| R9 | Une nuit reprise continue dans son dossier, avec la numérotation qui suit la dernière image enregistrée |
+| R10 | En plage horaire, une nuit lancée à l'avance reprend tant que la fin de cette nuit-là n'est pas passée |
+| R11 | Le départ automatique n'a jamais lieu tant que l'heure n'est pas fiable (téléphone ou horloge matérielle) |
 
 ## 5. Exigences non fonctionnelles
 

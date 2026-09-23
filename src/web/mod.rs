@@ -95,6 +95,24 @@ pub struct AppState {
     pub camera_check: Arc<RwLock<Option<(std::time::Instant, bool)>>>,
     /// An interrupted night will resume at this instant unless cancelled.
     pub resume_at: Arc<RwLock<Option<tokio::time::Instant>>>,
+    /// Last request to the API (someone is using the interface).
+    pub last_activity: Arc<std::sync::Mutex<tokio::time::Instant>>,
+    /// The system clock was set from the hardware clock (RTC) at startup.
+    pub clock_from_rtc: Arc<AtomicBool>,
+    /// Expedition mode: state of the automatic start.
+    pub auto_start: Arc<RwLock<AutoStart>>,
+}
+
+/// Automatic start of the night (expedition mode), shown on the home screen.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum AutoStart {
+    /// Not in expedition mode, or the night already started.
+    #[default]
+    Off,
+    /// The night starts at this instant if nobody uses the interface.
+    At(tokio::time::Instant),
+    /// Waiting for a condition (reason shown to the user).
+    Blocked(&'static str),
 }
 
 /// Progress of the dark frame capture (see `api::capture_darks`).
@@ -128,7 +146,29 @@ impl AppState {
             darks: Arc::new(RwLock::new(None)),
             camera_check: Arc::new(RwLock::new(None)),
             resume_at: Arc::new(RwLock::new(None)),
+            last_activity: Arc::new(std::sync::Mutex::new(tokio::time::Instant::now())),
+            clock_from_rtc: Arc::new(AtomicBool::new(false)),
+            auto_start: Arc::new(RwLock::new(AutoStart::Off)),
         }
+    }
+
+    /// Someone used the interface: postpones the automatic start.
+    pub fn touch(&self) {
+        if let Ok(mut t) = self.last_activity.lock() {
+            *t = tokio::time::Instant::now();
+        }
+    }
+
+    /// Time since the last API request.
+    pub fn idle_for(&self) -> std::time::Duration {
+        self.last_activity.lock().map(|t| t.elapsed()).unwrap_or_default()
+    }
+
+    /// The clock can be trusted: set from the phone this session, or from
+    /// the hardware clock at startup.
+    pub fn clock_trusted(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.time_synced.load(Relaxed) || self.clock_from_rtc.load(Relaxed)
     }
 
     /// Override the OTA update behaviour (tests).
@@ -217,8 +257,21 @@ pub fn build_router(state: AppState) -> Router<()> {
         // Embedded web interface (single binary deployment)
         .fallback(static_files::serve_static)
         .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), track_activity))
         .layer(axum::middleware::from_fn(security::security_headers))
         .with_state(state)
+}
+
+/// Record API use (captive-portal probes from the phone do not count).
+async fn track_activity(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if req.uri().path().starts_with("/api/") {
+        state.touch();
+    }
+    next.run(req).await
 }
 
 /// Start the web server on the configured port.

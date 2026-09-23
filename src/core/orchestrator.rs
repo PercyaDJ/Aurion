@@ -9,7 +9,11 @@ use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
 use chrono::Datelike;
-use crate::core::night::{NightMarker, ResumePlan, MAX_RESUMES, RESUME_DELAY_SECS};
+use crate::core::layout::{self, NightLayout};
+use crate::core::night::{
+    next_occurrence, NightMarker, ResumePlan, AUTO_START_IDLE_SECS, MAX_RESUMES, RESUME_DELAY_SECS,
+    SLEEP_IF_START_IN_SECS, WAKE_LEAD_SECS,
+};
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
@@ -17,7 +21,7 @@ use crate::ports::clock::ClockPort;
 use crate::ports::network::NetworkApPort;
 use crate::ports::storage::StoragePort;
 use crate::ports::system::SystemPort;
-use crate::web::AppState;
+use crate::web::{AppState, AutoStart};
 
 /// Orchestrator — autonomous night capture loop.
 ///
@@ -36,6 +40,10 @@ pub struct Orchestrator<C: CameraPort, S: StoragePort, Sys: SystemPort> {
 /// Delay between the "Déconnexion" click and the hotspot shutdown, so the
 /// phone receives the answer and the user can walk away.
 const DISCONNECT_DELAY: Duration = Duration::from_secs(15);
+
+/// `JpgAuroraRaw`: RAW kept this long after the last aurora detection, so
+/// the end of an aurora (often faint but beautiful) is in RAW too.
+pub const AURORA_RAW_HOLD_SECS: i64 = 600;
 
 impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     pub fn new(state: AppState, camera: C, storage: S, system: Sys) -> Self {
@@ -73,9 +81,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // ─── Interrupted night (power cut): resume on its own ─
         let resume = self.resume_window().await;
 
-        // ─── ARM phase: wait for user to disconnect ─────────
+        // ─── ARM phase: wait for the user (or the automatic start) ─
         if resume.is_none() {
-            self.wait_for_disconnect().await;
+            self.wait_for_start().await;
         }
 
         // ─── DISCONNECT timer ───────────────────────────────
@@ -98,6 +106,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // ─── Night marker (resume after a power cut) ────────
         let marker_path = self.state.paths.night_marker.clone();
+        let resumed_session = resume.as_ref().and_then(|(m, _)| m.session.clone());
         match resume {
             Some((marker, plan)) => {
                 if let ResumePlan::Timer(hours) = plan {
@@ -141,6 +150,21 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 let now = self.now();
                 if time_range.contains(now.time()) {
                     break;
+                }
+                // Pi 5: rather than idling for hours, power off and wake
+                // up just before the night (the marker resumes it).
+                let until_start = (next_occurrence(now, config.time_range.start) - now).num_seconds();
+                if self.system.can_wake() && until_start > SLEEP_IF_START_IN_SECS {
+                    let wake = next_occurrence(now, config.time_range.start) - chrono::Duration::seconds(WAKE_LEAD_SECS);
+                    if self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await.is_ok() {
+                        self.log(&format!("Nuit dans {} h : extinction, réveil programmé à {}", until_start / 3600, wake.format("%H:%M"))).await;
+                        self.set_phase(Phase::Shutdown).await;
+                        let _ = self.storage.sync().await;
+                        if let Err(e) = self.system.shutdown().await {
+                            error!("Orchestrator: shutdown before the night failed: {}", e);
+                        }
+                        return Ok(());
+                    }
                 }
                 if !logged_wait {
                     let msg = format!(
@@ -213,7 +237,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
         let storage_path: &Path = configured_path.as_path();
 
-        let mut session_logger = match SessionLogger::new_at(storage_path, self.now()) {
+        let opened = match &resumed_session {
+            Some(name) => SessionLogger::open_named(storage_path, name, self.now()),
+            None => SessionLogger::new_at(storage_path, self.now()),
+        };
+        let mut session_logger = match opened {
             Ok(l) => {
                 info!("Orchestrator: session logger at {:?}", l.session_path());
                 Some(l)
@@ -223,6 +251,26 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 None
             }
         };
+
+        // ─── Night folder on the key ────────────────────────
+        let night_name = session_logger
+            .as_ref()
+            .and_then(|l| l.session_path().file_name().map(|n| n.to_string_lossy().to_string()));
+        let night_layout = night_name.as_deref().map(NightLayout::night).unwrap_or_else(NightLayout::root);
+        let night_path = night_name.as_deref().map(|n| layout::night_dir(storage_path, n));
+        if let Some(ref dir) = night_path {
+            let removed = layout::remove_partial_files(dir) + layout::remove_partial_files(storage_path);
+            if removed > 0 {
+                self.log(&format!("{} fichier(s) incomplet(s) d'une coupure supprimé(s)", removed)).await;
+            }
+        }
+        // The marker remembers the folder so a resumed night continues in it
+        if let (Some(name), Some(mut m)) = (&night_name, NightMarker::load(&marker_path)) {
+            if m.session.as_deref() != Some(name.as_str()) {
+                m.session = Some(name.clone());
+                let _ = m.save(&marker_path);
+            }
+        }
 
         let is_safe_mode = !config.detection.detection_capture_enabled;
         let capture_mode_str = if is_safe_mode { "SAFE" } else { "FILTER" };
@@ -304,7 +352,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut consecutive_detections = 0u32;
         let mut stacker: Option<Stacker> = None;
         let mut iterations = 0u64;
-        let mut frame_number = 0u64;
+        // A resumed night continues the numbering (timelapse order kept)
+        let mut frame_number = night_path.as_deref().and_then(layout::max_frame_number).map(|n| n + 1).unwrap_or(0);
+        let mut last_aurora_at: Option<chrono::DateTime<chrono::Local>> = None;
         let mut consecutive_io_errors = 0u32;
         let loop_start = self.now();
         let mut has_started_range = false;
@@ -451,7 +501,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                             }
                         }
                     }
-                    OutputFormat::RawDng | OutputFormat::RawAndJpg => {
+                    OutputFormat::RawDng | OutputFormat::RawAndJpg | OutputFormat::JpgAuroraRaw => {
                         // Single capture: returns (dng_frame, jpg_frame)
                         match self.camera.capture_raw_and_jpg(&exposure, Path::new("/tmp")).await {
                             Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
@@ -551,7 +601,16 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
                 Phase::Run => {
                     // Save the captured frame (NO double capture — raw_frame_opt already holds the DNG)
-                    self.save_frame(&config, &analysis_frame, raw_frame_opt.as_ref(), frame_number, det_result.detected, &mut stacker).await;
+                    if det_result.detected {
+                        last_aurora_at = Some(self.now());
+                    }
+                    let keep_raw = match config.capture.output_format {
+                        OutputFormat::JpgAuroraRaw => last_aurora_at
+                            .is_some_and(|t| (self.now() - t).num_seconds() <= AURORA_RAW_HOLD_SECS),
+                        f => f.captures_raw(),
+                    };
+                    let raw = raw_frame_opt.as_ref().filter(|_| keep_raw);
+                    self.save_frame(&config, &night_layout, &analysis_frame, raw, frame_number, det_result.detected, &mut stacker).await;
                     frame_number += 1;
 
                     // In FILTER mode during Run, if detection drops we keep capturing
@@ -579,10 +638,31 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
         drop(session_logger);
 
+        // Spreadsheet of the auroras of the night (rewritten after a resume)
+        if let Some(ref dir) = night_path {
+            match layout::write_aurora_index(dir) {
+                Ok(n) => self.log(&format!("aurores.csv : {} image(s) avec aurore", n)).await,
+                Err(e) => warn!("Orchestrator: aurores.csv: {}", e),
+            }
+        }
+
         // Night finished normally: nothing to resume at next boot. An
         // external stop (power watch, systemd) keeps the marker.
         if !interrupted {
             NightMarker::remove(&marker_path);
+        }
+
+        // Expedition: a Raspberry Pi 5 wakes itself up for the next night
+        if !interrupted && config.expedition.enabled {
+            if config.time_range.duration_hours.is_none() && self.system.can_wake() {
+                let wake = next_occurrence(self.now(), config.time_range.start) - chrono::Duration::seconds(WAKE_LEAD_SECS);
+                match self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await {
+                    Ok(()) => self.log(&format!("Expédition : réveil programmé le {}", wake.format("%d/%m à %H:%M"))).await,
+                    Err(e) => self.log(&format!("Expédition : réveil automatique impossible ({})", e)).await,
+                }
+            } else {
+                self.log("Expédition : rebranchez l'alimentation ce soir, la nuit démarrera seule").await;
+            }
         }
 
         // Sync and unmount storage
@@ -606,9 +686,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// `raw_frame` is the pre-captured DNG (Some for RawDng/RawAndJpg).
     /// `is_aurora` controls whether `_AURORA` is appended to the filename.
     /// `stacker` accumulates frames when stacking is enabled.
+    #[allow(clippy::too_many_arguments)]
     async fn save_frame(
         &self,
         config: &AppConfig,
+        night: &NightLayout,
         analysis_frame: &CaptureFrame,
         raw_frame: Option<&CaptureFrame>,
         frame_num: u64,
@@ -624,14 +706,14 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // Full-resolution processing only when a treatment is enabled.
         let processed = self.process_jpeg(analysis_frame, denoise).await;
 
-        if matches!(config.capture.output_format, OutputFormat::Jpg | OutputFormat::RawAndJpg) {
+        if config.capture.output_format.saves_jpg() {
             let filename = format!("{}.jpg", base);
             match &processed {
                 Some(p) if !p.jpeg.is_empty() => {
-                    if let Err(e) = self.storage.save_file(&filename, &p.jpeg).await {
+                    if let Err(e) = self.storage.save_file(&night.image(&filename), &p.jpeg).await {
                         error!("Orchestrator: save JPG failed: {}", e);
                     } else {
-                        self.save_thumbnail(analysis_frame, &filename).await;
+                        self.save_thumbnail(night, analysis_frame, &filename).await;
                         if p.hot_pixels_fixed > 0 {
                             info!("Orchestrator: {} ({} pixels chauds corrigés)", filename, p.hot_pixels_fixed);
                         }
@@ -641,16 +723,17 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
         }
 
-        if matches!(config.capture.output_format, OutputFormat::RawDng | OutputFormat::RawAndJpg) {
-            match raw_frame {
-                Some(raw) => {
-                    let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
-                    if let Err(e) = self.storage.save_file(&format!("{}.dng", base), dng_bytes).await {
-                        error!("Orchestrator: save RAW failed: {}", e);
-                    }
+        match raw_frame {
+            Some(raw) => {
+                let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
+                if let Err(e) = self.storage.save_file(&night.image(&format!("{}.dng", base)), dng_bytes).await {
+                    error!("Orchestrator: save RAW failed: {}", e);
                 }
-                None => error!("Orchestrator: no raw frame available for {:?}", config.capture.output_format),
             }
+            None if matches!(config.capture.output_format, OutputFormat::RawDng | OutputFormat::RawAndJpg) => {
+                error!("Orchestrator: no raw frame available for {:?}", config.capture.output_format)
+            }
+            None => {} // JpgAuroraRaw outside an aurora
         }
 
         // ─── Stacking: one extra, less noisy image every N frames ───
@@ -677,8 +760,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                         .flatten();
                         match jpeg {
                             Some(j) => {
-                                if self.storage.save_file(&name, &j).await.is_ok() {
-                                    self.save_thumbnail(analysis_frame, &name).await;
+                                if self.storage.save_file(&night.image(&name), &j).await.is_ok() {
+                                    self.save_thumbnail(night, analysis_frame, &name).await;
                                     info!("Orchestrator: saved {} ({} images empilées)", name, n);
                                 }
                             }
@@ -737,8 +820,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// Gallery thumbnail (thumbs/<name>): the EXIF thumbnail of the capture
     /// when available (no encoding at all), otherwise a 320×240 resize of the
     /// analysis pixels.
-    async fn save_thumbnail(&self, frame: &CaptureFrame, filename: &str) {
-        let thumb_name = format!("thumbs/{}", filename);
+    async fn save_thumbnail(&self, night: &NightLayout, frame: &CaptureFrame, filename: &str) {
+        let thumb_name = night.thumb(filename);
         if let Some(thumb) = crate::core::jpeg::exif_thumbnail(&frame.raw_bytes) {
             let _ = self.storage.save_file(&thumb_name, thumb).await;
             return;
@@ -752,7 +835,6 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
     }
 
-    /// Wait for the user to trigger disconnect from the UI.
     /// If the previous night was interrupted, keep the hotspot up for
     /// [`RESUME_DELAY_SECS`] (the phone can cancel or resume at once), then
     /// return the marker and the plan to resume. `None`: normal ARM.
@@ -816,15 +898,47 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
     }
 
-    async fn wait_for_disconnect(&self) {
-        info!("Orchestrator: ARM phase — waiting for user disconnect...");
+    /// ARM phase: wait for "Lancer la nuit". In expedition mode the night
+    /// also starts on its own once nobody has used the interface for
+    /// [`AUTO_START_IDLE_SECS`], provided the clock is reliable and the key
+    /// is present.
+    async fn wait_for_start(&self) {
+        let idle_needed = Duration::from_secs(AUTO_START_IDLE_SECS);
+        let mut announced = false;
         loop {
             let phase = *self.state.phase.read().await;
-            if phase == Phase::Disconnect || phase == Phase::Shutdown {
+            if phase != Phase::Arm {
                 break;
             }
-            sleep(Duration::from_millis(500)).await;
+            let (enabled, mount) = {
+                let c = self.state.config.read().await;
+                (c.expedition.enabled, c.storage.mount_point.clone())
+            };
+            let health = crate::sys::storage_health(Path::new(&mount));
+            let key_ok = health.writable && (health.is_mountpoint || !cfg!(feature = "rpi"));
+            let next = if !enabled {
+                AutoStart::Off
+            } else if !self.state.clock_trusted() {
+                AutoStart::Blocked("heure à confirmer : ouvrez cette page une fois depuis le téléphone")
+            } else if !key_ok {
+                AutoStart::Blocked("clé USB absente")
+            } else {
+                let left = idle_needed.saturating_sub(self.state.idle_for());
+                if left.is_zero() {
+                    self.log("Expédition : démarrage automatique de la nuit").await;
+                    self.set_phase(Phase::Disconnect).await;
+                    break;
+                }
+                if !announced {
+                    self.log("Expédition : la nuit démarrera seule 5 min après la dernière utilisation de l'interface").await;
+                    announced = true;
+                }
+                AutoStart::At(tokio::time::Instant::now() + left)
+            };
+            *self.state.auto_start.write().await = next;
+            sleep(Duration::from_secs(1)).await;
         }
+        *self.state.auto_start.write().await = AutoStart::Off;
     }
 
     /// Set the shared phase (visible to web UI).

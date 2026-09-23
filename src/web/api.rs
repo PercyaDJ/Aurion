@@ -145,6 +145,16 @@ pub struct Preflight {
     pub planned_hours: f64,
     /// Seconds before an interrupted night resumes on its own.
     pub resume_in_secs: Option<u64>,
+    /// Expedition mode enabled.
+    pub expedition: bool,
+    /// Expedition: seconds before the night starts on its own.
+    pub auto_start_in_secs: Option<u64>,
+    /// Expedition: why the night cannot start on its own yet.
+    pub auto_start_blocked: Option<String>,
+    /// Nights of capture the free space allows (planned duration).
+    pub nights_capacity: Option<f64>,
+    /// The board can switch itself on for the next night (Raspberry Pi 5).
+    pub wake_capable: bool,
 }
 
 fn check(id: &'static str, level: &'static str, title: impl Into<String>, detail: impl Into<String>) -> Check {
@@ -178,7 +188,9 @@ pub fn bytes_per_capture(config: &AppConfig, images: &[(String, u64)]) -> u64 {
     let avg = |ext: &str, fallback: u64| {
         let v: Vec<u64> = images
             .iter()
-            .filter(|(n, _)| validate::extension_lower(n).as_deref() == Some(ext) && !n.contains("_STACK"))
+            // Files under 200 kB are not real captures (empty or truncated
+            // file after a power cut): they would make the estimate absurd.
+            .filter(|(n, size)| validate::extension_lower(n).as_deref() == Some(ext) && !n.contains("_STACK") && *size >= 200_000)
             .map(|(_, s)| *s)
             .collect();
         if v.is_empty() { fallback } else { v.iter().sum::<u64>() / v.len() as u64 }
@@ -192,6 +204,9 @@ pub fn bytes_per_capture(config: &AppConfig, images: &[(String, u64)]) -> u64 {
         Jpg => jpg + thumb,
         RawDng => dng,
         RawAndJpg => jpg + dng + thumb,
+        // RAW only during auroras: the JPEG stream is what fills the key
+        // night after night (the RAW of the auroras are added on top).
+        JpgAuroraRaw => jpg + thumb,
     }
 }
 
@@ -247,7 +262,7 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
     } else if let Some((_, free)) = crate::sys::disk_usage(&mount) {
         let m = mount.clone();
         let images: Vec<(String, u64)> = tokio::task::spawn_blocking(move || {
-            crate::web::gallery::list_images(&m).into_iter().map(|(i, _)| (i.filename, i.size_bytes)).collect()
+            crate::web::gallery::recent_image_sizes(&m, 60)
         })
         .await
         .unwrap_or_default();
@@ -265,9 +280,18 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
 
     // Clock
     let now = chrono::Local::now();
+    let from_rtc = state.clock_from_rtc.load(std::sync::atomic::Ordering::Relaxed);
     if now.year() < 2024 {
         checks.push(check("clock", "error", "Heure non réglée",
             "Rechargez cette page depuis le téléphone : l'heure se règle automatiquement."));
+    } else if from_rtc {
+        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), "Horloge matérielle : l'heure est juste même sans téléphone."));
+    } else if state.clock_trusted() {
+        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), "Réglée par le téléphone."));
+    } else if config.expedition.enabled {
+        checks.push(check("clock", "warn", format!("Heure à confirmer : {}", now.format("%H:%M")),
+            "Ce Raspberry Pi n'a pas d'horloge sauvegardée : l'heure se règle quand un téléphone ouvre cette page. \
+             Pour des nuits sans téléphone, un Raspberry Pi 5 ou un module horloge (RTC DS3231) est nécessaire."));
     } else {
         checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), ""));
     }
@@ -298,6 +322,30 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
             "Choisissez votre propre mot de passe pour que personne d'autre ne puisse piloter la caméra."));
     }
 
+    // Expedition: how many nights fit, and how the next nights start
+    let wake_capable = crate::sys::rtc_info().wake_capable;
+    let nights_capacity = capacity.filter(|_| planned > 0.0).map(|h| round1(h / planned));
+    if config.expedition.enabled {
+        let nights = nights_capacity.map(|n| format!("environ {:.0} nuit(s) de place sur la clé", n.floor())).unwrap_or_default();
+        let how = if wake_capable {
+            "Raspberry Pi 5 : il s'éteint le matin et se rallume seul chaque soir."
+        } else {
+            "Chaque soir : branchez la batterie, la nuit démarre seule 5 min après (heure juste requise)."
+        };
+        let raw_note = if matches!(config.capture.output_format, crate::core::models::OutputFormat::JpgAuroraRaw) {
+            " Les RAW des aurores s'ajoutent à cette estimation."
+        } else {
+            ""
+        };
+        checks.push(check("expedition", "ok", format!("Mode expédition{}{}", if nights.is_empty() { "" } else { " : " }, nights),
+            format!("{}{}", how, raw_note)));
+    }
+
+    let (auto_start_in_secs, auto_start_blocked) = match *state.auto_start.read().await {
+        crate::web::AutoStart::At(at) => (Some(at.saturating_duration_since(tokio::time::Instant::now()).as_secs()), None),
+        crate::web::AutoStart::Blocked(why) => (None, Some(why.to_string())),
+        crate::web::AutoStart::Off => (None, None),
+    };
     let ready = !checks.iter().any(|c| c.level == "error");
     Json(Preflight {
         ready,
@@ -306,6 +354,11 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         capacity_hours: capacity,
         planned_hours: round1(planned),
         resume_in_secs: resume_in_secs(&state).await,
+        expedition: config.expedition.enabled,
+        auto_start_in_secs,
+        auto_start_blocked,
+        nights_capacity,
+        wake_capable,
     })
 }
 
@@ -1234,6 +1287,13 @@ mod tests {
         assert_eq!(fmt_hours(4.8), "4 h 48");
         assert_eq!(fmt_hours(0.05), "0 h 03");
         assert_eq!(fmt_hours(-1.0), "0 h");
+    }
+
+    #[test]
+    fn tiny_files_do_not_skew_the_estimate() {
+        let c = AppConfig { capture: crate::core::config::CaptureConfig { output_format: crate::core::models::OutputFormat::Jpg, ..AppConfig::default().capture }, ..AppConfig::default() };
+        let images = vec![("aurora_20260101_000000_00000.jpg".to_string(), 0u64)];
+        assert_eq!(bytes_per_capture(&c, &images), 4_000_000 + 20_000, "typical size used instead of 0");
     }
 
     #[test]

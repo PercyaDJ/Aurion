@@ -839,3 +839,7 @@ html:not(.expert) .expert-only { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .resume-card { border-color: var(--accent); box-shadow: 0 0 24px var(--accent-glow); }
+.switch-row { display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 0.9rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.switch-row small { display: block; color: var(--text-secondary); font-size: 0.78rem; margin-top: 0.15rem; line-height: 1.4; }
+.switch-row input { margin-top: 0.2rem; accent-color: var(--accent); width: 18px; height: 18px; flex-shrink: 0; }
+.switch-row:has(input:checked) { border-color: var(--accent); background: var(--accent-glow); }

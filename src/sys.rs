@@ -173,3 +173,55 @@ mod tests {
         assert_eq!(out.trim(), "secret");
     }
 }
+
+/// Hardware clock (RTC) of the board, if any.
+///
+/// - Raspberry Pi 5: built-in RTC (keeps time while the board is powered,
+///   even halted; with its optional battery, also when unplugged) and wake-up
+///   alarm: the board can power itself on in the evening.
+/// - Raspberry Pi 4: no RTC; an I2C module (DS3231) gives the time but
+///   cannot switch the board on.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RtcInfo {
+    /// Time kept by the RTC (Unix seconds), when it looks valid (≥ 2024).
+    pub epoch: Option<i64>,
+    /// The board can be woken up by the RTC alarm (Raspberry Pi 5).
+    pub wake_capable: bool,
+}
+
+pub fn rtc_info() -> RtcInfo {
+    rtc_info_at(Path::new("/sys/class/rtc/rtc0"), Path::new("/proc/device-tree/model"))
+}
+
+pub fn rtc_info_at(rtc: &Path, model: &Path) -> RtcInfo {
+    let epoch = std::fs::read_to_string(rtc.join("since_epoch"))
+        .ok()
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .filter(|e| *e >= 1_704_067_200); // 2024-01-01: an unset RTC reads 1970
+    let is_pi5 = std::fs::read(model)
+        .map(|m| String::from_utf8_lossy(&m).contains("Raspberry Pi 5"))
+        .unwrap_or(false);
+    RtcInfo { epoch, wake_capable: is_pi5 && rtc.join("wakealarm").exists() }
+}
+
+#[cfg(test)]
+mod rtc_tests {
+    use super::*;
+
+    #[test]
+    fn rtc_detection() {
+        let d = tempfile::tempdir().unwrap();
+        let rtc = d.path().join("rtc0");
+        let model = d.path().join("model");
+        assert_eq!(rtc_info_at(&rtc, &model), RtcInfo::default(), "Pi 4 without module");
+        std::fs::create_dir_all(&rtc).unwrap();
+        std::fs::write(rtc.join("since_epoch"), "86400\n").unwrap();
+        assert_eq!(rtc_info_at(&rtc, &model).epoch, None, "unset RTC (1970) is ignored");
+        std::fs::write(rtc.join("since_epoch"), "1768500000\n").unwrap();
+        std::fs::write(rtc.join("wakealarm"), "").unwrap();
+        std::fs::write(&model, "Raspberry Pi 4 Model B Rev 1.4\0").unwrap();
+        assert_eq!(rtc_info_at(&rtc, &model), RtcInfo { epoch: Some(1_768_500_000), wake_capable: false }, "DS3231 on a Pi 4");
+        std::fs::write(&model, "Raspberry Pi 5 Model B Rev 1.0\0").unwrap();
+        assert!(rtc_info_at(&rtc, &model).wake_capable);
+    }
+}

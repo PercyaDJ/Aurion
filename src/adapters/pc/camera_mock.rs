@@ -15,6 +15,8 @@ pub enum SkyPattern {
     Dark,
     /// Aurora on every frame.
     Aurora,
+    /// Aurora on camera frames `from..to` only (one aurora episode).
+    Burst { from: usize, to: usize },
 }
 
 /// PC mock camera: reads JPG files from a test data directory.
@@ -133,6 +135,7 @@ impl CameraMock {
                     SkyPattern::Intermittent => index % 5 >= 3,
                     SkyPattern::Dark => false,
                     SkyPattern::Aurora => true,
+                    SkyPattern::Burst { from, to } => (from..to).contains(&index),
                 };
 
                 if is_aurora_frame && y < height * 65 / 100 {

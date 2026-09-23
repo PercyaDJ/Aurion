@@ -116,6 +116,22 @@ async fn main() -> anyhow::Result<()> {
             let port = config.web.port;
             let state = AppState::with_paths(config, paths);
 
+            // Hardware clock (Raspberry Pi 5, or RTC module on a Pi 4): the
+            // time is known without a phone, needed for unattended nights.
+            #[cfg(feature = "rpi")]
+            if let Some(epoch) = aurion::sys::rtc_info().epoch {
+                let drift = (epoch - chrono::Utc::now().timestamp()).abs();
+                let ok = drift <= 60
+                    || aurion::sys::helper(&["set-time", &epoch.to_string()], None, std::time::Duration::from_secs(10))
+                        .await
+                        .map_err(|e| tracing::warn!("Heure de l'horloge matérielle non appliquée: {}", e))
+                        .is_ok();
+                if ok {
+                    state.clock_from_rtc.store(true, std::sync::atomic::Ordering::Relaxed);
+                    state.add_log("Heure donnée par l'horloge matérielle (RTC)".into()).await;
+                }
+            }
+
             // Start Wi-Fi AP
             #[cfg(feature = "rpi")]
             {

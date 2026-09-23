@@ -44,15 +44,39 @@ fn clock() -> Arc<TokioClock> {
     Arc::new(TokioClock::new(Utc.with_ymd_and_hms(2026, 1, 15, 21, 0, 0).unwrap()))
 }
 
+/// Images of every night folder (`sessions/<night>/JPG|RAW`), by name.
 fn images(dir: &Path) -> Vec<String> {
-    let mut v: Vec<String> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.starts_with("aurora_"))
+    let mut v: Vec<String> = image_paths(dir)
+        .into_iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect();
     v.sort();
     v
+}
+
+fn image_paths(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(nights) = std::fs::read_dir(dir.join("sessions")) else { return out };
+    for night in nights.filter_map(|e| e.ok()) {
+        for sub in ["JPG", "RAW"] {
+            let Ok(rd) = std::fs::read_dir(night.path().join(sub)) else { continue };
+            out.extend(rd.filter_map(|e| e.ok()).map(|e| e.path())
+                .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("aurora_")));
+        }
+    }
+    assert!(std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok())
+        .all(|e| !e.file_name().to_string_lossy().starts_with("aurora_")), "nothing written at the root of the key");
+    out
+}
+
+/// Path of an image in its night folder.
+fn image_path(dir: &Path, name: &str) -> PathBuf {
+    image_paths(dir).into_iter().find(|p| p.file_name().unwrap() == name).expect("image in a night folder")
+}
+
+/// Capture-time thumbnail of an image.
+fn thumb_path(dir: &Path, name: &str) -> PathBuf {
+    image_path(dir, name).parent().unwrap().parent().unwrap().join("thumbs").join(name)
 }
 
 fn session_events(capture: &Path) -> Vec<serde_json::Value> {
@@ -86,9 +110,9 @@ async fn safe_mode_captures_all_night_then_powers_off() {
     assert!((170..=182).contains(&files.len()), "got {} frames", files.len());
     assert!(files.iter().all(|f| f.ends_with(".jpg") && !f.contains("_AURORA")));
     // Every file is a real JPEG with its thumbnail
-    let first = std::fs::read(night.capture.join(&files[0])).unwrap();
+    let first = std::fs::read(image_path(&night.capture, &files[0])).unwrap();
     assert!(image::load_from_memory(&first).is_ok());
-    assert!(night.capture.join("thumbs").join(&files[0]).exists());
+    assert!(thumb_path(&night.capture, &files[0]).exists());
     // One NDJSON event per frame
     assert_eq!(session_events(&night.capture).len(), files.len());
     assert_eq!(night.state.current_phase().await, Phase::Shutdown);
@@ -253,7 +277,7 @@ async fn hotspot_is_switched_off_when_the_night_starts() {
 // ─── Photo quality: Pi-like captures (full JPEG + EXIF thumbnail) ────
 
 fn saved_jpeg(capture: &Path, name: &str) -> Vec<u8> {
-    std::fs::read(capture.join(name)).unwrap()
+    std::fs::read(image_path(capture, name)).unwrap()
 }
 
 #[tokio::test(start_paused = true)]
@@ -272,7 +296,7 @@ async fn pi_captures_are_saved_untouched_with_exif_thumbnail() {
     assert_eq!((full.width(), full.height()), (1280, 960), "full resolution kept");
     let thumb = aurion::core::jpeg::exif_thumbnail(&data).expect("EXIF thumbnail kept");
     // Gallery thumbnail = the EXIF thumbnail itself (no re-encoding)
-    assert_eq!(std::fs::read(night.capture.join("thumbs").join(jpg)).unwrap(), thumb);
+    assert_eq!(std::fs::read(thumb_path(&night.capture, jpg)).unwrap(), thumb);
     assert!(files.iter().any(|f| f.ends_with(".dng")));
 }
 
@@ -431,4 +455,179 @@ async fn night_marker_exists_during_the_night_only() {
     assert!(marker.exists(), "written when the night starts");
     tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), run).await.unwrap().unwrap().unwrap();
     assert!(!marker.exists(), "removed at the normal end");
+}
+
+// ─── Night folders, aurora index, RAW during auroras ────────
+
+#[tokio::test(start_paused = true)]
+async fn each_night_has_its_folder_with_raw_jpg_and_aurora_index() {
+    let (night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawAndJpg;
+        c.time_range.duration_hours = Some(0.05);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Aurora), storage, clock()).await;
+
+    let nights: Vec<PathBuf> = std::fs::read_dir(night.capture.join("sessions")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(nights.len(), 1);
+    let dir = &nights[0];
+    let jpg = std::fs::read_dir(dir.join("JPG")).unwrap().count();
+    let raw = std::fs::read_dir(dir.join("RAW")).unwrap().count();
+    assert!(jpg > 10 && jpg == raw, "{} JPG / {} RAW", jpg, raw);
+    assert_eq!(std::fs::read_dir(dir.join("thumbs")).unwrap().count(), jpg);
+    let csv = std::fs::read_to_string(dir.join("aurores.csv")).expect("aurora index written at the end of the night");
+    assert_eq!(csv.lines().next(), Some("image;heure;score;couleur;jpg;raw"));
+    assert_eq!(csv.lines().count(), jpg + 1, "one line per aurora frame");
+    assert!(csv.lines().nth(1).unwrap().ends_with(".dng"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn raw_only_during_auroras_saves_the_key() {
+    let (night, _) = setup(|c| c.capture.output_format = OutputFormat::JpgAuroraRaw); // 30 min
+    let storage = StorageMock::new(night.capture.clone());
+    // 3 calibration frames, then an aurora on camera frames 10..20 only
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Burst { from: 10, to: 20 }), storage, clock()).await;
+
+    let files = images(&night.capture);
+    let jpgs: Vec<&String> = files.iter().filter(|f| f.ends_with(".jpg")).collect();
+    let dngs: Vec<&String> = files.iter().filter(|f| f.ends_with(".dng")).collect();
+    assert!((170..=182).contains(&jpgs.len()), "JPEG all night: {}", jpgs.len());
+    // RAW from the first aurora frame until 10 min (60 frames) after the last one
+    assert!((60..=75).contains(&dngs.len()), "{} RAW", dngs.len());
+    let first_dng = aurion::core::layout::parse_frame_number(dngs[0]).unwrap();
+    let first_aurora = jpgs.iter().find(|f| f.contains("_AURORA")).map(|f| aurion::core::layout::parse_frame_number(f).unwrap()).unwrap();
+    assert_eq!(first_dng, first_aurora, "no RAW before the aurora");
+    assert!(dngs.iter().all(|d| jpgs.iter().any(|j| j.trim_end_matches(".jpg") == d.trim_end_matches(".dng"))),
+        "every RAW has its JPEG twin (same name)");
+}
+
+#[tokio::test(start_paused = true)]
+async fn resumed_night_continues_in_the_same_folder_and_numbering() {
+    let (night, _) = setup(|_| {});
+    let clock = clock();
+    let previous = night.capture.join("sessions/2026-01-15_20-00");
+    std::fs::create_dir_all(previous.join("JPG")).unwrap();
+    std::fs::write(previous.join("JPG/aurora_20260115_205900_00041.jpg"), b"x").unwrap();
+    std::fs::write(previous.join("JPG/.aurora_20260115_205910_00042.jpg.part"), b"half").unwrap();
+    let started = clock.now_local() - chrono::Duration::hours(1);
+    let mut marker = NightMarker::new(started, Some(1.5));
+    marker.session = Some("2026-01-15_20-00".into());
+    marker.save(&night.state.paths.night_marker).unwrap();
+
+    let storage = StorageMock::new(night.capture.clone());
+    storage.mount().await.unwrap();
+    *night.state.phase.write().await = Phase::Disconnect; // "Reprendre maintenant"
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock.clone());
+    tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), orch.run()).await.unwrap().unwrap();
+
+    assert_eq!(std::fs::read_dir(night.capture.join("sessions")).unwrap().count(), 1, "no second folder");
+    assert!(!previous.join("JPG/.aurora_20260115_205910_00042.jpg.part").exists(), "power-cut leftovers cleaned");
+    let files = images(&night.capture);
+    let numbers: Vec<u64> = files.iter().map(|f| aurion::core::layout::parse_frame_number(f).unwrap()).collect();
+    assert_eq!(numbers[0], 41);
+    assert_eq!(numbers[1], 42, "numbering continues after the last saved frame");
+    assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "no duplicate or gap");
+}
+
+// ─── Expedition: nights without anyone touching the camera ──
+
+fn range_from(clock: &TokioClock, start_in_min: i64, len_min: i64) -> (chrono::NaiveTime, chrono::NaiveTime) {
+    let now = clock.now_local();
+    ((now + chrono::Duration::minutes(start_in_min)).time(), (now + chrono::Duration::minutes(start_in_min + len_min)).time())
+}
+
+#[tokio::test(start_paused = true)]
+async fn expedition_starts_alone_once_nobody_uses_the_interface() {
+    let (night, _) = setup(|c| c.expedition.enabled = true);
+    night.state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed); // a phone set the clock
+    let storage = StorageMock::new(night.capture.clone());
+    storage.mount().await.unwrap();
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock());
+    let run = tokio::spawn(async move { orch.run().await });
+
+    tokio::time::sleep(std::time::Duration::from_secs(240)).await;
+    assert_eq!(night.state.current_phase().await, Phase::Arm);
+    assert!(matches!(*night.state.auto_start.read().await, aurion::web::AutoStart::At(_)));
+    night.state.touch(); // the photographer checks the framing once more
+    tokio::time::sleep(std::time::Duration::from_secs(240)).await;
+    assert_eq!(night.state.current_phase().await, Phase::Arm, "activity postpones the start");
+    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+    assert_ne!(night.state.current_phase().await, Phase::Arm, "5 min without activity: the night starts");
+
+    tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), run).await.unwrap().unwrap().unwrap();
+    assert!((170..=182).contains(&images(&night.capture).len()));
+    assert_eq!(night.system.shutdown_count(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn expedition_never_starts_alone_with_an_unknown_clock() {
+    let (night, _) = setup(|c| c.expedition.enabled = true);
+    let storage = StorageMock::new(night.capture.clone());
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock());
+    let run = tokio::spawn(async move { orch.run().await });
+    tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+    assert_eq!(night.state.current_phase().await, Phase::Arm);
+    assert!(matches!(*night.state.auto_start.read().await, aurion::web::AutoStart::Blocked(_)));
+    // The phone connects and sets the clock (an API request): the countdown starts
+    night.state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed);
+    night.state.touch();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    assert!(matches!(*night.state.auto_start.read().await, aurion::web::AutoStart::At(_)));
+    run.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn pi5_expedition_programs_its_wake_up_for_the_next_night() {
+    let clock = clock();
+    let (start, end) = range_from(&clock, 0, 30);
+    let (mut night, _) = setup(|c| {
+        c.expedition.enabled = true;
+        c.time_range.duration_hours = None;
+        c.time_range.start = start;
+        c.time_range.end = end;
+    });
+    night.system = SystemMock::with_wake();
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock.clone()).await;
+    assert!(!images(&night.capture).is_empty());
+    let wakes = night.system.wakes();
+    assert_eq!(wakes.len(), 1, "one wake-up programmed");
+    let expected = clock.now_local() - chrono::Duration::minutes(30) + chrono::Duration::days(1) - chrono::Duration::minutes(10);
+    assert!((wakes[0].timestamp() - expected.timestamp()).abs() <= 120, "tomorrow, 10 min before the start: {} vs {}", wakes[0], expected);
+    assert_eq!(night.system.shutdown_count(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pi5_sleeps_until_the_night_then_resumes_by_itself() {
+    let clock = clock();
+    let (start, end) = range_from(&clock, 5 * 60, 30); // night in 5 h
+    let (mut night, _) = setup(|c| {
+        c.time_range.duration_hours = None;
+        c.time_range.start = start;
+        c.time_range.end = end;
+    });
+    night.system = SystemMock::with_wake();
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock.clone()).await;
+    assert!(images(&night.capture).is_empty(), "nothing captured before the night");
+    assert_eq!(night.system.shutdown_count(), 1, "powered off instead of idling for 5 h");
+    let wake = night.system.wakes()[0];
+    assert!(night.state.paths.night_marker.exists(), "the marker brings the night back");
+
+    // The RTC switches the board on: boot, resume window, night
+    let until_wake = (wake.timestamp() - clock.now_local().timestamp()) as u64;
+    tokio::time::sleep(std::time::Duration::from_secs(until_wake)).await;
+    *night.state.phase.write().await = Phase::Arm;
+    let storage = StorageMock::new(night.capture.clone());
+    storage.mount().await.unwrap();
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock.clone());
+    tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), orch.run()).await.unwrap().unwrap();
+    let n = images(&night.capture).len();
+    assert!((170..=182).contains(&n), "30 min night captured after waking: {}", n);
+    assert_eq!(night.system.shutdown_count(), 2);
+    assert!(!night.state.paths.night_marker.exists());
 }

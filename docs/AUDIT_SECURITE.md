@@ -45,6 +45,16 @@ Surfaces analysées : API HTTP (42 routes, dont 9 de portail captif), pages web,
 | Menu généré en JavaScript | libellés statiques insérés par `textContent` (pas de HTML) ; données serveur toujours échappées (`aurionEscape`) | e2e |
 | Changement du mot de passe depuis l'accueil | même route et mêmes validations que les réglages avancés (10 à 63 caractères ASCII) ; hotspot redémarré par le helper | e2e « mot de passe au premier démarrage » |
 
+### Revue de la 1.7.0
+
+| Point | Analyse | Test |
+|---|---|---|
+| `aurion-helper rtc-wake <époque>` | 10 chiffres exactement, entre maintenant + 1 min et + 8 jours, fichier `wakealarm` requis ; en simulation, jamais le vrai `/sys` | `helper_test.sh` (6 cas) |
+| `hwclock --systohc` après `set-time` | seulement si `/dev/rtc0` et `hwclock` existent ; aucun argument utilisateur | revue |
+| `GET /api/gallery?session=` | nom de nuit validé par `is_safe_name` (400 sinon) ; images retrouvées par nom validé, uniquement dans `sessions/<nuit>/JPG|RAW` ou à la racine | `night_folders_are_listed_served_and_zipped` |
+| Démarrage automatique (expédition) | jamais sans heure fiable ni clé présente ; toute requête `/api/` le repousse de 5 min ; les sondes du portail captif ne comptent pas | simulations `expedition_*` |
+| Heure lue sur l'horloge matérielle | valeur ignorée si antérieure à 2024 (horloge non réglée) ; appliquée par le helper existant | `rtc_detection` |
+
 ## 4. Le helper root (`scripts/aurion-helper`)
 
 Seul programme exécutable en root par le service. Principes :

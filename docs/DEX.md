@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.6.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.7.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -53,6 +53,17 @@ Ordres de grandeur (réglages par défaut, une image toutes les 10 s plus le tem
 heure au plus. Taille par image : JPEG environ 4 Mo, DNG environ 24 Mo (estimations remplacées par les tailles
 réelles dès que la clé contient des photos).
 
+### Expédition (plusieurs nuits)
+
+| Étape | Action | Contrôle |
+|---|---|---|
+| Préparation | accueil : **Plusieurs nuits (expédition)**, format **JPG + RAW des aurores**, plage horaire | ligne « Mode expédition : environ N nuits » supérieure à la durée du séjour ; ligne « Heure » verte |
+| Chaque soir, Pi 5 | rien : réveil 10 min avant la plage, départ automatique | - |
+| Chaque soir, Pi 4 | brancher une batterie chargée ; sans module horloge, ouvrir la page une fois pour donner l'heure | départ automatique 5 min après avoir quitté la page |
+| Relève | clé USB sur un ordinateur : `sessions/<nuit>/RAW`, `JPG`, `aurores.csv` | une nuit par dossier |
+
+Détail et calculs d'énergie et de stockage : [GUIDE_EXPEDITION.md](GUIDE_EXPEDITION.md).
+
 ## 4. Supervision
 
 ### Depuis le téléphone
@@ -74,7 +85,8 @@ journalctl -u aurion -f                  # journal en direct
 vcgencmd get_throttled                   # 0x0 = alimentation correcte
 vcgencmd measure_temp                    # température CPU
 findmnt /mnt/capture                     # clé montée ?
-ls /mnt/capture/sessions/                # nuits enregistrées
+ls /mnt/capture/sessions/                # nuits enregistrées (RAW/, JPG/, aurores.csv)
+cat /sys/class/rtc/rtc0/since_epoch      # horloge matérielle présente (Pi 5, DS3231)
 tail -n 50 /mnt/capture/sessions/*/session.log
 cat /opt/aurion/config/night.json        # présent = une nuit est en cours ou a été interrompue
 ```
@@ -120,6 +132,7 @@ la remplace par la configuration par défaut en gardant une copie.
 | Point orange « Place limitée » | clé presque pleine | accueil : heures de capture possibles | télécharger puis supprimer d'anciennes nuits (Photos, Par session) ou passer en JPG seul |
 | Point rouge « Alimentation trop faible » | batterie ou câble insuffisants | `vcgencmd get_throttled` (bit 0) | batterie 5 V / 3 A, câble court et épais |
 | Le Pi s'éteint seul la nuit | sous-tension persistante (arrêt de protection) ou clé pleine | `session.log` : dernière ligne ; `night.json` présent = nuit interrompue | batterie plus puissante ; à la remise sous tension, la nuit reprend seule si elle n'est pas finie |
+| Expédition : la nuit ne démarre pas seule | heure non confirmée (Pi 4 sans horloge) ou clé absente ; page restée ouverte | accueil, carte « Mode expédition » (raison affichée) | ouvrir la page une fois puis la fermer ; brancher la clé ; module DS3231 pour des soirs sans téléphone |
 | « Nuit interrompue » à l'allumage | la nuit précédente a été coupée avant sa fin | `cat /opt/aurion/config/night.json` | laisser reprendre (5 min) ou *Annuler la reprise* |
 | Heure fausse | Pi 4 sans horloge sauvegardée, aucun téléphone connecté | accueil, ligne « Heure » | se connecter depuis le téléphone : synchronisation automatique |
 | Photos floues ou traînées | mise au point, pose trop longue pour la focale | aperçu | mise au point sur une étoile brillante ; réduire `shutter_max_us` (règle des 500) |

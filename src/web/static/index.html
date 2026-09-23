@@ -52,6 +52,12 @@
                 </div>
             </section>
 
+            <!-- Mode expédition : démarrage automatique -->
+            <section id="autoStartCard" class="card resume-card" hidden>
+                <h2>Mode expédition</h2>
+                <p id="autoStartText"></p>
+            </section>
+
             <!-- Premier démarrage : mot de passe personnel -->
             <section id="onboarding" class="card onboarding" hidden>
                 <h2>Protégez votre caméra</h2>
@@ -100,9 +106,15 @@
                     <select id="nightFormat" class="form-select">
                         <option value="RawAndJpg">RAW + JPG (conseillé)</option>
                         <option value="RawDng">RAW seulement</option>
+                        <option value="JpgAuroraRaw">JPG + RAW des aurores (expédition)</option>
                         <option value="Jpg">JPG seulement (plus léger)</option>
                     </select>
                 </div>
+                <label class="switch-row">
+                    <input type="checkbox" id="expeditionToggle" onchange="toggleExpedition(this.checked)">
+                    <span><b>Plusieurs nuits (expédition)</b><small>Chaque soir, la nuit démarre seule quand vous
+                            quittez cette page. Idéal pour poser la caméra plusieurs jours.</small></span>
+                </label>
                 <p class="muted small" id="capacityLine"></p>
             </section>
 
@@ -135,6 +147,7 @@
     <script>
         let config = null;
         let preflight = null;
+        let clockRetry = false;
         let phase = null;
 
         const RUNNING_TEXT = {
@@ -190,9 +203,11 @@
         function renderCapacity() {
             if (!preflight) return;
             const line = document.getElementById('capacityLine');
-            line.textContent = preflight.capacity_hours != null
-                ? `Place sur la clé : environ ${fmtHours(preflight.capacity_hours)} de photos avec ces réglages.`
+            let text = preflight.capacity_hours != null
+                ? `Place sur la clé : environ ${fmtHours(preflight.capacity_hours)} de photos avec ces réglages`
                 : '';
+            if (text && preflight.nights_capacity != null) text += `, soit environ ${Math.floor(preflight.nights_capacity)} nuit(s)`;
+            line.textContent = text ? text + '.' : '';
         }
 
         function fillNightForm(cfg) {
@@ -215,7 +230,13 @@
                 preflight = await (await apiFetch('/api/preflight')).json();
                 showPhase(preflight.phase);
                 renderChecks(preflight);
+                // The Pi is not sure of its clock (rebooted since): send it again
+                if (preflight.checks.some(c => c.id === 'clock' && c.level !== 'ok') && !clockRetry) {
+                    clockRetry = true;
+                    aurionSyncClock();
+                }
                 renderResume(preflight.resume_in_secs);
+                renderAutoStart(preflight);
                 const pw = preflight.checks.some(c => c.id === 'password');
                 let skipped = false;
                 try { skipped = sessionStorage.getItem('aurionSkipOnboarding') === '1'; } catch (_) { }
@@ -279,6 +300,34 @@
                 btn.textContent = 'Lancer la nuit';
             }
             delete btn.dataset.pending;
+        }
+
+        function renderAutoStart(pf) {
+            const card = document.getElementById('autoStartCard');
+            document.getElementById('expeditionToggle').checked = pf.expedition;
+            card.hidden = !pf.expedition;
+            if (!pf.expedition) return;
+            const wake = pf.wake_capable
+                ? ' Le matin, il s\'éteint et se rallume seul le soir suivant.'
+                : ' Le matin, il s\'éteint : rebranchez la batterie le soir, la nuit démarre seule.';
+            document.getElementById('autoStartText').textContent = pf.auto_start_blocked
+                ? 'Démarrage automatique en attente : ' + pf.auto_start_blocked + '.'
+                : 'La nuit démarrera seule 5 minutes après que vous aurez quitté cette page (écran éteint ou page fermée).' + wake;
+        }
+
+        async function toggleExpedition(on) {
+            try {
+                const cfg = await (await apiFetch('/api/config')).json();
+                cfg.expedition = { enabled: on };
+                await apiFetch('/api/config', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+                });
+                showToast(on ? 'Mode expédition activé' : 'Mode expédition désactivé', 'success');
+                loadPreflight();
+            } catch (e) {
+                showToast(e.message, 'error');
+                document.getElementById('expeditionToggle').checked = !on;
+            }
         }
 
         let resumeDeadline = null;
@@ -347,7 +396,7 @@
         document.getElementById('nightFormat').addEventListener('change', async () => {
             // La capacité dépend du format : recalcul côté serveur avec le format choisi
             if (!config) return;
-            const est = { RawAndJpg: 28, RawDng: 24, Jpg: 4 };
+            const est = { RawAndJpg: 28, RawDng: 24, Jpg: 4, JpgAuroraRaw: 4 };
             const cur = est[config.capture.output_format], next = est[document.getElementById('nightFormat').value];
             if (preflight && preflight.capacity_hours != null && cur && next) {
                 document.getElementById('capacityLine').textContent =

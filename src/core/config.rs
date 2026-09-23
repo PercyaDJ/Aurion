@@ -53,6 +53,18 @@ pub struct AppConfig {
     pub network: NetworkConfig,
     pub web: WebConfig,
     pub preset_name: String,
+    /// Several nights in a row without anyone touching the camera.
+    #[serde(default)]
+    pub expedition: ExpeditionConfig,
+}
+
+/// Expedition mode: at power-on the night starts on its own once nobody has
+/// used the interface for a few minutes (the clock must be reliable), and at
+/// the end of the night a Raspberry Pi 5 programs its own wake-up for the
+/// next evening.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ExpeditionConfig {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,6 +306,7 @@ impl AppConfig {
             network: self.network.clone(),
             web: self.web.clone(),
             preset_name: preset_name.to_string(),
+            expedition: self.expedition.clone(),
         }
     }
 
@@ -521,6 +534,7 @@ impl Default for AppConfig {
             },
             web: WebConfig { port: 8080 },
             preset_name: "FullDark".into(),
+            expedition: ExpeditionConfig::default(),
         }
     }
 }

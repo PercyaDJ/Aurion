@@ -14,6 +14,9 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V5 | `aurion bench` sur le Pi et mesure de la température CPU pendant une nuit | S | temps réels consignés dans AUDIT_CODE.md § 5 |
 | V6 | Reprise après coupure : lancer une nuit en minuteur 1 h, débrancher après 20 min, rebrancher sans téléphone | S | Wi-Fi visible 5 min, puis reprise ; `session.log` montre « Reprise de la nuit interrompue » ; extinction à l'heure prévue |
 | V7 | Vérifier l'heure du Pi 4 après une coupure (présence de `fake-hwclock` sur l'image) | S | l'heure au redémarrage est proche de l'heure de la coupure, sinon documenter l'écart |
+| V8 | Pi 5 en expédition : réveil par l'alarme RTC après l'extinction, consommation éteint (avec et sans `POWER_OFF_ON_HALT=1` dans l'EEPROM), comportement de la batterie quand la charge devient très faible | S | le Pi se rallume seul à l'heure programmée ; consommation mesurée consignée dans GUIDE_EXPEDITION.md |
+| V9 | Pi 4 + module DS3231 (`dtoverlay=i2c-rtc,ds3231`) : `/sys/class/rtc/rtc0` présent, heure juste après une coupure sans téléphone, démarrage automatique en expédition | S | journal « Heure donnée par l'horloge matérielle » ; nuit démarrée seule |
+| V10 | ISO maximal utile pour le RAW : vérifier au-delà de quel ISO le gain devient numérique (sans effet sur le DNG) sur l'IMX477 | S | valeur mesurée ; `iso_max` par défaut ajusté si nécessaire |
 
 ## Énergie (P1)
 
@@ -59,7 +62,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Action | Effort |
 |---|---|---|
 | C1 | Découper `orchestrator::run` en étapes testables séparément | M |
-| C2 | Un dossier par nuit sur la clé (avec migration des anciennes captures) | M |
+| C2 | ~~Un dossier par nuit sur la clé~~ : fait en 1.7.0 (les anciennes captures restent lisibles à la racine, sans migration) | - |
 | C3 | Factoriser le CSS et le JavaScript des pages (menu et rafraîchissement factorisés en 1.6.0 ; reste : styles en ligne de la galerie et des réglages) | M |
 | C4 | Tests sur banc matériel : un Pi dédié en CI (runner auto-hébergé) qui lance V1 automatiquement | L |
 | C5 | Porter la couverture de `web/api.rs` au-delà de 85 % en simulant `rpicam-still` (script factice dans le `PATH`) | S |

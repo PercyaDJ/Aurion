@@ -1,5 +1,37 @@
 # Journal des versions
 
+## 1.7.0
+
+Objectif : poser Aurion pour une expédition de plusieurs semaines, dans l'ordre stable, fiable, simple, complet.
+
+### Autonomie sur plusieurs nuits
+- **Mode expédition** : à l'allumage, la nuit démarre seule 5 min après la dernière utilisation de l'interface,
+  seulement si l'heure est juste (téléphone ou horloge matérielle) et la clé présente.
+- **Raspberry Pi 5** : réveil programmé par son horloge (RTC) 10 min avant la nuit suivante ; si une nuit est lancée
+  plus de 2 h avant son début, il s'éteint et se rallume seul au lieu d'attendre allumé.
+- Horloge matérielle lue au démarrage (Pi 5 ou module DS3231) ; l'heure envoyée par le téléphone met aussi
+  l'horloge matérielle à jour.
+- Reprise après coupure : même dossier de nuit, numérotation continue, fichiers incomplets nettoyés ; une nuit
+  lancée le matin pour le soir reprend correctement.
+
+### Photos et stockage
+- **Un dossier par nuit** sur la clé : `sessions/<nuit>/RAW`, `JPG`, `thumbs`, journaux, et **`aurores.csv`**
+  (images avec aurore, de la plus forte à la plus faible, noms des JPG et RAW).
+- Nouveau format **JPG + RAW des aurores** : JPEG toute la nuit pour le timelapse, RAW pendant les aurores et
+  10 min après ; plusieurs nuits tiennent sur une clé.
+- ZIP d'une nuit organisé comme le dossier de la clé ; galerie compatible avec les photos des versions précédentes
+  (à la racine de la clé).
+- Autonomie de la clé affichée en nuits ; les fichiers vides ou tronqués ne faussent plus l'estimation.
+
+### Fiabilité
+- La galerie ne liste plus qu'au plus 1000 images récentes par requête (et filtre par nuit) : plus de page figée
+  avec des dizaines de milliers de photos.
+- L'heure est renvoyée par le téléphone à chaque chargement de page (et de nouveau si le Pi en doute).
+
+### Tests
+- 212 tests Rust (27 nuits simulées, dont démarrage automatique, veille et réveil du Pi 5, RAW pendant les aurores,
+  reprise dans le même dossier), 48 cas du helper root, 29 étapes navigateur.
+
 ## 1.6.0
 
 Objectif : poser Aurion le soir, récupérer ses photos le matin, sans friction.
