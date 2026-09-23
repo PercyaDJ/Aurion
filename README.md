@@ -5,7 +5,7 @@ Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit
 
 ## Installation (aucune connaissance technique nécessaire)
 
-1. Téléchargez l'image **aurion-…-raspios-arm64.img.xz** dans l'onglet *Releases* de ce dépôt.
+1. Téléchargez l'image (système + application, environ 600 Mo) : **[aurion-raspios-arm64.img.xz](https://github.com/PercyaDJ/Aurion/releases/latest/download/aurion-raspios-arm64.img.xz)**.
 2. Copiez-la sur une carte micro-SD avec **Raspberry Pi Imager** (*Utiliser une image personnalisée*, puis **Non** aux réglages personnalisés).
 3. Branchez la caméra, la carte SD, la clé USB (exFAT), puis l'alimentation.
 4. Après 3 à 5 minutes, rejoignez le Wi-Fi **Aurion** (mot de passe **aurora2024**) : la page s'ouvre toute seule.
@@ -20,9 +20,9 @@ Boucle essai / correction : [docs/GUIDE_DEVELOPPEMENT.md](docs/GUIDE_DEVELOPPEME
 <details>
 <summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.8.0_arm64.deb`
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.9.0_arm64.deb`
 - Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.8.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.9.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
 Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>

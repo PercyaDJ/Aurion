@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.8.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.9.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -19,7 +19,7 @@ Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_
 
 | Méthode | Commande ou action | Durée |
 |---|---|---|
-| Image carte SD (recommandé) | Raspberry Pi Imager, *Utiliser une image personnalisée*, `aurion-X.Y.Z-raspios-arm64.img.xz`, **Non** aux réglages personnalisés | 10 min + 5 min au premier démarrage |
+| Image carte SD (recommandé) | Raspberry Pi Imager, *Utiliser une image personnalisée*, `aurion-raspios-arm64.img.xz`, **Non** aux réglages personnalisés | 10 min + 5 min au premier démarrage |
 | Paquet Debian | `sudo apt install ./aurion_X.Y.Z_arm64.deb` | 2 min |
 | Depuis un clone | `sudo ./install.sh` | 2 min (binaire précompilé) |
 | Depuis un PC | `scripts/deploy.sh utilisateur@aurion.local` ou `scripts\deploy.ps1` | 2 min |
@@ -110,11 +110,19 @@ sudo mv /opt/aurion/aurion.prev /opt/aurion/aurion
 sudo systemctl start aurion
 ```
 
+### Système ou application ?
+
+| Ce qui change | Comment |
+|---|---|
+| Application seule (cas courant) | depuis le téléphone, *Mettre à jour depuis GitHub* |
+| Programme système `aurion-helper`, paquets, réglages du système (Diagnostics signale « programme système plus ancien ») | regraver l'image `aurion-raspios-arm64.img.xz` : les réglages reviennent de la clé USB |
+
 ## 6. Sauvegarde et restauration
 
 | Donnée | Emplacement | Sauvegarde |
 |---|---|---|
 | Photos et journaux de nuit | clé USB | copier la clé sur un ordinateur ; ZIP par nuit depuis l'interface |
+| Copie des réglages | clé USB, `aurion-reglages.json` (écrite à chaque enregistrement ; le mot de passe du partage de connexion n'y figure pas) | automatique ; reprise automatique sur une carte SD neuve |
 | Configuration | `/opt/aurion/config/aurion.json` | `sudo cp` vers la clé USB ; contient le mot de passe Wi-Fi (fichier 0600) |
 | Presets | `/opt/aurion/config/presets/` | idem |
 

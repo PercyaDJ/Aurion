@@ -62,7 +62,8 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         run: |
           v=${{ steps.version.outputs.version }}
-          sudo bash scripts/build-image.sh "dist/aurion-$v-rpi-arm64" "dist/aurion-$v-raspios-arm64.img.xz"
+          # Same name for every version: permanent link .../releases/latest/download/aurion-raspios-arm64.img.xz
+          sudo bash scripts/build-image.sh "dist/aurion-$v-rpi-arm64" "dist/aurion-raspios-arm64.img.xz"
 
       - uses: softprops/action-gh-release@v2
         if: steps.version.outputs.skip == 'false'
@@ -71,13 +72,18 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Aurion ${{ steps.version.outputs.version }}
           body: |
-            ## Installation (aucune connaissance technique nécessaire)
+            ## Installation : un seul fichier, système + application
 
-            1. Téléchargez **aurion-${{ steps.version.outputs.version }}-raspios-arm64.img.xz** ci-dessous.
+            1. Téléchargez **aurion-raspios-arm64.img.xz** ci-dessous (environ 600 Mo : Raspberry Pi OS + Aurion).
             2. Avec **Raspberry Pi Imager** : *Choisir l'OS* → *Utiliser une image personnalisée* → ce fichier.
                Répondez **Non** à la question des réglages personnalisés.
             3. Carte SD dans le Raspberry Pi, caméra et clé USB branchées, allumez.
             4. Après 3 à 5 minutes, rejoignez le Wi-Fi **Aurion** (mot de passe **aurora2024**) : la page s'ouvre toute seule.
+
+            Lien permanent vers la dernière version : https://github.com/PercyaDJ/Aurion/releases/latest/download/aurion-raspios-arm64.img.xz
+
+            Mettre à jour ensuite : l'application depuis le téléphone (*Diagnostics*, *Mettre à jour depuis GitHub*) ;
+            le système en regravant cette image. Les photos et les réglages restent sur la clé USB.
 
             Guide pas à pas : docs/GUIDE_DEMARRAGE.md
 

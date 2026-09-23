@@ -65,6 +65,11 @@ Surfaces analysées : API HTTP (42 routes, dont 9 de portail captif), pages web,
 | `aurion-helper power-profile` | 3 valeurs fixes ; en simulation, jamais le vrai `/sys` ; Ethernet laissé actif si un câble est branché | `helper_test.sh` (8 cas) |
 | Retour arrière | échange de deux fichiers du compte du service, refusé pendant une nuit | `rollback_swaps_current_and_previous` |
 
+Copie des réglages sur la clé (`aurion-reglages.json`, 1.9.0) : elle contient le mot de passe du Wi-Fi Aurion, pas
+celui du partage de connexion du téléphone. Qui possède la clé a déjà l'accès physique (réinitialisation du mot de
+passe par fichier, photos) : risque jugé faible. La copie n'est reprise que sur une carte SD sans réglages
+enregistrés, et seulement si elle est valide.
+
 Risque accepté : les versions ne sont pas signées. Le téléchargement passe en HTTPS depuis le dépôt du projet ; qui
 peut modifier le dépôt peut donc livrer une version (plan A2 : signature Ed25519).
 

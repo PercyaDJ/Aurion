@@ -365,3 +365,16 @@ async fn preflight_in_expedition_mode_counts_nights_and_questions_the_clock() {
     let clock = pf["checks"].as_array().unwrap().iter().find(|c| c["id"] == "clock").unwrap().clone();
     assert_eq!(clock["level"], "ok");
 }
+
+#[tokio::test]
+async fn saved_settings_are_copied_on_the_usb_key() {
+    let t = common::env();
+    let mut cfg: Value = t.server.get("/api/config").await.json();
+    cfg["network"]["password"] = json!("MotDePasseTerrain1");
+    cfg["expedition"]["enabled"] = json!(true);
+    t.server.post("/api/config").json(&cfg).await.assert_status_ok();
+    let copy: Value = serde_json::from_slice(&std::fs::read(t.capture_dir().join("aurion-reglages.json")).unwrap()).unwrap();
+    assert_eq!(copy["network"]["password"], "MotDePasseTerrain1", "the camera password comes back after a new SD card");
+    assert_eq!(copy["expedition"]["enabled"], true);
+    assert!(t.config_dir().join(".reglages-utilisateur").exists(), "this SD card now has user settings");
+}

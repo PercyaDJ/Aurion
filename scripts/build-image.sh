@@ -134,7 +134,11 @@ Aurion - caméra d'aurores boréales
 2. Allumez. Le premier démarrage prend 3 à 5 minutes.
 3. Sur le téléphone, rejoignez le Wi-Fi « Aurion » (mot de passe : aurora2024).
 4. La page Aurion s'ouvre toute seule (sinon : http://192.168.4.1:8080).
-   Changez le mot de passe Wi-Fi dans Réglages avancés.
+   L'accueil propose de choisir votre mot de passe, vérifie la caméra et la clé,
+   puis « Lancer la nuit ».
+
+Nouvelle carte SD avec une clé déjà utilisée : vos réglages sont repris
+depuis la clé (fichier aurion-reglages.json), vos photos restent sur la clé.
 TXT
 boot_write "$WORK/AURION-LISEZMOI.txt" AURION-LISEZMOI.txt
 

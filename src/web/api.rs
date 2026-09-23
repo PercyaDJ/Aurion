@@ -496,6 +496,8 @@ pub async fn update_config(
     update
         .save(&state.paths.config_file)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Sauvegarde impossible: {}", e)))?;
+    crate::core::config::mark_user_settings(&state.paths.config_file);
+    let _ = update.save_usb_backup(); // settings kept on the key (new SD card)
     *config = update;
     let masked = config.masked();
     drop(config);
@@ -629,6 +631,8 @@ pub async fn apply_preset(
     merged
         .save(&state.paths.config_file)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Sauvegarde impossible: {}", e)))?;
+    crate::core::config::mark_user_settings(&state.paths.config_file);
+    let _ = merged.save_usb_backup();
     *config = merged;
     let masked = config.masked();
     drop(config);

@@ -628,6 +628,56 @@ pub fn apply_usb_wifi_reset(config: &mut AppConfig) -> bool {
     true
 }
 
+// ─── Settings kept on the USB key ──────────────────────────
+//
+// The SD card holds the system ("firmware": Raspberry Pi OS + Aurion); the
+// USB key holds the photos and a copy of the settings. Flashing a new image
+// on the SD card therefore loses nothing: at first start, Aurion finds its
+// settings on the key.
+
+/// Copy of the settings at the root of the capture drive.
+pub const USB_SETTINGS_FILE: &str = "aurion-reglages.json";
+/// Next to the config: the user has saved settings on this SD card.
+const USER_SETTINGS_MARKER: &str = ".reglages-utilisateur";
+
+impl AppConfig {
+    /// Write the copy of the settings on the key (best effort: no key, no
+    /// copy). The password of the phone hotspot is not copied: it is not
+    /// the camera's own secret.
+    pub fn save_usb_backup(&self) -> std::io::Result<()> {
+        let mut copy = self.clone();
+        copy.online_update = OnlineUpdateConfig::default();
+        let json = serde_json::to_vec_pretty(&copy).map_err(std::io::Error::other)?;
+        let mount = Path::new(&self.storage.mount_point);
+        if !mount.is_dir() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "clé absente"));
+        }
+        write_atomic(&mount.join(USB_SETTINGS_FILE), &json, 0o600)
+    }
+}
+
+/// The user saved settings on this SD card (they win over the key copy).
+pub fn mark_user_settings(config_file: &Path) {
+    if let Some(dir) = config_file.parent() {
+        let _ = write_atomic(&dir.join(USER_SETTINGS_MARKER), b"1", 0o600);
+    }
+}
+
+/// Settings to restore from the key on a freshly flashed SD card: only when
+/// nothing was ever saved on this card and the key holds a valid copy.
+/// The local mount point is kept.
+pub fn settings_from_usb(current: &AppConfig, config_file: &Path) -> Option<AppConfig> {
+    let dir = config_file.parent()?;
+    if dir.join(USER_SETTINGS_MARKER).exists() {
+        return None;
+    }
+    let data = std::fs::read(Path::new(&current.storage.mount_point).join(USB_SETTINGS_FILE)).ok()?;
+    let mut restored: AppConfig = serde_json::from_slice(&data).ok()?;
+    restored.storage.mount_point = current.storage.mount_point.clone();
+    restored.validate().ok()?;
+    Some(restored)
+}
+
 // ─── Errors ────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -844,6 +894,35 @@ mod tests {
         assert!(!dir.path().join(WIFI_RESET_FILE).exists(), "file consumed");
         assert!(dir.path().join("aurion-reset-wifi.txt.done").exists());
         assert!(!apply_usb_wifi_reset(&mut config), "only once");
+    }
+
+    #[test]
+    fn settings_survive_a_new_sd_card() {
+        let key = tempfile::tempdir().unwrap();
+        let sd1 = tempfile::tempdir().unwrap();
+        let mut c = AppConfig::default();
+        c.storage.mount_point = key.path().to_string_lossy().to_string();
+        c.network.password = "MonMotDePasse2026".into();
+        c.expedition.enabled = true;
+        c.online_update = OnlineUpdateConfig { ssid: "Tel".into(), password: "secretdutel".into() };
+        c.save_usb_backup().unwrap();
+        let copy = std::fs::read_to_string(key.path().join(USB_SETTINGS_FILE)).unwrap();
+        assert!(!copy.contains("secretdutel"), "the phone hotspot password stays on the SD card");
+
+        // New SD card (factory settings, nothing saved yet): restored
+        let mut fresh = AppConfig::default();
+        fresh.storage.mount_point = c.storage.mount_point.clone();
+        let cfg_file = sd1.path().join("aurion.json");
+        let r = settings_from_usb(&fresh, &cfg_file).expect("restored");
+        assert_eq!(r.network.password, "MonMotDePasse2026");
+        assert!(r.expedition.enabled);
+        // Once the user saved on this card, the card wins
+        mark_user_settings(&cfg_file);
+        assert!(settings_from_usb(&fresh, &cfg_file).is_none());
+        // No key or a broken copy: nothing
+        let sd2 = tempfile::tempdir().unwrap();
+        std::fs::write(key.path().join(USB_SETTINGS_FILE), b"{broken").unwrap();
+        assert!(settings_from_usb(&fresh, &sd2.path().join("aurion.json")).is_none());
     }
 
     #[test]

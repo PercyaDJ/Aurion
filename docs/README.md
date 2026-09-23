@@ -19,4 +19,4 @@
 
 Installation avancée : [DEPLOY_RPI.md](../DEPLOY_RPI.md).
 
-Version couverte : **1.8.0** (23/09/2026).
+Version couverte : **1.9.0** (23/09/2026).

@@ -1,5 +1,18 @@
 # Journal des versions
 
+## 1.9.0
+
+Objectif : tout-en-un. Un fichier à graver (système + application), la caméra prête en quelques minutes, et une
+carte SD qu'on peut regraver sans rien perdre.
+
+- Image au nom fixe **aurion-raspios-arm64.img.xz** : lien permanent vers la dernière version
+  (`releases/latest/download/aurion-raspios-arm64.img.xz`), page de release centrée sur ce fichier.
+- **Réglages gardés sur la clé USB** (`aurion-reglages.json`, écrit à chaque enregistrement) et repris
+  automatiquement au premier démarrage d'une carte SD neuve ; la clé est la mémoire de la caméra.
+- Au démarrage, la clé est montée avant le Wi-Fi Aurion : le mot de passe repris s'applique tout de suite ; le
+  fichier de réinitialisation du mot de passe marche aussi au premier démarrage.
+- Guide : système ou application, quoi mettre à jour et comment ; durées de mise en route.
+
 ## 1.8.0
 
 Objectif : RAW seul, photos à la suite, le moins de consommation possible, et des cycles essai / correction de

@@ -40,7 +40,7 @@ Installation sur un Raspberry Pi OS existant, sans compilation :
 
 (ou le paquet : sudo apt install ./aurion_${VERSION}_arm64.deb)
 
-Le plus simple pour une carte SD neuve : l'image aurion-${VERSION}-raspios-arm64.img.xz
+Le plus simple pour une carte SD neuve : l'image aurion-raspios-arm64.img.xz
 à copier avec Raspberry Pi Imager (voir docs/GUIDE_DEMARRAGE.md).
 
 À la fin, le nom et le mot de passe du Wi-Fi s'affichent : notez-les.

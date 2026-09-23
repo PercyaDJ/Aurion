@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.8.0**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.9.0**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -142,6 +142,7 @@ Points clés :
 | `sessions/…/aurores.csv` | images avec aurore triées par score (image, heure, score, couleur, JPG, RAW), écrit en fin de nuit |
 | `aurora_*.jpg|dng`, `thumbs/` à la racine | captures des versions antérieures à 1.7, toujours affichées par la galerie |
 | `darks/` | séries de darks |
+| `aurion-reglages.json` | copie des réglages (sans le mot de passe du partage de connexion), reprise au premier démarrage d'une carte SD neuve |
 | `aurion-reset-wifi.txt` | déposé par l'utilisateur : remet le mot de passe Wi-Fi d'usine au démarrage (renommé `.done`) |
 
 ### Carte SD
@@ -151,6 +152,7 @@ Points clés :
 | `/opt/aurion/aurion` (+ `.prev`) | binaire (et version précédente après mise à jour) | 0755 |
 | `/opt/aurion/config/aurion.json` | configuration | 0600, service |
 | `/opt/aurion/config/presets/` | presets utilisateur | 0700 |
+| `/opt/aurion/config/.reglages-utilisateur` | présent dès que des réglages ont été enregistrés sur cette carte : la copie de la clé n'est alors plus reprise | 0600 |
 | `/opt/aurion/config/night.json` | nuit en cours (reprise après coupure), supprimé en fin normale | 0600 |
 | `/usr/local/sbin/aurion-helper` | helper root | 0755 root |
 | `/etc/sudoers.d/aurion` | autorise uniquement le helper | 0440 |
@@ -214,7 +216,7 @@ flowchart LR
 
 | Livrable | Construit par | Usage |
 |---|---|---|
-| `aurion-X.Y.Z-raspios-arm64.img.xz` | `scripts/build-image.sh` (Raspberry Pi OS Lite 64 bits + Aurion, installation au premier démarrage) | utilisateur final : Raspberry Pi Imager |
+| `aurion-raspios-arm64.img.xz` (nom fixe, lien permanent `releases/latest/download/`) | `scripts/build-image.sh` (Raspberry Pi OS Lite 64 bits + Aurion, installation au premier démarrage) | utilisateur final : Raspberry Pi Imager |
 | `aurion_X.Y.Z_arm64.deb` | `scripts/package.sh` | Pi déjà installé : `sudo apt install ./…deb` |
 | `aurion-X.Y.Z-rpi-arm64.tar.gz` | `scripts/package.sh` | `install.sh`, `deploy.sh`, `deploy.ps1` |
 | binaire `aurion` seul | idem | mise à jour depuis l'interface (Diagnostics) |

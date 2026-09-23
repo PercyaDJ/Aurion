@@ -15,7 +15,8 @@
 ## 1. Préparer la carte SD (10 minutes, une seule fois)
 
 1. Sur l'ordinateur, installez **Raspberry Pi Imager** (gratuit, raspberrypi.com/software).
-2. Téléchargez le fichier **aurion-…-raspios-arm64.img.xz** depuis la page *Releases* du projet sur GitHub.
+2. Téléchargez **[aurion-raspios-arm64.img.xz](https://github.com/PercyaDJ/Aurion/releases/latest/download/aurion-raspios-arm64.img.xz)** (environ 600 Mo). Ce fichier contient tout :
+   le système du Raspberry Pi et l'application Aurion. Le lien donne toujours la dernière version.
 3. Dans Raspberry Pi Imager :
    - *Appareil* : votre modèle de Raspberry Pi ;
    - *Système d'exploitation* : tout en bas, **Utiliser une image personnalisée**, puis le fichier téléchargé ;
@@ -72,6 +73,29 @@ la nuit jusqu'à l'heure de fin prévue.
 - **Sur l'ordinateur** : accueil, **Éteindre Aurion**, attendez 20 secondes, puis branchez la clé USB sur
   l'ordinateur : chaque nuit a son dossier dans `sessions/` (sous-dossiers `RAW` et `JPG`, et `aurores.csv`
   qui liste les images avec aurore, de la plus forte à la plus faible).
+
+## Mettre à jour
+
+Aurion est en deux parties, comme un appareil photo avec son firmware et ses réglages :
+
+| Partie | Où | Mise à jour |
+|---|---|---|
+| **Système + application** (l'image) | carte SD | regraver la dernière image avec Raspberry Pi Imager : quand une nouvelle version le demande (*Diagnostics* l'indique) ou pour repartir à neuf |
+| **Application seule** | carte SD | depuis le téléphone : *Diagnostics*, **Mettre à jour depuis GitHub** (le système n'est pas touché) ; retour arrière en un geste |
+| **Photos et copie des réglages** | clé USB | jamais effacées par une mise à jour |
+
+Regraver la carte SD ne fait rien perdre : au premier démarrage, Aurion reprend ses réglages (mot de passe Wi-Fi,
+réglages photo, mode expédition) dans le fichier `aurion-reglages.json` de la clé USB. La clé est ainsi la mémoire
+de la caméra, la carte SD n'est que le programme.
+
+## En combien de temps ?
+
+| Étape | Durée |
+|---|---|
+| Télécharger l'image (environ 600 Mo) | selon la connexion |
+| Graver la carte SD avec Raspberry Pi Imager | quelques minutes selon la carte |
+| Premier démarrage (installation automatique, sans internet) | 3 à 5 minutes |
+| Mot de passe, cadrage, vérifications, **Lancer la nuit** | 2 à 3 minutes |
 
 ## Plusieurs nuits d'affilée
 

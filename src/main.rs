@@ -102,19 +102,45 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run => {
             tracing::info!("Aurion {}: production mode (config: {})", aurion::VERSION, paths.config_file.display());
 
-            let mut config = load_config(&paths);
-            // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
-            if aurion::core::config::apply_usb_wifi_reset(&mut config) {
-                tracing::warn!("Mot de passe Wi-Fi réinitialisé par le fichier de la clé USB");
-                if let Err(e) = config.save(&paths.config_file) {
-                    tracing::error!("Sauvegarde de la config impossible: {}", e);
-                }
-            }
-            if config.network.password == DEFAULT_WIFI_PASSWORD {
-                tracing::warn!("[Securite] Mot de passe Wi-Fi par defaut. Changez-le dans Reglages avances.");
-            }
+            let config = load_config(&paths);
             let port = config.web.port;
             let state = AppState::with_paths(config, paths);
+
+            // The USB key first: it holds the photos and a copy of the
+            // settings (a freshly flashed SD card finds them back there).
+            #[cfg(feature = "rpi")]
+            let storage = aurion::adapters::rpi::StorageRpi::new(state.config.read().await.storage.mount_point.clone());
+            #[cfg(not(feature = "rpi"))]
+            let storage = aurion::adapters::pc::StorageMock::new(PathBuf::from(state.config.read().await.storage.mount_point.clone()));
+            use aurion::ports::storage::StoragePort;
+            if !storage.is_available() {
+                if let Err(e) = storage.mount().await {
+                    tracing::warn!("Storage mount failed: {} — continuing", e);
+                }
+            }
+            {
+                let mut config = state.config.write().await;
+                let file = state.paths.config_file.clone();
+                if let Some(restored) = aurion::core::config::settings_from_usb(&config, &file) {
+                    *config = restored;
+                    let _ = config.save(&file);
+                    aurion::core::config::mark_user_settings(&file);
+                    tracing::info!("Réglages restaurés depuis la clé USB");
+                    drop(config);
+                    state.add_log("Réglages restaurés depuis la clé USB (nouvelle carte SD)".into()).await;
+                    config = state.config.write().await;
+                }
+                // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
+                if aurion::core::config::apply_usb_wifi_reset(&mut config) {
+                    tracing::warn!("Mot de passe Wi-Fi réinitialisé par le fichier de la clé USB");
+                    if let Err(e) = config.save(&file) {
+                        tracing::error!("Sauvegarde de la config impossible: {}", e);
+                    }
+                }
+                if config.network.password == DEFAULT_WIFI_PASSWORD {
+                    tracing::warn!("[Securite] Mot de passe Wi-Fi par defaut : l'accueil propose de le changer.");
+                }
+            }
 
             // Hardware clock (Raspberry Pi 5, or RTC module on a Pi 4): the
             // time is known without a phone, needed for unattended nights.
@@ -157,21 +183,9 @@ async fn main() -> anyhow::Result<()> {
             let camera = aurion::adapters::pc::CameraMock::synthetic();
 
             #[cfg(feature = "rpi")]
-            let storage = aurion::adapters::rpi::StorageRpi::new(state.config.read().await.storage.mount_point.clone());
-            #[cfg(not(feature = "rpi"))]
-            let storage = aurion::adapters::pc::StorageMock::new(PathBuf::from(state.config.read().await.storage.mount_point.clone()));
-
-            #[cfg(feature = "rpi")]
             let system = aurion::adapters::rpi::SystemRpi::new();
             #[cfg(not(feature = "rpi"))]
             let system = aurion::adapters::pc::SystemMock::new();
-
-            use aurion::ports::storage::StoragePort;
-            if !storage.is_available() {
-                if let Err(e) = storage.mount().await {
-                    tracing::warn!("Storage mount failed: {} — continuing", e);
-                }
-            }
 
             #[allow(unused_mut)]
             let mut orchestrator = aurion::core::orchestrator::Orchestrator::new(state.clone(), camera, storage, system);
