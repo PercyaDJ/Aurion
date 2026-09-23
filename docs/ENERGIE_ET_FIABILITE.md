@@ -12,8 +12,9 @@
 | Services inutiles arrêtés (bluetooth, ModemManager, triggerhappy) | `install.sh` | moins de réveils |
 | Runtime limité à 2 threads | `main.rs` | moins de réveils CPU |
 | Journaux en RAM | `install.sh` | pas d'écriture sur la carte SD |
+| Interface : rafraîchissement suspendu quand l'écran du téléphone est éteint ou l'onglet caché | `js/common.js` (`aurionPoll`) | moins de requêtes, moins de réveils du Pi pendant la préparation |
 
-Pour aller plus loin (non appliqué automatiquement) : débrancher l'écran HDMI, limiter la fréquence CPU
+Pour aller plus loin (non appliqué automatiquement, faute de mesure sur le matériel) : débrancher l'écran HDMI, limiter la fréquence CPU
 (`arm_freq`), utiliser un Pi 4 plutôt qu'un Pi 5 (consommation au repos plus faible). Ordres de grandeur et mesure :
 voir PLAN_ACTION.md (tâche E1, mesure réelle avec un testeur USB).
 
@@ -29,6 +30,7 @@ voir PLAN_ACTION.md (tâche E1, mesure réelle avec un testeur USB).
 | Carte SD | journaux en RAM, `noatime`, pas de mises à jour automatiques | très peu d'écritures, donc très peu de risque |
 | Batterie qui s'épuise | arrêt propre sur sous-tension persistante (3 contrôles de suite) | `sync` puis extinction |
 | Blocage du système | watchdog matériel (redémarrage) et watchdog systemd (relance du service) | reprise automatique |
+| Nuit interrompue (batterie vide, changée, câble arraché) | `night.json` écrit au lancement, supprimé en fin normale | au redémarrage : Wi-Fi 5 min (annulable depuis le téléphone), puis la nuit reprend seule jusqu'à la fin prévue, 3 fois au plus |
 
 ## 3. Recommandations terrain
 

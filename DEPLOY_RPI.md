@@ -18,10 +18,10 @@ Trois possibilités, au choix (détails dans le [README](README.md)) :
 |---|---|
 | une carte SD neuve (recommandé) | image `aurion-…-raspios-arm64.img.xz` avec Raspberry Pi Imager : voir [docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md) |
 | le Pi, depuis un clone du dépôt | `sudo ./install.sh` |
-| le Pi, paquet Debian | `sudo apt install ./aurion_1.5.0_arm64.deb` |
+| le Pi, paquet Debian | `sudo apt install ./aurion_1.6.0_arm64.deb` |
 | le Pi, avec internet | `curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh \| sudo bash` |
-| un PC Windows | `.\scripts\deploy.ps1 utilisateur@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` |
-| un PC Linux / macOS | `scripts/deploy.sh utilisateur@aurion.local aurion-1.5.0-rpi-arm64.tar.gz` |
+| un PC Windows | `.\scripts\deploy.ps1 utilisateur@aurion.local .\aurion-1.6.0-rpi-arm64.tar.gz` |
+| un PC Linux / macOS | `scripts/deploy.sh utilisateur@aurion.local aurion-1.6.0-rpi-arm64.tar.gz` |
 
 L'archive `aurion-<version>-rpi-arm64.tar.gz` est construite par GitHub Actions (onglet *Releases*,
 ou onglet *Actions*, artefact `aurion-rpi-arm64`).

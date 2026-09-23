@@ -38,6 +38,8 @@ pub struct Paths {
     pub thumb_cache_dir: PathBuf,
     /// Scratch directory for preview captures.
     pub tmp_dir: PathBuf,
+    /// Marker of the night in progress (resume after a power cut).
+    pub night_marker: PathBuf,
 }
 
 impl Paths {
@@ -48,6 +50,7 @@ impl Paths {
             presets_dir: config_dir.join("presets"),
             thumb_cache_dir: std::env::temp_dir().join("aurion_thumbnails"),
             tmp_dir: std::env::temp_dir(),
+            night_marker: config_dir.join("night.json"),
         }
     }
 }
@@ -88,6 +91,10 @@ pub struct AppState {
     pub last_preview: Arc<RwLock<Option<crate::core::models::ExposureSettings>>>,
     /// Progress of a dark frame series: (done, total, last error).
     pub darks: Arc<RwLock<Option<DarkProgress>>>,
+    /// Last camera detection result (checking costs a process launch).
+    pub camera_check: Arc<RwLock<Option<(std::time::Instant, bool)>>>,
+    /// An interrupted night will resume at this instant unless cancelled.
+    pub resume_at: Arc<RwLock<Option<tokio::time::Instant>>>,
 }
 
 /// Progress of the dark frame capture (see `api::capture_darks`).
@@ -119,6 +126,8 @@ impl AppState {
             system_actions: cfg!(feature = "rpi"),
             last_preview: Arc::new(RwLock::new(None)),
             darks: Arc::new(RwLock::new(None)),
+            camera_check: Arc::new(RwLock::new(None)),
+            resume_at: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -154,6 +163,9 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router<()> {
     let api = Router::new()
         .route("/api/status", get(api::get_status))
+        .route("/api/preflight", get(api::get_preflight))
+        .route("/api/night/last", get(gallery::get_last_night))
+        .route("/api/night/resume/cancel", post(api::cancel_resume))
         .route("/api/preview", get(api::get_preview))
         .route("/api/preview/capture", post(api::capture_preview))
         .route("/api/config", get(api::get_config).post(api::update_config))

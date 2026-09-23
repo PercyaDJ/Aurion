@@ -4,258 +4,362 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aurion — Accueil</title>
+    <title>Aurion</title>
     <link rel="stylesheet" href="/css/style.css">
     <script src="/js/common.js"></script>
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#6c5ce7">
+    <meta name="theme-color" content="#0a0a0f">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Aurion">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
-    <style>
-        .hero {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            padding: 2rem 1rem 1rem;
-        }
-
-        .hero-icon {
-            font-size: 3rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .hero-title {
-            font-size: 2rem;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            background: linear-gradient(135deg, var(--aurora-green), var(--accent));
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .hero-sub {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-top: 0.25rem;
-        }
-
-        .mode-cards {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            margin-top: 1.5rem;
-        }
-
-        .mode-card {
-            display: flex;
-            align-items: flex-start;
-            gap: 1rem;
-            padding: 1.25rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            cursor: pointer;
-            transition: all 0.25s ease;
-            text-decoration: none;
-            color: inherit;
-        }
-
-        .mode-card:hover {
-            border-color: var(--accent);
-            box-shadow: 0 0 30px var(--accent-glow);
-            transform: translateY(-2px);
-        }
-
-        .mode-card:active {
-            transform: translateY(0);
-        }
-
-        .mode-icon {
-            font-size: 2rem;
-            width: 48px;
-            height: 48px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 12px;
-            flex-shrink: 0;
-        }
-
-        .mode-icon.capture {
-            background: linear-gradient(135deg, rgba(108, 92, 231, 0.2), rgba(46, 204, 113, 0.2));
-        }
-
-        .mode-icon.recovery {
-            background: linear-gradient(135deg, rgba(240, 165, 0, 0.2), rgba(231, 76, 60, 0.2));
-        }
-
-        .mode-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-
-        .mode-title {
-            font-size: 1.1rem;
-            font-weight: 700;
-        }
-
-        .mode-desc {
-            font-size: 0.82rem;
-            color: var(--text-secondary);
-            line-height: 1.4;
-        }
-
-        .stats-bar {
-            display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin-top: 2rem;
-            padding: 1rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-        }
-
-        .stat-item {
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: var(--aurora-green);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .stat-label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .phase-indicator {
-            margin-top: 1.5rem;
-            text-align: center;
-        }
-    </style>
 </head>
 
 <body>
-    <!-- Navbar -->
     <nav class="navbar">
         <div class="navbar-brand">
-            <img src="/icons/icon-192.png" alt="Aurion"
-                style="width:28px;height:28px;vertical-align:middle;margin-right:6px;">
+            <img src="/icons/icon-192.png" alt="" style="width:28px;height:28px;vertical-align:middle;margin-right:6px;">
             <span>Aurion</span>
         </div>
+        <span class="badge badge-phase" id="phaseBadge">…</span>
         <button class="burger-btn" onclick="toggleMenu()" aria-label="Menu">☰</button>
     </nav>
-
-    <!-- Side Menu -->
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
-    <nav class="side-menu" id="sideMenu">
-        <a href="/index.html" class="active"><span class="menu-icon">🏠</span> Accueil</a>
-        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
-        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
-        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
-        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
-        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
-        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
-        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
-        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
-    </nav>
+    <nav class="side-menu" id="sideMenu"></nav>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <!-- Hero -->
-        <div class="hero fade-in">
-            <div class="hero-icon"><img src="/icons/icon-192.png" alt="Aurion" style="width:64px;height:64px;"></div>
-            <div class="hero-title">Aurion</div>
-            <div class="hero-sub">Caméra autonome de capture d'aurores</div>
-        </div>
+    <div class="main-content home">
 
-        <!-- Mode Cards -->
-        <div class="mode-cards">
-            <a href="/dashboard.html" class="mode-card fade-in">
-                <div class="mode-icon capture">🌙</div>
-                <div class="mode-info">
-                    <span class="mode-title">Mode Capture</span>
-                    <span class="mode-desc">Configurer les paramètres et lancer la capture nocturne. Réglages
-                        d'exposition, détection, presets.</span>
+        <!-- Nuit en cours (remplace tout le reste) -->
+        <section id="nightRunning" class="card night-running" hidden>
+            <div class="night-moon">🌌</div>
+            <h1 id="runningTitle">Nuit en cours</h1>
+            <p id="runningText"></p>
+            <ul class="plain-list">
+                <li>Laissez Aurion allumé et ne touchez plus à la caméra.</li>
+                <li>Il s'éteindra seul à la fin de la nuit.</li>
+                <li>Demain : rallumez-le, rejoignez le Wi-Fi <b>Aurion</b>, vos photos seront ici.</li>
+            </ul>
+        </section>
+
+        <div id="armView">
+            <!-- Nuit interrompue par une coupure de courant -->
+            <section id="resumeCard" class="card resume-card" hidden>
+                <h2>Nuit interrompue</h2>
+                <p>Aurion a redémarré pendant la nuit (batterie vide ou changée, câble débranché).
+                    Il reprend seul les photos dans <b id="resumeCountdown">5:00</b>.</p>
+                <div class="row-actions wrap">
+                    <button class="btn btn-primary" onclick="resumeNow()">Reprendre maintenant</button>
+                    <button class="btn btn-outline" onclick="cancelResume()">Annuler la reprise</button>
                 </div>
-            </a>
+            </section>
 
-            <a href="/gallery.html" class="mode-card fade-in">
-                <div class="mode-icon recovery">📸</div>
-                <div class="mode-info">
-                    <span class="mode-title">Mode Récupération</span>
-                    <span class="mode-desc">Voir et télécharger les images capturées. Parcourir la galerie, télécharger
-                        sur votre téléphone.</span>
+            <!-- Premier démarrage : mot de passe personnel -->
+            <section id="onboarding" class="card onboarding" hidden>
+                <h2>Protégez votre caméra</h2>
+                <p class="muted">Le mot de passe Wi-Fi est encore celui d'usine. Choisissez le vôtre (10 caractères minimum).</p>
+                <input type="text" id="newWifiPassword" class="form-input" autocomplete="new-password" autocapitalize="off"
+                    spellcheck="false" placeholder="Nouveau mot de passe Wi-Fi">
+                <div class="row-actions">
+                    <button class="btn btn-primary" onclick="saveWifiPassword()">Enregistrer</button>
+                    <button class="btn btn-outline" onclick="skipOnboarding()">Plus tard</button>
                 </div>
-            </a>
-        </div>
+                <p class="muted small">Le Wi-Fi Aurion redémarre : reconnectez-vous ensuite avec ce nouveau mot de passe.
+                    Oubli ? Posez un fichier <code>aurion-reset-wifi.txt</code> sur la clé USB et rallumez.</p>
+            </section>
 
-        <!-- Stats -->
-        <div class="stats-bar fade-in">
-            <div class="stat-item">
-                <div class="stat-value" id="statImages">—</div>
-                <div class="stat-label">Images</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value" id="statSize">—</div>
-                <div class="stat-label">Taille</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value" id="statDate">—</div>
-                <div class="stat-label">Dernière session</div>
-            </div>
-        </div>
+            <!-- Vérifications avant la nuit -->
+            <section class="card">
+                <div class="card-header">
+                    <span class="card-title">Prêt pour la nuit ?</span>
+                    <span class="badge" id="readyBadge">…</span>
+                </div>
+                <ul class="checklist" id="checks">
+                    <li class="check-item"><span class="dot"></span><span>Vérification en cours…</span></li>
+                </ul>
+            </section>
 
-        <!-- Phase -->
-        <div class="phase-indicator fade-in">
-            <span class="badge badge-phase pulse" id="phaseBadge">—</span>
+            <!-- Réglages de la nuit -->
+            <section class="card">
+                <div class="card-title" style="margin-bottom:0.75rem;">Cette nuit</div>
+
+                <div class="field-label">Mode</div>
+                <div class="segmented" role="radiogroup">
+                    <label><input type="radio" name="mode" id="modeSafe" value="safe" checked>
+                        <span><b>Toute la nuit</b><small>Une photo toutes les <span id="intervalLabel">10</span> s, les aurores
+                                sont marquées. Idéal timelapse.</small></span></label>
+                    <label><input type="radio" name="mode" id="modeFilter" value="filter">
+                        <span><b>Aurores seulement</b><small>Surveille le ciel et n'enregistre que pendant les aurores.
+                                Économise la clé.</small></span></label>
+                </div>
+
+                <div class="field-row">
+                    <label class="field-label" for="nightLength">Durée</label>
+                    <select id="nightLength" class="form-select"></select>
+                </div>
+                <div class="field-row">
+                    <label class="field-label" for="nightFormat">Photos</label>
+                    <select id="nightFormat" class="form-select">
+                        <option value="RawAndJpg">RAW + JPG (conseillé)</option>
+                        <option value="RawDng">RAW seulement</option>
+                        <option value="Jpg">JPG seulement (plus léger)</option>
+                    </select>
+                </div>
+                <p class="muted small" id="capacityLine"></p>
+            </section>
+
+            <button class="btn btn-hero btn-block" id="startNightBtn" onclick="startNight()" disabled>
+                Lancer la nuit
+            </button>
+            <p class="muted small center" id="startHint" style="margin:0.5rem 0 1.25rem;">Le Wi-Fi se coupe 15 s après, pour économiser la batterie.</p>
+
+            <!-- Dernière nuit -->
+            <section class="card" id="lastNight" hidden>
+                <div class="card-header">
+                    <span class="card-title">Dernière nuit</span>
+                    <span class="badge" id="lastNightBadge"></span>
+                </div>
+                <div class="stats" id="lastNightStats"></div>
+                <div class="row-actions wrap">
+                    <a class="btn btn-primary" id="lastBest" href="/gallery.html#best">Voir les plus belles</a>
+                    <a class="btn btn-outline" id="lastRaw" href="#">Télécharger les RAW</a>
+                    <a class="btn btn-outline" id="lastAll" href="#">Tout télécharger</a>
+                </div>
+            </section>
+
+            <div class="row-actions wrap center">
+                <a class="btn btn-outline" href="/preview.html">Cadrer (aperçu)</a>
+                <button class="btn btn-outline btn-danger-outline" id="shutdownBtn" onclick="shutdownNow()">Éteindre Aurion</button>
+            </div>
         </div>
     </div>
 
     <script>
-        function toggleMenu() {
-            document.getElementById('sideMenu').classList.toggle('open');
-            document.getElementById('menuOverlay').classList.toggle('visible');
+        let config = null;
+        let preflight = null;
+        let phase = null;
+
+        const RUNNING_TEXT = {
+            'DISCONNECT': ['C\'est parti', 'Le Wi-Fi se coupe dans quelques secondes. Vous pouvez partir.'],
+            'CALIBRATION': ['Nuit en cours', 'Aurion ajuste l\'exposition au ciel.'],
+            'WATCH': ['Nuit en cours', 'Aurion surveille le ciel.'],
+            'RUN': ['Nuit en cours', 'Aurion photographie le ciel.'],
+            'SHUTDOWN': ['Fin de nuit', 'Aurion s\'éteint. Attendez 20 secondes avant de le débrancher.'],
+        };
+
+        function fmtHours(h) {
+            if (h == null) return '';
+            const whole = Math.floor(h), min = Math.round((h - whole) * 60);
+            return min ? `${whole} h ${String(min).padStart(2, '0')}` : `${whole} h`;
         }
 
-        async function loadStats() {
-            try {
-                const res = await fetch('/api/gallery/stats');
-                const data = await res.json();
-                document.getElementById('statImages').textContent = data.total_images;
-                document.getElementById('statSize').textContent =
-                    data.total_size_mb > 1024
-                        ? (data.total_size_mb / 1024).toFixed(1) + ' Go'
-                        : data.total_size_mb.toFixed(0) + ' Mo';
-                document.getElementById('statDate').textContent =
-                    data.last_session_date || 'Aucune';
-            } catch (e) {
-                console.error('Stats load failed:', e);
+        function showPhase(p) {
+            phase = p;
+            document.getElementById('phaseBadge').textContent = p;
+            const running = p !== 'ARM' && p !== 'BOOT';
+            document.getElementById('nightRunning').hidden = !running;
+            document.getElementById('armView').hidden = running;
+            if (running) {
+                const [title, text] = RUNNING_TEXT[p] || ['Nuit en cours', ''];
+                document.getElementById('runningTitle').textContent = title;
+                document.getElementById('runningText').textContent = text;
             }
         }
 
-        async function loadPhase() {
+        function renderChecks(pf) {
+            const ul = document.getElementById('checks');
+            ul.innerHTML = '';
+            for (const c of pf.checks) {
+                const li = document.createElement('li');
+                li.className = 'check-item ' + c.level;
+                li.dataset.check = c.id;
+                li.innerHTML = `<span class="dot"></span><span><b>${aurionEscape(c.title)}</b>` +
+                    (c.detail ? `<small>${aurionEscape(c.detail)}</small>` : '') + '</span>';
+                ul.appendChild(li);
+            }
+            const badge = document.getElementById('readyBadge');
+            const warn = pf.checks.some(c => c.level === 'warn');
+            badge.textContent = pf.ready ? (warn ? 'À vérifier' : 'Prêt') : 'À corriger';
+            badge.className = 'badge ' + (pf.ready ? (warn ? 'badge-warning' : 'badge-ok') : 'badge-danger');
+            const btn = document.getElementById('startNightBtn');
+            if (!btn.dataset.pending) btn.disabled = !pf.ready || phase !== 'ARM';
+            document.getElementById('startHint').textContent = pf.ready
+                ? 'Le Wi-Fi se coupe 15 s après, pour économiser la batterie.'
+                : 'Corrigez les points en rouge pour pouvoir lancer la nuit.';
+            renderCapacity();
+        }
+
+        function renderCapacity() {
+            if (!preflight) return;
+            const line = document.getElementById('capacityLine');
+            line.textContent = preflight.capacity_hours != null
+                ? `Place sur la clé : environ ${fmtHours(preflight.capacity_hours)} de photos avec ces réglages.`
+                : '';
+        }
+
+        function fillNightForm(cfg) {
+            document.getElementById(cfg.detection.detection_capture_enabled ? 'modeFilter' : 'modeSafe').checked = true;
+            document.getElementById('intervalLabel').textContent = cfg.capture.capture_interval_secs;
+            const sel = document.getElementById('nightLength');
+            const start = cfg.time_range.start.substring(0, 5), end = cfg.time_range.end.substring(0, 5);
+            sel.innerHTML = `<option value="range">De ${start} à ${end}</option>` +
+                [2, 3, 4, 6, 8, 10, 12].map(h => `<option value="${h}">${h} heures à partir de maintenant</option>`).join('');
+            const d = cfg.time_range.duration_hours;
+            if (d && ![...sel.options].some(o => o.value === String(d))) {
+                sel.insertAdjacentHTML('beforeend', `<option value="${d}">${fmtHours(d)} à partir de maintenant</option>`);
+            }
+            sel.value = d ? String(d) : 'range';
+            document.getElementById('nightFormat').value = cfg.capture.output_format;
+        }
+
+        async function loadPreflight() {
             try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
-                document.getElementById('phaseBadge').textContent = data.phase;
+                preflight = await (await apiFetch('/api/preflight')).json();
+                showPhase(preflight.phase);
+                renderChecks(preflight);
+                renderResume(preflight.resume_in_secs);
+                const pw = preflight.checks.some(c => c.id === 'password');
+                let skipped = false;
+                try { skipped = sessionStorage.getItem('aurionSkipOnboarding') === '1'; } catch (_) { }
+                document.getElementById('onboarding').hidden = !pw || skipped;
             } catch (e) {
-                console.error('Status load failed:', e);
+                showToast('Aurion ne répond pas. Vérifiez que vous êtes sur son Wi-Fi.', 'error');
             }
         }
 
-        loadStats();
-        loadPhase();
+        async function loadLastNight() {
+            try {
+                const n = await (await apiFetch('/api/night/last')).json();
+                const card = document.getElementById('lastNight');
+                if (!n) { card.hidden = true; return; }
+                card.hidden = false;
+                const s = n.session;
+                document.getElementById('lastNightBadge').textContent = s.date || s.name;
+                const stat = (v, l) => `<div class="stat"><div class="stat-value">${aurionEscape(v)}</div><div class="stat-label">${l}</div></div>`;
+                document.getElementById('lastNightStats').innerHTML =
+                    stat(s.image_count, 'photos') + stat(s.aurora_count, 'avec aurore') +
+                    stat(n.raw_count, 'RAW') + stat(fmtHours(s.duration_minutes / 60) || '0 h', 'durée');
+                const base = '/api/gallery/sessions/' + encodeURIComponent(s.name) + '/download';
+                document.getElementById('lastRaw').href = base + '?only=raw';
+                document.getElementById('lastRaw').hidden = n.raw_count === 0;
+                document.getElementById('lastAll').href = base;
+                document.getElementById('lastBest').hidden = s.aurora_count === 0;
+            } catch (_) { /* pas de clé : rien à montrer */ }
+        }
+
+        async function loadConfig() {
+            try {
+                config = await (await apiFetch('/api/config')).json();
+                fillNightForm(config);
+            } catch (_) { }
+        }
+
+        async function startNight() {
+            const filter = document.getElementById('modeFilter').checked;
+            const len = document.getElementById('nightLength').value;
+            const fmt = document.getElementById('nightFormat').value;
+            const when = len === 'range' ? document.getElementById('nightLength').selectedOptions[0].textContent.toLowerCase()
+                : `pendant ${len} heures`;
+            if (!confirm(`Lancer la nuit ${when} ?\n\nLe Wi-Fi Aurion va se couper. La caméra travaille seule puis s'éteint.`)) return;
+            const btn = document.getElementById('startNightBtn');
+            btn.disabled = true;
+            btn.dataset.pending = '1';
+            btn.textContent = 'Lancement…';
+            try {
+                const cfg = await (await apiFetch('/api/config')).json();
+                cfg.detection.detection_capture_enabled = filter;
+                cfg.time_range.duration_hours = len === 'range' ? null : parseFloat(len);
+                cfg.capture.output_format = fmt;
+                await apiFetch('/api/config', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+                });
+                await apiFetch('/api/disconnect', { method: 'POST' });
+                showPhase('DISCONNECT');
+            } catch (e) {
+                showToast('Impossible de lancer la nuit : ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Lancer la nuit';
+            }
+            delete btn.dataset.pending;
+        }
+
+        let resumeDeadline = null;
+        function renderResume(secs) {
+            const card = document.getElementById('resumeCard');
+            card.hidden = secs == null;
+            resumeDeadline = secs == null ? null : Date.now() + secs * 1000;
+            tickResume();
+        }
+        function tickResume() {
+            if (resumeDeadline == null) return;
+            const left = Math.max(0, Math.round((resumeDeadline - Date.now()) / 1000));
+            document.getElementById('resumeCountdown').textContent =
+                Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+            if (left === 0) loadPreflight();
+        }
+        setInterval(tickResume, 1000);
+
+        async function resumeNow() {
+            try {
+                await apiFetch('/api/disconnect', { method: 'POST' });
+                showPhase('DISCONNECT');
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function cancelResume() {
+            try {
+                await apiFetch('/api/night/resume/cancel', { method: 'POST' });
+                renderResume(null);
+                showToast('Reprise annulée : Aurion attend vos instructions', 'success');
+            } catch (e) { showToast(e.message, 'error'); loadPreflight(); }
+        }
+
+        async function saveWifiPassword() {
+            const pw = document.getElementById('newWifiPassword').value;
+            if (pw.length < 10) { showToast('10 caractères minimum', 'error'); return; }
+            try {
+                const cfg = await (await apiFetch('/api/config')).json();
+                cfg.network.password = pw;
+                await apiFetch('/api/config', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+                });
+                document.getElementById('onboarding').hidden = true;
+                showToast('Mot de passe enregistré. Reconnectez-vous au Wi-Fi Aurion avec : ' + pw, 'success');
+                loadPreflight();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        function skipOnboarding() {
+            try { sessionStorage.setItem('aurionSkipOnboarding', '1'); } catch (_) { }
+            document.getElementById('onboarding').hidden = true;
+        }
+
+        async function shutdownNow() {
+            if (!confirm('Éteindre Aurion maintenant ?\nAttendez 20 secondes avant de débrancher.')) return;
+            try {
+                await apiFetch('/api/system/shutdown', { method: 'POST' });
+                showPhase('SHUTDOWN');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        document.getElementById('nightFormat').addEventListener('change', async () => {
+            // La capacité dépend du format : recalcul côté serveur avec le format choisi
+            if (!config) return;
+            const est = { RawAndJpg: 28, RawDng: 24, Jpg: 4 };
+            const cur = est[config.capture.output_format], next = est[document.getElementById('nightFormat').value];
+            if (preflight && preflight.capacity_hours != null && cur && next) {
+                document.getElementById('capacityLine').textContent =
+                    `Place sur la clé : environ ${fmtHours(Math.round(preflight.capacity_hours * cur / next * 10) / 10)} de photos avec ces réglages.`;
+            }
+        });
+
+        document.addEventListener('aurion-clock', loadPreflight);
+        loadConfig();
+        loadPreflight();
+        loadLastNight();
+        aurionPoll(loadPreflight, 10000);
     </script>
     <script src="/js/toast.js"></script>
 </body>

@@ -177,3 +177,51 @@ async fn delete_session_removes_its_images_only() {
     assert!(other.exists(), "images of other nights are kept");
     t.server.delete("/api/gallery/sessions/2026-03-05_21-30").await.assert_status(StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn session_zip_raw_only_or_jpg_only() {
+    let t = common::env();
+    t.add_session("2026-03-05_21-30");
+    t.add_file("aurora_20260305_213100_00000.jpg", b"J");
+    t.add_file("aurora_20260305_213100_00000.dng", b"R");
+    t.add_file("aurora_20260305_223100_00001_AURORA.dng", b"R2");
+
+    let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=raw").await;
+    res.assert_status_ok();
+    assert!(res.header("content-disposition").to_str().unwrap().contains("aurion_2026-03-05_21-30_RAW.zip"));
+    let names: Vec<String> = unzip(res.as_bytes().to_vec()).await.into_iter().map(|(n, _)| n).collect();
+    assert!(names.iter().all(|n| !n.ends_with(".jpg")), "{:?}", names);
+    assert!(names.contains(&"aurora_20260305_223100_00001_AURORA.dng".to_string()));
+
+    let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=jpg").await;
+    let names: Vec<String> = unzip(res.as_bytes().to_vec()).await.into_iter().map(|(n, _)| n).collect();
+    assert!(names.iter().all(|n| !n.ends_with(".dng")), "{:?}", names);
+    assert!(names.contains(&"aurora_20260305_213100_00000.jpg".to_string()));
+
+    // Unknown filter value is rejected, not silently ignored
+    let res = t.server.get("/api/gallery/sessions/2026-03-05_21-30/download?only=exe").await;
+    assert!(res.status_code().is_client_error());
+}
+
+#[tokio::test]
+async fn last_night_summary() {
+    let t = common::env();
+    let none: Value = t.server.get("/api/night/last").await.json();
+    assert!(none.is_null(), "no night yet");
+
+    t.add_session("2026-03-05_21-30");
+    t.add_session("2026-03-06_22-00");
+    std::fs::write(
+        t.capture_dir().join("sessions/2026-03-06_22-00/event.jsonl"),
+        b"{\"aurora_score\":2.5,\"aurora_detected\":true}\n{\"aurora_score\":6.25,\"aurora_detected\":true}\n",
+    )
+    .unwrap();
+    for f in ["aurora_20260305_213100_00000.jpg", "aurora_20260306_220500_00000_AURORA.jpg", "aurora_20260306_220500_00000_AURORA.dng"] {
+        t.add_file(f, b"data");
+    }
+    let n: Value = t.server.get("/api/night/last").await.json();
+    assert_eq!(n["session"]["name"], "2026-03-06_22-00", "most recent night");
+    assert_eq!(n["raw_count"], 1);
+    assert_eq!(n["session"]["aurora_count"], 1);
+    assert_eq!(n["best_score"], 6.25);
+}

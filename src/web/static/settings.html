@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aurion — Réglages rapides</title>
+    <title>Aurion : réglages photo</title>
     <link rel="stylesheet" href="/css/style.css">
     <script src="/js/common.js"></script>
 </head>
@@ -15,20 +15,10 @@
         <button class="burger-btn" onclick="toggleMenu()">☰</button>
     </nav>
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
-    <nav class="side-menu" id="sideMenu">
-        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
-        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
-        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
-        <a href="/settings.html" class="active"><span class="menu-icon">⚙️</span> Réglages rapides</a>
-        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
-        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
-        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
-        <a href="/gallery.html"><span class="menu-icon">📸</span> Galerie</a>
-        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
-    </nav>
+    <nav class="side-menu" id="sideMenu"></nav>
 
     <div class="main-content">
-        <h1 style="margin-bottom: 1rem;">⚙️ Réglages rapides</h1>
+        <h1 style="margin-bottom: 1rem;">⚙️ Réglages photo</h1>
 
         <!-- Exposure -->
         <div class="card fade-in">
@@ -215,10 +205,6 @@
     </div>
 
     <script>
-        function toggleMenu() {
-            document.getElementById('sideMenu').classList.toggle('open');
-            document.getElementById('menuOverlay').classList.toggle('visible');
-        }
 
         function updateVal(id, val) {
             document.getElementById(id).textContent = val;

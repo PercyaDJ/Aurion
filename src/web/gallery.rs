@@ -261,6 +261,42 @@ fn compute_sessions(mount: &FsPath) -> Vec<SessionInfo> {
 
 /// List capture sessions (most recent first). Read-only: listing never
 /// deletes anything (a session of a night without aurora only has logs).
+#[derive(Serialize)]
+pub struct LastNight {
+    pub session: SessionInfo,
+    pub best_score: Option<f64>,
+    pub raw_count: usize,
+}
+
+/// Summary of the most recent night for the home screen.
+/// Highest aurora score recorded in a session's event log.
+fn session_best_score(mount: &FsPath, session: &str) -> Option<f64> {
+    let text = std::fs::read_to_string(mount.join("sessions").join(session).join("event.jsonl")).ok()?;
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("aurora_score")?.as_f64())
+        .filter(|s| s.is_finite())
+        .reduce(f64::max)
+}
+
+pub async fn get_last_night(State(state): State<AppState>) -> Json<Option<LastNight>> {
+    let mount = mount_point(&state).await;
+    Json(
+        tokio::task::spawn_blocking(move || {
+            let session = compute_sessions(&mount).into_iter().find(|s| s.image_count > 0)?;
+            let raw_count = session_files(&mount, &session.name)
+                .iter()
+                .filter(|f| validate::extension_lower(f).as_deref() == Some("dng"))
+                .count();
+            let best_score = session_best_score(&mount, &session.name);
+            Some(LastNight { session, best_score, raw_count })
+        })
+        .await
+        .ok()
+        .flatten(),
+    )
+}
+
 pub async fn get_gallery_sessions(State(state): State<AppState>) -> Json<Vec<SessionInfo>> {
     let mount = mount_point(&state).await;
     Json(tokio::task::spawn_blocking(move || compute_sessions(&mount)).await.unwrap_or_default())
@@ -599,14 +635,36 @@ pub async fn download_gallery_zip(
     zip_response(&zip_name, zip_stream(entries))
 }
 
+#[derive(Deserialize, Default)]
+pub struct SessionZipQuery {
+    /// "raw" = DNG only, "jpg" = JPEG only; default: everything.
+    #[serde(default)]
+    pub only: Option<String>,
+}
+
 /// Download an entire session (images + logs) as a ZIP file.
-pub async fn download_gallery_session_zip(State(state): State<AppState>, Path(session): Path<String>) -> Response {
+pub async fn download_gallery_session_zip(
+    State(state): State<AppState>,
+    Path(session): Path<String>,
+    Query(q): Query<SessionZipQuery>,
+) -> Response {
     if !validate::is_safe_name(&session) {
         return bad_request("Nom de session invalide");
     }
+    let only = q.only.as_deref();
+    if !matches!(only, None | Some("raw") | Some("jpg")) {
+        return bad_request("Filtre inconnu : utilisez only=raw ou only=jpg");
+    }
     let mount = mount_point(&state).await;
     let session_dir = mount.join("sessions").join(&session);
-    let files = session_files(&mount, &session);
+    let files: Vec<String> = session_files(&mount, &session)
+        .into_iter()
+        .filter(|f| match (only, validate::extension_lower(f).as_deref()) {
+            (Some("raw"), ext) => matches!(ext, Some("dng") | Some("raw")),
+            (Some("jpg"), ext) => matches!(ext, Some("jpg") | Some("jpeg")),
+            _ => true,
+        })
+        .collect();
 
     let mut entries: Vec<(String, PathBuf)> = files.into_iter().map(|n| (n.clone(), mount.join(n))).collect();
     for log in ["event.jsonl", "session.log"] {
@@ -619,7 +677,8 @@ pub async fn download_gallery_session_zip(State(state): State<AppState>, Path(se
         state.add_log(format!("ZIP '{}' : aucun fichier trouvé", session)).await;
         return (StatusCode::NOT_FOUND, "Cette session ne contient plus aucun fichier.").into_response();
     }
-    zip_response(&format!("aurion_session_{}.zip", session), zip_stream(entries))
+    let suffix = match only { Some("raw") => "_RAW", Some("jpg") => "_JPG", _ => "" };
+    zip_response(&format!("aurion_{}{}.zip", session, suffix), zip_stream(entries))
 }
 
 #[cfg(test)]

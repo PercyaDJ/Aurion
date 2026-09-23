@@ -36,9 +36,78 @@ function aurionEscape(text) {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (data.changed && typeof showToast === 'function') {
-            showToast("Heure synchronisée avec le téléphone", 'success');
+        if (data.changed) {
+            if (typeof showToast === 'function') showToast("Heure synchronisée avec le téléphone", 'success');
+            document.dispatchEvent(new Event('aurion-clock'));
         }
         try { sessionStorage.setItem('aurionClockSynced', '1'); } catch (_) { }
     } catch (_) { /* hors ligne : on réessaiera au prochain chargement */ }
 })();
+
+// ─── Menu commun et mode expert ────────────────────────────
+// Le menu est généré ici, une seule fois pour toutes les pages.
+// Mode simple : l'essentiel pour poser Aurion et récupérer ses photos.
+// Mode expert : réglages fins, presets, stockage, diagnostics.
+const AURION_MENU = [
+    { href: '/index.html', icon: '🌌', label: 'Accueil' },
+    { href: '/gallery.html', icon: '📸', label: 'Photos' },
+    { href: '/preview.html', icon: '📷', label: 'Cadrage (aperçu)' },
+    { href: '/settings.html', icon: '⚙️', label: 'Réglages photo' },
+    { href: '/settings_advanced.html', icon: '🔧', label: 'Réglages experts', expert: true },
+    { href: '/presets.html', icon: '💾', label: 'Presets', expert: true },
+    { href: '/storage.html', icon: '💿', label: 'Stockage', expert: true },
+    { href: '/diagnostics.html', icon: '📋', label: 'Diagnostics et mise à jour' },
+];
+
+function aurionIsExpert() {
+    try { return localStorage.getItem('aurionExpert') === '1'; } catch (_) { return false; }
+}
+
+function aurionSetExpert(on) {
+    try { localStorage.setItem('aurionExpert', on ? '1' : '0'); } catch (_) { }
+    document.documentElement.classList.toggle('expert', on);
+    aurionBuildMenu();
+}
+
+function aurionBuildMenu() {
+    const menu = document.getElementById('sideMenu');
+    if (!menu) return;
+    const expert = aurionIsExpert();
+    const here = location.pathname === '/' ? '/index.html' : location.pathname;
+    menu.innerHTML = '';
+    for (const item of AURION_MENU) {
+        if (item.expert && !expert && here !== item.href) continue;
+        const a = document.createElement('a');
+        a.href = item.href;
+        if (item.href === here) a.className = 'active';
+        const icon = document.createElement('span');
+        icon.className = 'menu-icon';
+        icon.textContent = item.icon;
+        a.append(icon, ' ' + item.label);
+        menu.appendChild(a);
+    }
+    const label = document.createElement('label');
+    label.className = 'menu-expert';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = 'expertToggle';
+    box.checked = expert;
+    box.addEventListener('change', () => aurionSetExpert(box.checked));
+    label.append(box, ' Mode expert');
+    menu.appendChild(label);
+}
+
+function toggleMenu() {
+    document.getElementById('sideMenu').classList.toggle('open');
+    document.getElementById('menuOverlay').classList.toggle('visible');
+}
+
+// Rafraîchissement périodique suspendu quand l'écran est éteint ou l'onglet
+// caché : moins de requêtes, donc moins de réveils du Pi et du téléphone.
+function aurionPoll(fn, ms) {
+    setInterval(() => { if (!document.hidden) fn(); }, ms);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) fn(); });
+}
+
+if (aurionIsExpert()) document.documentElement.classList.add('expert');
+document.addEventListener('DOMContentLoaded', aurionBuildMenu);

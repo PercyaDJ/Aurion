@@ -8,3 +8,4 @@ pub mod orchestrator;
 pub mod validate;
 pub mod denoise;
 pub mod jpeg;
+pub mod night;

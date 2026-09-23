@@ -12,6 +12,8 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V3 | Test de coupure : débrancher l'alimentation pendant une capture, rebrancher | S | clé réparée au montage, aucune image tronquée, journal lisible jusqu'à la dernière minute |
 | V4 | Recalibrer les seuils de détection (la zone analysée est désormais de 65 % au lieu de 42 %) sur de vraies images d'aurore et de ciel vide | M | aucun faux positif sur une nuit sans aurore, détection d'une aurore faible visible à l'œil |
 | V5 | `aurion bench` sur le Pi et mesure de la température CPU pendant une nuit | S | temps réels consignés dans AUDIT_CODE.md § 5 |
+| V6 | Reprise après coupure : lancer une nuit en minuteur 1 h, débrancher après 20 min, rebrancher sans téléphone | S | Wi-Fi visible 5 min, puis reprise ; `session.log` montre « Reprise de la nuit interrompue » ; extinction à l'heure prévue |
+| V7 | Vérifier l'heure du Pi 4 après une coupure (présence de `fake-hwclock` sur l'image) | S | l'heure au redémarrage est proche de l'heure de la coupure, sinon documenter l'écart |
 
 ## Énergie (P1)
 
@@ -44,13 +46,21 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | A4 | P2 | Séparer les actions root dans un petit service dédié (socket local) pour durcir `aurion.service` (`ProtectSystem`, `NoNewPrivileges`) | L |
 | A5 | P3 | Option WPA3-SAE pour le hotspot | S |
 
+## Expérience utilisateur (P1 / P2)
+
+| ID | Priorité | Action | Effort |
+|---|---|---|---|
+| U1 | P1 | Mesurer sur le terrain le temps entre l'allumage et le lancement de la nuit (objectif : moins de 2 minutes) | S |
+| U2 | P2 | Aperçu plein écran avec loupe pour la mise au point sur une étoile | M |
+| U3 | P2 | Aperçu du timelapse de la dernière nuit (miniatures animées) sur l'accueil | M |
+
 ## Code et tests (P2)
 
 | ID | Action | Effort |
 |---|---|---|
 | C1 | Découper `orchestrator::run` en étapes testables séparément | M |
 | C2 | Un dossier par nuit sur la clé (avec migration des anciennes captures) | M |
-| C3 | Factoriser le CSS et le JavaScript des pages | M |
+| C3 | Factoriser le CSS et le JavaScript des pages (menu et rafraîchissement factorisés en 1.6.0 ; reste : styles en ligne de la galerie et des réglages) | M |
 | C4 | Tests sur banc matériel : un Pi dédié en CI (runner auto-hébergé) qui lance V1 automatiquement | L |
 | C5 | Porter la couverture de `web/api.rs` au-delà de 85 % en simulant `rpicam-still` (script factice dans le `PATH`) | S |
 
@@ -61,4 +71,4 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | D1 | Dépôt APT signé (GitHub Pages) : `sudo apt install aurion` et mises à jour par `apt upgrade` | M |
 | D2 | ~~Image carte SD prête à flasher construite par la CI~~ : fait en 1.5.0 (`scripts/build-image.sh`, release automatique) | - |
 | D3 | Rendre le dépôt public (téléchargement de l'image sans compte GitHub pour les utilisateurs) | S |
-| D4 | Réinitialisation du mot de passe Wi-Fi sans regraver la carte (fichier sur la clé USB, ou bouton) | S |
+| D4 | ~~Réinitialisation du mot de passe Wi-Fi sans regraver la carte~~ : fait en 1.6.0 (fichier `aurion-reset-wifi.txt` sur la clé) | - |

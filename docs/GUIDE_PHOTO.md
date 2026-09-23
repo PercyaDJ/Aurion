@@ -25,7 +25,7 @@ et ne monte l'ISO qu'ensuite. Bornez :
 - **ISO maximal** : 1600 à 3200 sur l'IMX477 ; au-delà le bruit augmente plus vite que le signal.
 
 ### Levier 3 : darks
-Page *Preview*, section *Darks* : bouchon sur l'objectif, la caméra enregistre 10 à 30 poses noires en RAW **aux
+Page *Cadrage (aperçu)*, section *Darks* : bouchon sur l'objectif, la caméra enregistre 10 à 30 poses noires en RAW **aux
 réglages de la dernière preview** (même ISO, même temps de pose), dans `darks/` sur la clé. Soustraites au
 post-traitement, elles retirent pixels chauds et bruit thermique des DNG. À faire juste avant ou juste après la nuit,
 caméra à la même température.
@@ -52,7 +52,7 @@ léger lissage en post-traitement. Pour une exposition totalement manuelle : ISO
 
 ## 3. Retrouver les aurores les plus fortes
 
-Galerie, onglet **Meilleures aurores** : les images sont classées par score de détection (force et étendue de la
+*Photos*, onglet **Meilleures aurores** (ou accueil, *Voir les plus belles*) : les images sont classées par score de détection (force et étendue de la
 couleur verte, rouge ou violette dans le ciel). Le bouton **Télécharger les RAW (top)** récupère en ZIP les DNG et JPEG
 des 30 meilleures, prêts pour une retouche unitaire.
 

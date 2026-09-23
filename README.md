@@ -18,9 +18,9 @@ Mise à jour ensuite depuis le téléphone : *Diagnostics*, *Mise à jour du log
 <details>
 <summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.5.0_arm64.deb`
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.6.0_arm64.deb`
 - Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.6.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
 Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>
@@ -31,13 +31,20 @@ Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO
 
 1. Brancher le Pi (USB-C 5 V / 3 A) avec la clé USB.
 2. Se connecter au Wi-Fi **Aurion** : la page s'ouvre toute seule (portail captif), sinon `http://192.168.4.1:8080`.
-   L'heure du Pi est réglée automatiquement sur celle du téléphone (le Pi n'a pas d'horloge sauvegardée).
-3. **Capture** : régler, puis *Déconnexion, lancer la capture*. Le Wi-Fi se coupe au bout de 15 s, la nuit se déroule seule et le Pi s'éteint à la fin.
-4. **Récupération** : rallumer, aller dans *Galerie*, télécharger une nuit complète en ZIP.
+   L'heure du Pi est réglée automatiquement sur celle du téléphone.
+3. **Accueil** : la liste *Prêt pour la nuit ?* vérifie caméra, clé (et nombre d'heures de photos possibles),
+   heure et alimentation. Choisir le mode, la durée, le format, puis **Lancer la nuit**. Le Wi-Fi se coupe au bout
+   de 15 s, la nuit se déroule seule et le Pi s'éteint à la fin.
+4. **Le lendemain** : rallumer, l'accueil affiche la *Dernière nuit* avec **Télécharger les RAW**,
+   **Voir les plus belles** et **Tout télécharger**.
 
 Deux modes :
-- **SAFE** (défaut) : capture toute la nuit, les images avec aurore sont marquées `_AURORA`.
-- **FILTER** : surveille le ciel et ne commence à enregistrer qu'après N détections consécutives.
+- **Toute la nuit** (SAFE, défaut, idéal timelapse) : capture toute la nuit, les images avec aurore sont marquées `_AURORA`.
+- **Aurores seulement** (FILTER) : surveille le ciel et n'enregistre qu'après N détections consécutives.
+
+Coupure de courant pendant la nuit : au redémarrage, la nuit reprend seule (annulable 5 min depuis le téléphone).
+Mot de passe Wi-Fi oublié : fichier vide `aurion-reset-wifi.txt` à la racine de la clé USB, puis rallumer.
+Menu simple par défaut ; *Mode expert* (en bas du menu) pour les réglages fins.
 
 ## Développement sur PC
 
@@ -56,7 +63,7 @@ cd tests/e2e && npm install && node ui_test.mjs   # interface dans Chromium
 ```
 
 Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && bash scripts/package.sh`
-(binaire statique musl : fonctionne sur Bullseye, Bookworm et Trixie). Pousser un tag `vX.Y.Z` publie l'archive automatiquement.
+(binaire statique musl : fonctionne sur Bullseye, Bookworm et Trixie). Changer `version` dans `Cargo.toml` et pousser sur `main` publie la release automatiquement.
 
 ## Tests
 
@@ -66,12 +73,12 @@ Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && b
 | `tests/api_tests.rs` | contrat de l'API utilisé par chaque page |
 | `tests/security_tests.rs` | traversée de chemin, injection Wi-Fi, CSRF, DNS rebinding, fuite du mot de passe, mise à jour OTA |
 | `tests/gallery_tests.rs` | galerie, miniatures, sessions, ZIP, suppression |
-| `tests/simulation_tests.rs` | nuits complètes en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne, disque plein, RAW |
+| `tests/simulation_tests.rs` | nuits complètes en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne, disque plein, RAW, reprise après coupure |
 | `tests/regression_tests.rs` | un test par bug corrigé + valeurs de référence de la détection |
 | `tests/integration_tests.rs` | cycle de vie avec les mocks |
 | `tests/helper_test.sh` | `aurion-helper` (seul programme exécuté en root) |
 | `tests/install_test.sh` | installation, mise à jour, réparation, désinstallation |
-| `tests/e2e/ui_test.mjs` | les 9 pages dans un navigateur réel |
+| `tests/e2e/ui_test.mjs` | les pages dans un navigateur réel : accueil, mode expert, lancement de la nuit, téléchargements |
 
 Détail, chiffres et couverture : [docs/TESTS.md](docs/TESTS.md).
 
@@ -114,7 +121,7 @@ Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Princip
 | | `duration_hours` | null | minuteur, prioritaire sur la plage |
 | network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |
 
-Rapports (audit de code, audit de sécurité, tests, énergie, plan d'action) : [docs/](docs/README.md).
+Documentation complète (DAT, DEX, spécifications, UX, audits, tests, énergie, plan d'action) : [docs/](docs/README.md). Nouveautés : [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 

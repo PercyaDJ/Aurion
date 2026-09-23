@@ -228,7 +228,12 @@ async fn static_pages_are_served_from_the_binary() {
         res.assert_status_ok();
         assert!(res.header("content-type").to_str().unwrap().starts_with("text/html"), "{}", page);
         let html = res.text();
+        if page == "/dashboard.html" {
+            assert!(html.contains("url=/index.html"), "old dashboard redirects to the home page");
+            continue;
+        }
         assert!(html.contains("/js/common.js"), "{} must load common.js", page);
+        assert!(html.contains(r#"id="sideMenu""#), "{} must have the shared menu", page);
         assert!(!html.contains("fonts.googleapis.com"), "{} must work offline", page);
     }
     let css = t.server.get("/css/style.css").await;
@@ -305,4 +310,35 @@ async fn best_auroras_endpoint() {
     assert_eq!(arr[0]["score"], 3.5);
     assert_eq!(arr[0]["dng"], "aurora_20260305_220100_00001_AURORA.dng");
     assert_eq!(arr[0]["jpg"], "aurora_20260305_220100_00001_AURORA.jpg");
+}
+
+#[tokio::test]
+async fn preflight_ready_with_usb_and_warns_on_default_password() {
+    let t = common::env();
+    let pf: Value = t.server.get("/api/preflight").await.json();
+    assert_eq!(pf["ready"], true, "{}", pf);
+    assert_eq!(pf["phase"], "ARM");
+    let ids: Vec<&str> = pf["checks"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+    for id in ["camera", "usb", "clock", "password"] {
+        assert!(ids.contains(&id), "{} missing in {:?}", id, ids);
+    }
+    let pw = pf["checks"].as_array().unwrap().iter().find(|c| c["id"] == "password").unwrap();
+    assert_eq!(pw["level"], "warn");
+    assert!(pf["capacity_hours"].as_f64().unwrap() > 0.0);
+    assert_eq!(pf["planned_hours"], 9.0, "21:00 to 06:00");
+}
+
+#[tokio::test]
+async fn preflight_blocks_without_usb_drive() {
+    let t = common::env_with(|c| {
+        c.storage.mount_point = "/nonexistent/aurion".into();
+        c.network.password = "UnMotDePassePerso".into();
+        c.time_range.duration_hours = Some(4.0);
+    });
+    let pf: Value = t.server.get("/api/preflight").await.json();
+    assert_eq!(pf["ready"], false);
+    let usb = pf["checks"].as_array().unwrap().iter().find(|c| c["id"] == "usb").unwrap();
+    assert_eq!(usb["level"], "error");
+    assert!(pf["checks"].as_array().unwrap().iter().all(|c| c["id"] != "password"));
+    assert_eq!(pf["planned_hours"], 4.0);
 }

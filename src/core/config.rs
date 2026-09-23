@@ -574,6 +574,24 @@ impl AppConfig {
     }
 }
 
+// ─── Password reset from the USB key ──────────────────────
+
+/// File that resets the Wi-Fi password when found at the root of the key.
+pub const WIFI_RESET_FILE: &str = "aurion-reset-wifi.txt";
+
+/// "Forgot the Wi-Fi password": if `aurion-reset-wifi.txt` is present at the
+/// root of the capture drive, restore the factory password, rename the file
+/// (`.done`) and return true. The caller saves the config.
+pub fn apply_usb_wifi_reset(config: &mut AppConfig) -> bool {
+    let path = Path::new(&config.storage.mount_point).join(WIFI_RESET_FILE);
+    if !path.is_file() {
+        return false;
+    }
+    config.network.password = DEFAULT_WIFI_PASSWORD.to_string();
+    let _ = std::fs::rename(&path, path.with_extension("txt.done"));
+    true
+}
+
 // ─── Errors ────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -774,6 +792,21 @@ mod tests {
         assert!(config.validate().is_ok());
         config.capture.denoise.isp_denoise = "magic; rm -rf /".into();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_usb_wifi_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.storage.mount_point = dir.path().to_string_lossy().to_string();
+        config.network.password = "MotDePasseOublie".into();
+        assert!(!apply_usb_wifi_reset(&mut config), "no file, no reset");
+        std::fs::write(dir.path().join(WIFI_RESET_FILE), b"").unwrap();
+        assert!(apply_usb_wifi_reset(&mut config));
+        assert_eq!(config.network.password, DEFAULT_WIFI_PASSWORD);
+        assert!(!dir.path().join(WIFI_RESET_FILE).exists(), "file consumed");
+        assert!(dir.path().join("aurion-reset-wifi.txt.done").exists());
+        assert!(!apply_usb_wifi_reset(&mut config), "only once");
     }
 
     #[test]

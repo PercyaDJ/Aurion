@@ -13,7 +13,7 @@ depuis une page web **sans identifiant**. Qui connaît le mot de passe Wi-Fi est
 | Fichier piégé sur la clé USB | noms de fichiers | injection dans l'interface (XSS) |
 | Service Aurion compromis | compte utilisateur du Pi | devenir root |
 
-Surfaces analysées : API HTTP (39 routes, dont 9 de portail captif), pages web, helper root, sudoers, installeur, service systemd, dépendances Rust.
+Surfaces analysées : API HTTP (42 routes, dont 9 de portail captif), pages web, helper root, sudoers, installeur, service systemd, dépendances Rust.
 
 ## 2. Failles trouvées et corrigées
 
@@ -33,7 +33,19 @@ Surfaces analysées : API HTTP (39 routes, dont 9 de portail captif), pages web,
 | S12 | Faible | Config écrite en place, lisible par tous | écriture atomique (fsync + renommage), droits 0600 | `test_save_is_atomic_and_private` |
 | S13 | Faible | Réglage de l'heure : chaîne libre passée à `date -s` | époque Unix bornée (2024 à 2100), fuseau vérifié dans `/usr/share/zoneinfo` | `time_sync_rules`, `helper_test.sh` |
 
-## 3. Le helper root (`scripts/aurion-helper`)
+## 3. Revue de la 1.6.0
+
+| Point | Analyse | Test |
+|---|---|---|
+| `GET /api/preflight` | lecture seule ; n'expose ni le mot de passe ni de chemin ; la détection caméra lance `rpicam-hello` au plus toutes les 30 s (pas de déni de service par rafraîchissement) | `preflight_*` |
+| `GET /api/night/last` | lecture seule ; nom de session issu d'un dossier filtré par `is_safe_name` | `last_night_summary` |
+| `?only=raw\|jpg` sur le ZIP d'une nuit | valeur fermée, toute autre valeur refusée (400) ; nom de session toujours validé | `session_zip_raw_only_or_jpg_only` |
+| `POST /api/night/resume/cancel` | écriture, donc soumise à l'anti-CSRF et au contrôle `Host` ; effet limité (annuler une reprise) | `interrupted_night_can_be_cancelled_from_the_phone` |
+| `night.json` | écrit en 0600 dans le dossier de config du service, écriture atomique ; un fichier corrompu est ignoré | `marker_roundtrip_and_garbage` |
+| Menu généré en JavaScript | libellés statiques insérés par `textContent` (pas de HTML) ; données serveur toujours échappées (`aurionEscape`) | e2e |
+| Changement du mot de passe depuis l'accueil | même route et mêmes validations que les réglages avancés (10 à 63 caractères ASCII) ; hotspot redémarré par le helper | e2e « mot de passe au premier démarrage » |
+
+## 4. Le helper root (`scripts/aurion-helper`)
 
 Seul programme exécutable en root par le service. Principes :
 - une liste fermée de commandes (`ap-start`, `ap-stop`, `wifi-scan`, `wifi-connect`, `set-time`, `set-timezone`, `shutdown`, `mount-usb`, `umount-usb`, `usb-add`) ;
@@ -46,7 +58,7 @@ Seul programme exécutable en root par le service. Principes :
 l'horloge du conteneur de développement ; le test a été remplacé par une commande sans effet réel et le mode simulation
 n'écrit plus rien dans `/run`.
 
-## 4. Dépendances (cargo audit, base RustSec du 23/09/2026, 1267 avis)
+## 5. Dépendances (cargo audit, base RustSec du 23/09/2026, 1267 avis)
 
 | Crate | Version | Avis | Statut |
 |---|---|---|---|
@@ -56,11 +68,12 @@ n'écrit plus rien dans `/run`.
 
 Aucune vulnérabilité (« vulnerability ») connue ; aucun avis ne concerne le binaire livré sur le Pi.
 
-## 5. Risques résiduels
+## 6. Risques résiduels
 
 | Risque | Niveau | Pourquoi il reste | Piste |
 |---|---|---|---|
-| Image carte SD : mot de passe Wi-Fi d'usine commun (`aurora2024`) jusqu'à ce que l'utilisateur le change | Moyen | choix d'accessibilité pour un public non technique (le mot de passe est imprimé dans le guide) ; l'interface affiche une alerte tant qu'il n'est pas changé. L'installation par script ou paquet génère toujours un mot de passe unique | écran de première connexion qui impose le changement (plan D4) |
+| Image carte SD : mot de passe Wi-Fi d'usine commun (`aurora2024`) jusqu'à ce que l'utilisateur le change | Moyen | choix d'accessibilité pour un public non technique (le mot de passe est imprimé dans le guide). Depuis la 1.6.0, l'accueil propose de le changer dès la première connexion (appliqué aussitôt) et la vérification avant la nuit le signale en orange. L'installation par script ou paquet génère toujours un mot de passe unique | rendre le changement obligatoire avant la première nuit, si le terrain montre que l'encadré est ignoré |
+| Réinitialisation du mot de passe par un fichier sur la clé USB | Faible | qui peut brancher une clé et rallumer le Pi a de toute façon l'accès physique (carte SD, photos) ; le fichier n'agit qu'une fois et la remise à zéro est journalisée | aucune |
 | Pas d'authentification applicative | Moyen | choix d'ergonomie : le Wi-Fi WPA2 fait office de clé | PIN optionnel (plan d'action A3) |
 | `nmcli` reçoit le mot de passe du hotspot en argument pendant une fraction de seconde | Faible | limitation de `nmcli` ; processus root, aucun autre utilisateur sur le Pi | fichier de connexion NetworkManager en 0600 |
 | Hotspot en WPA2-PSK (pas WPA3) | Faible | compatibilité avec tous les téléphones | option WPA3-SAE |

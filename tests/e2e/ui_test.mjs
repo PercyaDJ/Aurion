@@ -90,7 +90,7 @@ try {
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) jsErrors.push(m.text()); });
   page.on('dialog', d => d.accept());
 
-  const pages = ['index', 'dashboard', 'preview', 'settings', 'settings_advanced', 'presets', 'storage', 'gallery', 'diagnostics'];
+  const pages = ['index', 'preview', 'settings', 'settings_advanced', 'presets', 'storage', 'gallery', 'diagnostics'];
   for (const p of pages) {
     await step(`page ${p}.html sans erreur JavaScript`, async () => {
       jsErrors.length = 0;
@@ -101,11 +101,50 @@ try {
     });
   }
 
-  await step('dashboard : phase et avertissements', async () => {
-    await page.goto(base + '/dashboard.html');
+  await step('accueil : vérifications avant la nuit', async () => {
+    await page.goto(base + '/index.html');
     await page.waitForFunction(() => document.getElementById('phaseBadge').textContent === 'ARM');
-    const warnings = await page.locator('#warningsContainer .warning-box').allTextContents();
-    assert(warnings.some(w => w.includes('Mot de passe Wi-Fi par défaut')), 'default password warning: ' + warnings);
+    await page.waitForSelector('#checks [data-check=usb]');
+    assert(await page.locator('#checks [data-check=camera].ok').count() === 1, 'camera ok');
+    assert(await page.locator('#checks [data-check=password].warn').count() === 1, 'default password warning');
+    assert(!(await page.locator('#startNightBtn').isDisabled()), 'night can be started');
+    assert((await page.textContent('#capacityLine')).includes('Place sur la clé'), 'capacity shown');
+  });
+
+  await step('accueil : résumé de la dernière nuit et lien RAW', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#lastNight:not([hidden])');
+    const href = await page.getAttribute('#lastAll', 'href');
+    assert(href === '/api/gallery/sessions/2026-03-05_21-30/download', href);
+    assert((await page.getAttribute('#lastRaw', 'href')).endsWith('?only=raw'), 'raw link');
+  });
+
+  await step('accueil : menu simple puis mode expert', async () => {
+    await page.goto(base + '/index.html');
+    await page.evaluate(() => { try { localStorage.removeItem('aurionExpert'); } catch (_) { } });
+    await page.reload();
+    await page.click('.burger-btn');
+    assert(await page.locator('#sideMenu a[href="/presets.html"]').count() === 0, 'presets hidden in simple mode');
+    await page.check('#expertToggle');
+    assert(await page.locator('#sideMenu a[href="/presets.html"]').count() === 1, 'presets shown in expert mode');
+    await page.goto(base + '/gallery.html');
+    assert(await page.locator('#sideMenu a[href="/presets.html"]').count() === 1, 'expert mode remembered');
+  });
+
+  await step('ancien dashboard redirigé vers l\'accueil', async () => {
+    await page.goto(base + '/dashboard.html');
+    await page.waitForURL(/index\.html$/);
+  });
+
+  await step('accueil : mot de passe personnel au premier démarrage', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#onboarding:not([hidden])');
+    await page.fill('#newWifiPassword', 'court');
+    await page.click('#onboarding .btn-primary');
+    await page.waitForSelector('.toast.error');
+    assert(JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8')).network.password === 'aurora2024', 'short password refused');
+    await page.click('#onboarding .btn-outline');
+    assert(await page.locator('#onboarding').isHidden(), 'later hides the banner');
   });
 
   await step('réglages rapides : sauvegarde et persistance', async () => {
@@ -201,6 +240,15 @@ try {
     assert(first.includes('score 4.20'), 'strongest first: ' + first);
   });
 
+  await step('galerie : téléchargement RAW / JPG par nuit', async () => {
+    await page.goto(base + '/gallery.html#sessions');
+    await page.waitForSelector('#paneSessions a[data-dl=raw]');
+    const href = await page.getAttribute('#paneSessions a[data-dl=jpg]', 'href');
+    const res = await fetch(base + href);
+    assert(res.ok && res.headers.get('content-disposition').includes('_JPG.zip'), 'jpg zip ' + res.status);
+    await res.arrayBuffer();
+  });
+
   await step('galerie : sessions listées sans suppression (non-régression)', async () => {
     const sessions = await (await fetch(base + '/api/gallery/sessions')).json();
     assert(sessions.length === 1 && sessions[0].image_count === 2, JSON.stringify(sessions));
@@ -228,12 +276,20 @@ try {
     assert(res.status === 307 && res.headers.get('location').startsWith('http://192.168.4.1:'), 'status ' + res.status);
   });
 
-  await step('lancement de la nuit depuis le dashboard', async () => {
-    await page.goto(base + '/dashboard.html');
-    await page.waitForFunction(() => document.getElementById('phaseBadge').textContent === 'ARM');
-    await page.click('#disconnectBtn');
-    await page.waitForFunction(() => document.getElementById('phaseBadge').textContent === 'DISCONNECT', null, { timeout: 8000 });
-    assert(await page.locator('#disconnectBtn').isDisabled(), 'button must be disabled during the night');
+  await step('lancement de la nuit depuis l\'accueil (mode, durée, format)', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForFunction(() => !document.getElementById('startNightBtn').disabled);
+    await page.check('#modeFilter');
+    await page.selectOption('#nightLength', '6');
+    await page.selectOption('#nightFormat', 'RawDng');
+    await page.click('#startNightBtn');
+    await page.waitForSelector('#nightRunning:not([hidden])', { timeout: 8000 });
+    const saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
+    assert(saved.detection.detection_capture_enabled === true && saved.time_range.duration_hours === 6
+      && saved.capture.output_format === 'RawDng', JSON.stringify([saved.detection.detection_capture_enabled, saved.time_range, saved.capture.output_format]));
+    assert(saved.network.password === 'NouveauMotDePasse2026', 'password kept');
+    const st = await (await fetch(base + '/api/status')).json();
+    assert(st.phase !== 'ARM', 'phase ' + st.phase);
   });
 } finally {
   if (browser) await browser.close();

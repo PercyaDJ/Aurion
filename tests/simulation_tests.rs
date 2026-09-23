@@ -339,3 +339,96 @@ async fn strongest_auroras_are_ranked_from_the_night_log() {
     assert!(best.windows(2).all(|w| w[0].score >= w[1].score), "sorted by score");
     assert!(best.iter().all(|b| b.score > 0.0 && b.dng.is_some() && b.jpg.is_some()));
 }
+
+// ─── Resume after a power cut ───────────────────────────────
+
+use aurion::core::night::{NightMarker, RESUME_DELAY_SECS};
+
+fn interrupted_marker(night: &Night, clock: &TokioClock, started_hours_ago: f64, duration: f64) -> PathBuf {
+    let started = clock.now_local() - chrono::Duration::seconds((started_hours_ago * 3600.0) as i64);
+    let path = night.state.paths.night_marker.clone();
+    NightMarker::new(started, Some(duration)).save(&path).unwrap();
+    path
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupted_night_resumes_alone_for_the_remaining_time() {
+    let (night, _) = setup(|_| {});
+    let clock = clock();
+    let marker = interrupted_marker(&night, &clock, 1.0, 2.0); // 1 h left
+    let storage = StorageMock::new(night.capture.clone());
+    storage.mount().await.unwrap();
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock.clone());
+    let run = tokio::spawn(async move { orch.run().await });
+
+    // Nobody touches the phone: the hotspot waits, then the night resumes
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    assert_eq!(night.state.current_phase().await, Phase::Arm);
+    let left = night.state.resume_at.read().await.expect("resume pending");
+    assert!(left.saturating_duration_since(tokio::time::Instant::now()).as_secs() <= RESUME_DELAY_SECS - 60);
+
+    tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), run).await.unwrap().unwrap().unwrap();
+    let files = images(&night.capture);
+    // The planned end does not move: 1 h left minus the 5 min wait = 55 min
+    // at one frame every 10 s (not the configured 0.5 h, not the full 2 h)
+    assert!((310..=332).contains(&files.len()), "got {} frames", files.len());
+    assert_eq!(night.system.shutdown_count(), 1);
+    assert!(!marker.exists(), "finished night leaves no marker");
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupted_night_can_be_cancelled_from_the_phone() {
+    let (night, _) = setup(|_| {});
+    let clock = clock();
+    let marker = interrupted_marker(&night, &clock, 1.0, 6.0);
+    let storage = StorageMock::new(night.capture.clone());
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock.clone());
+    let run = tokio::spawn(async move { orch.run().await });
+
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    let server = axum_test::TestServer::new(aurion::web::build_router(night.state.clone())).unwrap();
+    let pf: serde_json::Value = server.get("/api/preflight").await.json();
+    assert!(pf["resume_in_secs"].as_u64().unwrap() > 200, "{}", pf);
+    server.post("/api/night/resume/cancel").await.assert_status_ok();
+    server.post("/api/night/resume/cancel").await.assert_status(axum::http::StatusCode::CONFLICT);
+
+    tokio::time::sleep(std::time::Duration::from_secs(2 * RESUME_DELAY_SECS)).await;
+    assert_eq!(night.state.current_phase().await, Phase::Arm, "back to normal: waits for the user");
+    assert!(!marker.exists());
+    assert!(images(&night.capture).is_empty());
+    run.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn finished_night_marker_is_ignored() {
+    let (night, _) = setup(|_| {});
+    let clock = clock();
+    let marker = interrupted_marker(&night, &clock, 7.0, 6.0); // ended 1 h ago
+    let storage = StorageMock::new(night.capture.clone());
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock.clone());
+    let run = tokio::spawn(async move { orch.run().await });
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    assert!(night.state.resume_at.read().await.is_none());
+    assert!(!marker.exists());
+    assert_eq!(night.state.current_phase().await, Phase::Arm);
+    run.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn night_marker_exists_during_the_night_only() {
+    let (night, _) = setup(|_| {});
+    let marker = night.state.paths.night_marker.clone();
+    let storage = StorageMock::new(night.capture.clone());
+    storage.mount().await.unwrap();
+    *night.state.phase.write().await = Phase::Disconnect;
+    let orch = Orchestrator::new(night.state.clone(), CameraMock::with_pattern(SkyPattern::Dark), storage, night.system.clone())
+        .with_clock(clock());
+    let run = tokio::spawn(async move { orch.run().await });
+    tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+    assert!(marker.exists(), "written when the night starts");
+    tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), run).await.unwrap().unwrap().unwrap();
+    assert!(!marker.exists(), "removed at the normal end");
+}

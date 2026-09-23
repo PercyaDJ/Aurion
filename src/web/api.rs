@@ -58,6 +58,8 @@ pub struct StatusResponse {
     pub usb_writable: bool,
     pub default_password: bool,
     pub time_synced: bool,
+    /// Seconds before an interrupted night resumes on its own.
+    pub resume_in_secs: Option<u64>,
 }
 
 pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
@@ -103,6 +105,207 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         usb_writable: health.writable,
         default_password: config.network.password == DEFAULT_WIFI_PASSWORD,
         time_synced: state.time_synced.load(std::sync::atomic::Ordering::Relaxed),
+        resume_in_secs: resume_in_secs(&state).await,
+    })
+}
+
+async fn resume_in_secs(state: &AppState) -> Option<u64> {
+    state.resume_at.read().await.map(|at| at.saturating_duration_since(tokio::time::Instant::now()).as_secs())
+}
+
+/// Cancel the automatic resume of an interrupted night (back to normal ARM).
+pub async fn cancel_resume(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    if state.resume_at.write().await.take().is_none() {
+        return Err(err(StatusCode::CONFLICT, "Aucune reprise de nuit en attente"));
+    }
+    state.add_log("Reprise de la nuit interrompue annulée depuis le téléphone".into()).await;
+    Ok(StatusCode::OK)
+}
+
+// ─── Pre-flight checks (home screen) ──────────────────────
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct Check {
+    pub id: &'static str,
+    /// "ok", "warn" or "error" (error = the night cannot start)
+    pub level: &'static str,
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct Preflight {
+    /// No blocking error: the night can be started.
+    pub ready: bool,
+    pub phase: String,
+    pub checks: Vec<Check>,
+    /// Capture time the free space allows with the current settings.
+    pub capacity_hours: Option<f64>,
+    /// Planned duration of the night.
+    pub planned_hours: f64,
+    /// Seconds before an interrupted night resumes on its own.
+    pub resume_in_secs: Option<u64>,
+}
+
+fn check(id: &'static str, level: &'static str, title: impl Into<String>, detail: impl Into<String>) -> Check {
+    Check { id, level, title: title.into(), detail: detail.into() }
+}
+
+/// "4 h 48", "9 h": same wording as the web page.
+pub fn fmt_hours(hours: f64) -> String {
+    let total = (hours.max(0.0) * 60.0).round() as u64;
+    match total % 60 {
+        0 => format!("{} h", total / 60),
+        m => format!("{} h {:02}", total / 60, m),
+    }
+}
+
+/// Planned night duration in hours (timer, or time range crossing midnight).
+pub fn planned_hours(config: &AppConfig) -> f64 {
+    if let Some(h) = config.time_range.duration_hours {
+        return h;
+    }
+    let start = config.time_range.start;
+    let end = config.time_range.end;
+    let secs = (end - start).num_seconds();
+    let secs = if secs <= 0 { secs + 24 * 3600 } else { secs };
+    secs as f64 / 3600.0
+}
+
+/// Estimated size of one capture, from the images already on the key
+/// (average per type), or typical values for the IMX477 otherwise.
+pub fn bytes_per_capture(config: &AppConfig, images: &[(String, u64)]) -> u64 {
+    let avg = |ext: &str, fallback: u64| {
+        let v: Vec<u64> = images
+            .iter()
+            .filter(|(n, _)| validate::extension_lower(n).as_deref() == Some(ext) && !n.contains("_STACK"))
+            .map(|(_, s)| *s)
+            .collect();
+        if v.is_empty() { fallback } else { v.iter().sum::<u64>() / v.len() as u64 }
+    };
+    // Typical: JPEG ~4 MB, DNG 12.3 Mpx 16-bit ~24 MB (replaced by real sizes after the first night)
+    let jpg = avg("jpg", 4_000_000);
+    let dng = avg("dng", 24_000_000);
+    use crate::core::models::OutputFormat::*;
+    let thumb = 20_000;
+    match config.capture.output_format {
+        Jpg => jpg + thumb,
+        RawDng => dng,
+        RawAndJpg => jpg + dng + thumb,
+    }
+}
+
+/// Hours of capture the free space allows (SAFE mode: one frame every
+/// interval + exposure).
+pub fn capacity_hours(config: &AppConfig, free_bytes: u64, bytes_per_frame: u64) -> f64 {
+    let period = config.capture.capture_interval_secs as f64 + config.exposure.shutter_max_us as f64 / 1e6;
+    let frames = free_bytes as f64 / bytes_per_frame.max(1) as f64;
+    round1(frames * period / 3600.0)
+}
+
+async fn camera_detected(state: &AppState) -> bool {
+    if !cfg!(feature = "rpi") {
+        return true; // simulated camera on PC
+    }
+    if let Some((at, ok)) = *state.camera_check.read().await {
+        if at.elapsed() < Duration::from_secs(30) || capture_in_progress(state.current_phase().await) {
+            return ok;
+        }
+    }
+    let ok = crate::sys::run("rpicam-hello", &["--list-cameras"], Duration::from_secs(15))
+        .await
+        .map(|out| out.contains("Available cameras") && !out.contains("No cameras"))
+        .unwrap_or(false);
+    *state.camera_check.write().await = Some((std::time::Instant::now(), ok));
+    ok
+}
+
+/// Everything the user must know before leaving the camera for the night,
+/// in plain words, ordered by importance.
+pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
+    let config = state.config.read().await.clone();
+    let phase = state.current_phase().await;
+    let mount = FsPath::new(&config.storage.mount_point).to_path_buf();
+    let mut checks = Vec::new();
+
+    // Camera
+    if camera_detected(&state).await {
+        checks.push(check("camera", "ok", "Caméra détectée", ""));
+    } else {
+        checks.push(check("camera", "error", "Caméra non détectée",
+            "Débranchez le Raspberry Pi, vérifiez la nappe (sens et loquet) des deux côtés, puis rallumez."));
+    }
+
+    // USB key and capacity
+    let health = crate::sys::storage_health(&mount);
+    let usb_ok = health.writable && (health.is_mountpoint || !cfg!(feature = "rpi"));
+    let planned = planned_hours(&config);
+    let mut capacity = None;
+    if !usb_ok {
+        checks.push(check("usb", "error", "Clé USB absente",
+            "Branchez une clé USB formatée en exFAT ou FAT32 (128 Go conseillés pour le RAW)."));
+    } else if let Some((_, free)) = crate::sys::disk_usage(&mount) {
+        let m = mount.clone();
+        let images: Vec<(String, u64)> = tokio::task::spawn_blocking(move || {
+            crate::web::gallery::list_images(&m).into_iter().map(|(i, _)| (i.filename, i.size_bytes)).collect()
+        })
+        .await
+        .unwrap_or_default();
+        let hours = capacity_hours(&config, free, bytes_per_capture(&config, &images));
+        capacity = Some(hours);
+        let free_gb = free as f64 / 1e9;
+        if hours < planned {
+            checks.push(check("usb", "warn", format!("Place limitée : environ {} de capture", fmt_hours(hours)),
+                format!("{:.0} Go libres pour une nuit prévue de {}. Libérez de la place (Photos) ou espacez les prises.", free_gb, fmt_hours(planned))));
+        } else {
+            checks.push(check("usb", "ok", format!("Clé USB : {:.0} Go libres", free_gb),
+                format!("Environ {} de capture possibles.", fmt_hours(hours))));
+        }
+    }
+
+    // Clock
+    let now = chrono::Local::now();
+    if now.year() < 2024 {
+        checks.push(check("clock", "error", "Heure non réglée",
+            "Rechargez cette page depuis le téléphone : l'heure se règle automatiquement."));
+    } else {
+        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), ""));
+    }
+
+    // Power supply and temperature (Raspberry Pi only)
+    if let Ok(out) = crate::sys::run("vcgencmd", &["get_throttled"], Duration::from_secs(3)).await {
+        let flags = u32::from_str_radix(out.trim().trim_start_matches("throttled=0x"), 16).unwrap_or(0);
+        if flags & 0x1 != 0 {
+            checks.push(check("power", "error", "Alimentation trop faible",
+                "Utilisez une batterie ou une alimentation 5 V / 3 A avec un câble court et épais."));
+        } else if flags & 0x10000 != 0 {
+            checks.push(check("power", "warn", "Baisse de tension détectée depuis le démarrage",
+                "La batterie ou le câble sont limites : risque d'arrêt pendant la nuit."));
+        } else {
+            checks.push(check("power", "ok", "Alimentation correcte", ""));
+        }
+    }
+    if let Some(t) = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").ok().and_then(|s| s.trim().parse::<f64>().ok()) {
+        if t / 1000.0 > 75.0 {
+            checks.push(check("temperature", "warn", format!("Processeur chaud ({:.0} °C)", t / 1000.0),
+                "Placez le boîtier à l'ombre et à l'air : la chaleur augmente le bruit des photos."));
+        }
+    }
+
+    // Security
+    if config.network.password == DEFAULT_WIFI_PASSWORD {
+        checks.push(check("password", "warn", "Mot de passe Wi-Fi d'usine",
+            "Choisissez votre propre mot de passe pour que personne d'autre ne puisse piloter la caméra."));
+    }
+
+    let ready = !checks.iter().any(|c| c.level == "error");
+    Json(Preflight {
+        ready,
+        phase: phase.to_string(),
+        checks,
+        capacity_hours: capacity,
+        planned_hours: round1(planned),
+        resume_in_secs: resume_in_secs(&state).await,
     })
 }
 
@@ -232,9 +435,24 @@ pub async fn update_config(
 
     state.add_log("Configuration mise à jour".into()).await;
     if network_changed {
-        state
-            .add_log("Réseau Wi-Fi modifié : appliqué au prochain démarrage du hotspot".into())
-            .await;
+        if state.system_actions && state.current_phase().await == Phase::Arm {
+            // Apply now: the phone gets the answer, then the hotspot restarts
+            // with the new name / password (the user reconnects).
+            state.add_log("Réseau Wi-Fi modifié : redémarrage du hotspot dans 3 s".into()).await;
+            let st = state.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let net = st.config.read().await.network.clone();
+                let channel = net.channel.to_string();
+                if let Err(e) = crate::sys::helper(&["ap-start", &net.ssid, &channel], Some(&net.password), Duration::from_secs(60)).await {
+                    st.add_log(format!("Redémarrage du hotspot impossible: {}", e)).await;
+                }
+            });
+        } else {
+            state
+                .add_log("Réseau Wi-Fi modifié : appliqué au prochain démarrage du hotspot".into())
+                .await;
+        }
     }
     Ok(Json(masked))
 }
@@ -996,6 +1214,42 @@ mod tests {
                 WifiNetwork { ssid: "Café Libre".into(), signal: 55, security: "Ouvert".into() },
             ]
         );
+    }
+
+    #[test]
+    fn planned_night_duration() {
+        let mut c = AppConfig::default(); // 21:00 → 06:00
+        assert_eq!(planned_hours(&c), 9.0);
+        c.time_range.duration_hours = Some(4.5);
+        assert_eq!(planned_hours(&c), 4.5);
+        c.time_range.duration_hours = None;
+        c.time_range.start = chrono::NaiveTime::from_hms_opt(18, 30, 0).unwrap();
+        c.time_range.end = chrono::NaiveTime::from_hms_opt(23, 0, 0).unwrap();
+        assert_eq!(planned_hours(&c), 4.5);
+    }
+
+    #[test]
+    fn hours_wording() {
+        assert_eq!(fmt_hours(9.0), "9 h");
+        assert_eq!(fmt_hours(4.8), "4 h 48");
+        assert_eq!(fmt_hours(0.05), "0 h 03");
+        assert_eq!(fmt_hours(-1.0), "0 h");
+    }
+
+    #[test]
+    fn capacity_estimation() {
+        let mut c = AppConfig::default();
+        c.capture.output_format = crate::core::models::OutputFormat::RawDng;
+        c.capture.capture_interval_secs = 10;
+        c.exposure.shutter_max_us = 20_000_000;
+        // No image yet: typical DNG size (24 MB); one frame every 30 s
+        let per = bytes_per_capture(&c, &[]);
+        assert_eq!(per, 24_000_000);
+        let hours = capacity_hours(&c, 24_000_000 * 120, per);
+        assert!((hours - 1.0).abs() < 0.05, "{}", hours);
+        // Real sizes from the key replace the estimate
+        let imgs = vec![("aurora_x.dng".to_string(), 10_000_000), ("aurora_y.dng".to_string(), 12_000_000)];
+        assert_eq!(bytes_per_capture(&c, &imgs), 11_000_000);
     }
 
     #[test]

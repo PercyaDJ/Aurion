@@ -102,7 +102,14 @@ async fn main() -> anyhow::Result<()> {
         Commands::Run => {
             tracing::info!("Aurion {}: production mode (config: {})", env!("CARGO_PKG_VERSION"), paths.config_file.display());
 
-            let config = load_config(&paths);
+            let mut config = load_config(&paths);
+            // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
+            if aurion::core::config::apply_usb_wifi_reset(&mut config) {
+                tracing::warn!("Mot de passe Wi-Fi réinitialisé par le fichier de la clé USB");
+                if let Err(e) = config.save(&paths.config_file) {
+                    tracing::error!("Sauvegarde de la config impossible: {}", e);
+                }
+            }
             if config.network.password == DEFAULT_WIFI_PASSWORD {
                 tracing::warn!("[Securite] Mot de passe Wi-Fi par defaut. Changez-le dans Reglages avances.");
             }

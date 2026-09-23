@@ -39,24 +39,43 @@ Le Pi s'installe tout seul au premier démarrage, il peut redémarrer une fois. 
 
 1. Réglages Wi-Fi : rejoignez **Aurion**, mot de passe **aurora2024**.
 2. La page Aurion s'ouvre toute seule. Sinon, ouvrez le navigateur à l'adresse **http://192.168.4.1:8080**.
-3. Allez dans *Réglages avancés* et **changez le mot de passe Wi-Fi** (10 caractères minimum). Il sera actif au prochain démarrage.
+3. Un encadré **Protégez votre caméra** propose de choisir votre mot de passe Wi-Fi (10 caractères minimum).
+   Le Wi-Fi Aurion redémarre aussitôt : reconnectez-vous avec le nouveau mot de passe.
 
 L'heure du Pi se règle automatiquement sur celle du téléphone à chaque connexion.
 
 ## 4. Une nuit d'aurores
 
 1. Installez la caméra face au nord, stable, objectif propre, mise au point sur l'infini.
-2. Sur le téléphone : *Preview* pour vérifier le cadrage.
-3. Option conseillée pour un timelapse propre : *Réglages avancés*, cocher **Verrouiller l'exposition**.
-4. Tableau de bord : **Déconnexion, lancer la capture**. Le Wi-Fi se coupe au bout de 15 secondes, c'est normal.
-5. La caméra photographie toute la nuit et s'éteint seule à la fin de la plage horaire.
+2. Accueil, **Cadrer (aperçu)** : vérifiez le cadrage.
+3. Revenez à l'accueil. La liste **Prêt pour la nuit ?** vérifie la caméra, la clé USB (et le nombre d'heures
+   de photos qu'elle peut contenir), l'heure et l'alimentation. Un point rouge empêche de lancer la nuit
+   et dit quoi faire ; un point orange est un conseil.
+4. Choisissez :
+   - **Toute la nuit** (conseillé, idéal pour un timelapse) : une photo toutes les 10 secondes, les photos avec
+     aurore sont marquées ; ou **Aurores seulement** : n'enregistre que pendant les aurores ;
+   - la **durée** : la plage horaire habituelle (21:00 à 06:00) ou un nombre d'heures à partir de maintenant ;
+   - les **photos** : RAW + JPG (conseillé), RAW seul ou JPG seul.
+5. Appuyez sur **Lancer la nuit**. Le Wi-Fi se coupe au bout de 15 secondes, c'est normal : vous pouvez partir.
+6. La caméra photographie seule et s'éteint seule à la fin.
+
+**Coupure de courant pendant la nuit** (batterie vide ou changée, câble débranché) : rebranchez simplement.
+Aurion rallume son Wi-Fi 5 minutes (au cas où vous voudriez annuler depuis le téléphone), puis reprend seul
+la nuit jusqu'à l'heure de fin prévue.
 
 ## 5. Récupérer les photos
 
-- **Sur le téléphone** : rallumez, reconnectez-vous au Wi-Fi Aurion, *Galerie*. L'onglet **Meilleures aurores**
-  propose les images les plus fortes et leurs RAW en un seul téléchargement.
-- **Sur l'ordinateur** : éteignez (Diagnostics, *Éteindre*), puis branchez la clé USB sur l'ordinateur :
-  les photos sont à la racine, les journaux dans `sessions/`.
+- **Sur le téléphone** : rallumez, reconnectez-vous au Wi-Fi Aurion. L'accueil affiche la **Dernière nuit**
+  (nombre de photos, d'aurores, de RAW) avec trois boutons : **Voir les plus belles**, **Télécharger les RAW**,
+  **Tout télécharger**. Dans *Photos*, onglet *Par session*, chaque nuit a ses boutons RAW, JPG et Tout.
+- **Sur l'ordinateur** : accueil, **Éteindre Aurion**, attendez 20 secondes, puis branchez la clé USB sur
+  l'ordinateur : les photos sont à la racine, les journaux dans `sessions/`.
+
+## Menu simple et mode expert
+
+Le menu ne montre que l'essentiel : Accueil, Photos, Cadrage, Réglages photo, Diagnostics.
+Cochez **Mode expert** en bas du menu pour afficher les réglages fins, les presets et le stockage
+(le choix est mémorisé sur le téléphone).
 
 ## En cas de problème
 
@@ -64,9 +83,10 @@ L'heure du Pi se règle automatiquement sur celle du téléphone à chaque conne
 |---|---|
 | Le Wi-Fi « Aurion » n'apparaît pas | attendre 5 minutes au premier démarrage ; débrancher et rebrancher l'alimentation |
 | La page ne s'ouvre pas | taper http://192.168.4.1:8080 dans le navigateur |
-| « Clé USB non détectée » | clé en exFAT ou FAT32, la rebrancher ; en essayer une autre |
-| « Caméra indisponible » | Pi débranché, vérifier la nappe (sens et loquet) des deux côtés |
-| Le Pi s'éteint tout seul | batterie trop faible ou câble trop fin : alimentation 5 V / 3 A |
-| Mot de passe Wi-Fi oublié | graver à nouveau la carte SD (les photos de la clé USB ne sont pas touchées) |
+| Point rouge « Clé USB absente » | clé en exFAT ou FAT32, la rebrancher ; en essayer une autre |
+| Point rouge « Caméra non détectée » | Pi débranché, vérifier la nappe (sens et loquet) des deux côtés |
+| Point rouge « Alimentation trop faible » ou le Pi s'éteint seul | batterie 5 V / 3 A, câble court et épais |
+| Mot de passe Wi-Fi oublié | sur un ordinateur, créez un fichier vide nommé `aurion-reset-wifi.txt` à la racine de la clé USB, rebranchez la clé sur le Pi et rallumez : le mot de passe redevient **aurora2024** (le fichier est renommé `.done`, vos photos ne sont pas touchées) |
+| « Nuit interrompue » à l'allumage alors que vous voulez récupérer vos photos | appuyez sur **Annuler la reprise** |
 
 Pour les réglages photo (RAW, timelapse, darks) : [GUIDE_PHOTO.md](GUIDE_PHOTO.md).

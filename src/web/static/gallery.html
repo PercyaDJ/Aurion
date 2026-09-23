@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aurion — Galerie</title>
+    <title>Aurion : photos</title>
     <link rel="stylesheet" href="/css/style.css">
     <script src="/js/common.js"></script>
     <style>
@@ -258,22 +258,12 @@
 
     <!-- Side Menu -->
     <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
-    <nav class="side-menu" id="sideMenu">
-        <a href="/index.html"><span class="menu-icon">🏠</span> Accueil</a>
-        <a href="/dashboard.html"><span class="menu-icon">📊</span> Dashboard</a>
-        <a href="/preview.html"><span class="menu-icon">📷</span> Preview</a>
-        <a href="/settings.html"><span class="menu-icon">⚙️</span> Réglages rapides</a>
-        <a href="/settings_advanced.html"><span class="menu-icon">🔧</span> Réglages avancés</a>
-        <a href="/presets.html"><span class="menu-icon">💾</span> Presets</a>
-        <a href="/storage.html"><span class="menu-icon">💿</span> Stockage</a>
-        <a href="/gallery.html" class="active"><span class="menu-icon">📸</span> Galerie</a>
-        <a href="/diagnostics.html"><span class="menu-icon">📋</span> Diagnostics</a>
-    </nav>
+    <nav class="side-menu" id="sideMenu"></nav>
 
     <!-- Main Content -->
     <div class="main-content">
         <div class="gallery-header">
-            <h1>📸 Galerie</h1>
+            <h1>📸 Photos</h1>
             <span class="gallery-count" id="galleryCount">Chargement...</span>
         </div>
 
@@ -370,10 +360,6 @@
     </div>
 
     <script>
-        function toggleMenu() {
-            document.getElementById('sideMenu').classList.toggle('open');
-            document.getElementById('menuOverlay').classList.toggle('visible');
-        }
 
         // ── Tab switching ─────────────────────────────────────
         let sessionLoaded = false;
@@ -552,8 +538,14 @@
                             <button onclick="confirmDeleteSession('${s.name}')" class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border:1px solid var(--red,#ff4d4d);padding:0.25rem 0.75rem;font-size:0.8rem;background:transparent;border-radius:var(--radius);cursor:pointer;">
                                 Supprimer
                             </button>
-                            <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
-                                Télécharger ZIP
+                            <a href="/api/gallery/sessions/${s.name}/download?only=raw" class="btn btn-outline btn-sm" data-dl="raw" style="color:var(--green);border-color:var(--green);padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                RAW
+                            </a>
+                            <a href="/api/gallery/sessions/${s.name}/download?only=jpg" class="btn btn-outline btn-sm" data-dl="jpg" style="padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                JPG
+                            </a>
+                            <a href="/api/gallery/sessions/${s.name}/download" class="btn btn-outline btn-sm" data-dl="all" style="padding:0.25rem 0.75rem;font-size:0.8rem;text-decoration:none;">
+                                Tout (ZIP)
                             </a>
                         </div>
                     </div>
@@ -883,6 +875,12 @@
         });
 
         loadGallery();
+        function openTabFromHash() {
+            if (location.hash === '#best') switchTab('best');
+            else if (location.hash === '#sessions') switchTab('sessions');
+        }
+        openTabFromHash();
+        window.addEventListener('hashchange', openTabFromHash);
     </script>
     <script src="/js/toast.js"></script>
 

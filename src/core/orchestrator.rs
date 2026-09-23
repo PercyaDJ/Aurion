@@ -9,6 +9,7 @@ use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
 use chrono::Datelike;
+use crate::core::night::{NightMarker, ResumePlan, MAX_RESUMES, RESUME_DELAY_SECS};
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
@@ -69,8 +70,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     pub async fn run(&self) -> anyhow::Result<()> {
         info!("Orchestrator: starting autonomous loop");
 
+        // ─── Interrupted night (power cut): resume on its own ─
+        let resume = self.resume_window().await;
+
         // ─── ARM phase: wait for user to disconnect ─────────
-        self.wait_for_disconnect().await;
+        if resume.is_none() {
+            self.wait_for_disconnect().await;
+        }
 
         // ─── DISCONNECT timer ───────────────────────────────
         if self.is_shutdown().await {
@@ -88,7 +94,26 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
 
         // ─── Load config snapshot ───────────────────────────
-        let config: AppConfig = self.state.config.read().await.clone();
+        let mut config: AppConfig = self.state.config.read().await.clone();
+
+        // ─── Night marker (resume after a power cut) ────────
+        let marker_path = self.state.paths.night_marker.clone();
+        match resume {
+            Some((marker, plan)) => {
+                if let ResumePlan::Timer(hours) = plan {
+                    config.time_range.duration_hours = Some(hours);
+                }
+                if let Err(e) = marker.save(&marker_path) {
+                    warn!("Orchestrator: cannot update night marker: {}", e);
+                }
+                self.log(&format!("Reprise de la nuit interrompue ({}/{})", marker.resumes, MAX_RESUMES)).await;
+            }
+            None => {
+                if let Err(e) = NightMarker::new(self.now(), config.time_range.duration_hours).save(&marker_path) {
+                    warn!("Orchestrator: cannot write night marker: {}", e);
+                }
+            }
+        }
 
         // ─── Log system clock immediately (critical for diagnosis without screen) ─
         {
@@ -284,11 +309,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let loop_start = self.now();
         let mut has_started_range = false;
         let mut wait_iters = 0u64;
+        let mut interrupted = false;
 
         loop {
             // Check for external shutdown signal
             if self.is_shutdown().await {
                 info!("Orchestrator: shutdown signal received");
+                interrupted = true;
                 break;
             }
 
@@ -552,6 +579,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
         drop(session_logger);
 
+        // Night finished normally: nothing to resume at next boot. An
+        // external stop (power watch, systemd) keeps the marker.
+        if !interrupted {
+            NightMarker::remove(&marker_path);
+        }
+
         // Sync and unmount storage
         if let Err(e) = self.storage.sync().await {
             warn!("Orchestrator: sync failed: {}", e);
@@ -720,6 +753,69 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     }
 
     /// Wait for the user to trigger disconnect from the UI.
+    /// If the previous night was interrupted, keep the hotspot up for
+    /// [`RESUME_DELAY_SECS`] (the phone can cancel or resume at once), then
+    /// return the marker and the plan to resume. `None`: normal ARM.
+    async fn resume_window(&self) -> Option<(NightMarker, ResumePlan)> {
+        let path = self.state.paths.night_marker.clone();
+        let marker = NightMarker::load(&path)?;
+        let config = self.state.config.read().await.clone();
+        let range = TimeRange { start: config.time_range.start, end: config.time_range.end };
+        if marker.resume_plan(self.now(), &range).is_none() {
+            NightMarker::remove(&path);
+            return None;
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(RESUME_DELAY_SECS);
+        *self.state.resume_at.write().await = Some(deadline);
+        self.log(&format!(
+            "Nuit interrompue (coupure de courant ?) : reprise automatique dans {} min",
+            RESUME_DELAY_SECS / 60
+        ))
+        .await;
+        let by_user = loop {
+            let phase = *self.state.phase.read().await;
+            if phase == Phase::Shutdown {
+                *self.state.resume_at.write().await = None;
+                return None;
+            }
+            if phase == Phase::Disconnect {
+                break true; // "Reprendre maintenant"
+            }
+            if self.state.resume_at.read().await.is_none() {
+                NightMarker::remove(&path); // cancelled from the phone
+                return None;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break false;
+            }
+            sleep(Duration::from_millis(500)).await;
+        };
+        *self.state.resume_at.write().await = None;
+
+        // A phone may have corrected the clock meanwhile: decide again.
+        let range = {
+            let c = self.state.config.read().await;
+            TimeRange { start: c.time_range.start, end: c.time_range.end }
+        };
+        match marker.resume_plan(self.now(), &range) {
+            Some(plan) => {
+                let mut marker = marker;
+                marker.resumes += 1;
+                self.set_phase(Phase::Disconnect).await;
+                Some((marker, plan))
+            }
+            None => {
+                NightMarker::remove(&path);
+                if !by_user {
+                    self.log("La nuit interrompue est terminée : pas de reprise").await;
+                }
+                // User asked to start: a fresh night (phase already DISCONNECT)
+                None
+            }
+        }
+    }
+
     async fn wait_for_disconnect(&self) {
         info!("Orchestrator: ARM phase — waiting for user disconnect...");
         loop {
