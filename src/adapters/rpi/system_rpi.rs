@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use std::process::Command;
-use tracing::{info, warn};
+use std::time::Duration;
+use tracing::info;
 
 use crate::ports::system::{SystemError, SystemPort};
 
-/// Raspberry Pi system adapter — real shutdown.
+/// Raspberry Pi system adapter — real shutdown through the privileged helper.
 pub struct SystemRpi;
 
 impl SystemRpi {
@@ -13,21 +13,19 @@ impl SystemRpi {
     }
 }
 
+impl Default for SystemRpi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SystemPort for SystemRpi {
     async fn shutdown(&self) -> Result<(), SystemError> {
         info!("SystemRpi: initiating system shutdown...");
-
-        let output = Command::new("sudo")
-            .args(["shutdown", "-h", "now"])
-            .output()
-            .map_err(|e| SystemError::ShutdownFailed(e.to_string()))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("SystemRpi: shutdown command returned error: {}", stderr);
-        }
-
-        Ok(())
+        crate::sys::helper(&["shutdown"], None, Duration::from_secs(30))
+            .await
+            .map(|_| ())
+            .map_err(SystemError::ShutdownFailed)
     }
 }

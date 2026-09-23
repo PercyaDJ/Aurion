@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Presets</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
 </head>
 
 <body>
@@ -65,34 +65,50 @@
 
         async function loadPresets() {
             try {
-                const res = await fetch('/api/presets');
+                const res = await apiFetch('/api/presets');
                 const data = await res.json();
                 const list = document.getElementById('presetList');
                 list.innerHTML = '';
 
-                data.presets.forEach(p => {
+                data.presets.forEach((p, i) => {
                     list.innerHTML += `
                         <div class="preset-card">
                             <div>
-                                <div class="preset-name">${p.name}</div>
+                                <div class="preset-name">${aurionEscape(p.name)}</div>
                                 ${p.is_builtin ? '<span class="preset-builtin">Intégré</span>' : '<span class="preset-builtin">Utilisateur</span>'}
                             </div>
-                            <button class="btn btn-outline btn-sm" onclick="applyPreset('${p.name}')">
-                                Appliquer
-                            </button>
+                            <div style="display:flex;gap:0.4rem;">
+                                <button class="btn btn-outline btn-sm" data-idx="${i}" data-action="apply">Appliquer</button>
+                                ${p.is_builtin ? '' : `<button class="btn btn-outline btn-sm" style="color:var(--red,#ff4d4d);border-color:var(--red,#ff4d4d);" data-idx="${i}" data-action="delete">Supprimer</button>`}
+                            </div>
                         </div>`;
                 });
+                list.querySelectorAll('button[data-action]').forEach(btn => {
+                    const name = data.presets[Number(btn.dataset.idx)].name;
+                    btn.onclick = () => btn.dataset.action === 'apply' ? applyPreset(name) : deletePreset(name);
+                });
             } catch (e) {
-                console.error('Load presets failed:', e);
+                showStatus('⚠️ ' + e.message, true);
             }
         }
 
         async function applyPreset(name) {
             try {
-                await fetch('/api/presets/' + encodeURIComponent(name) + '/apply', { method: 'POST' });
+                await apiFetch('/api/presets/' + encodeURIComponent(name) + '/apply', { method: 'POST' });
                 showStatus('✅ Preset "' + name + '" appliqué');
             } catch (e) {
-                console.error('Apply preset failed:', e);
+                showStatus('⚠️ ' + e.message, true);
+            }
+        }
+
+        async function deletePreset(name) {
+            if (!confirm('Supprimer le preset "' + name + '" ?')) return;
+            try {
+                await apiFetch('/api/presets/' + encodeURIComponent(name), { method: 'DELETE' });
+                showStatus('Preset "' + name + '" supprimé');
+                loadPresets();
+            } catch (e) {
+                showStatus('⚠️ ' + e.message, true);
             }
         }
 
@@ -104,7 +120,7 @@
             }
 
             try {
-                await fetch('/api/presets', {
+                await apiFetch('/api/presets', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name }),
@@ -113,7 +129,7 @@
                 document.getElementById('newPresetName').value = '';
                 loadPresets();
             } catch (e) {
-                console.error('Save preset failed:', e);
+                showStatus('⚠️ ' + e.message, true);
             }
         }
 

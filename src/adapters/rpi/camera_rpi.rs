@@ -16,6 +16,12 @@ pub struct CameraRpi {
     connected: bool,
 }
 
+impl Default for CameraRpi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CameraRpi {
     pub fn new() -> Self {
         // Synchronous check at startup only (before the async runtime is in full use)
@@ -66,10 +72,12 @@ impl CameraRpi {
         cmd
     }
 
-    /// Compute a safe async timeout: shutter duration + 15s headroom.
+    /// Compute a safe async timeout. With long exposures libcamera needs
+    /// several frames of the requested duration before the capture, so
+    /// allow three times the shutter time plus 20 s of headroom.
     fn capture_timeout_secs(exposure: &ExposureSettings) -> u64 {
-        let shutter_secs = exposure.shutter_us / 1_000_000;
-        shutter_secs + 15
+        let shutter_secs = exposure.shutter_us.div_ceil(1_000_000);
+        shutter_secs * 3 + 20
     }
 }
 
@@ -86,11 +94,12 @@ impl CameraPort for CameraRpi {
         let pid = std::process::id();
         let tmp_path = std::path::Path::new("/tmp").join(format!("aurion_{}_capture.jpg", pid));
         let tmp_path_str = tmp_path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&tmp_path); // never re-read a previous frame
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
         let output = timeout(
             Duration::from_secs(timeout_secs),
-            self.build_capture_command(exposure, &tmp_path_str, false).output(),
+            self.build_capture_command(exposure, &tmp_path_str, false).kill_on_drop(true).output(),
         )
         .await
         .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still timeout after {}s", timeout_secs)))?
@@ -140,13 +149,16 @@ impl CameraPort for CameraRpi {
         let tmp_jpg = std::path::Path::new("/tmp").join(format!("aurion_{}_raw.jpg", pid));
         let tmp_dng = std::path::Path::new("/tmp").join(format!("aurion_{}_raw.dng", pid));
         let tmp_jpg_str = tmp_jpg.to_string_lossy().to_string();
+        // Never re-read the files of a previous frame if this capture fails.
+        let _ = std::fs::remove_file(&tmp_jpg);
+        let _ = std::fs::remove_file(&tmp_dng);
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
 
         // rpicam-still --raw produces a DNG alongside the JPG
         let output = timeout(
             Duration::from_secs(timeout_secs),
-            self.build_capture_command(exposure, &tmp_jpg_str, true).output(),
+            self.build_capture_command(exposure, &tmp_jpg_str, true).kill_on_drop(true).output(),
         )
         .await
         .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still RAW timeout after {}s", timeout_secs)))?

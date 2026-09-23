@@ -5,9 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Diagnostics</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
 </head>
 
 <body>
@@ -184,6 +183,23 @@
             </div>
             <div id="wifiStatus" style="display: none; margin-top: 0.75rem; text-align: center; font-size: 0.85rem;">
             </div>
+            <button class="btn btn-outline btn-block" style="margin-top: 0.75rem;" onclick="restartHotspot()">
+                📡 Revenir au hotspot Aurion
+            </button>
+        </div>
+
+        <!-- Software update (OTA) -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">⬆️ Mise à jour du logiciel</span>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                Choisissez le fichier <code>aurion</code> (binaire Raspberry Pi 64 bits) fourni avec une nouvelle version.
+                Il est vérifié avant installation ; l'ancienne version est conservée en secours.
+            </span>
+            <input type="file" id="updateFile" class="form-input" style="margin-bottom: 0.5rem;">
+            <button class="btn btn-primary btn-block" id="updateBtn" onclick="uploadUpdate()">Installer la mise à jour</button>
+            <div id="updateStatus" style="display: none; margin-top: 0.75rem; text-align: center; font-size: 0.85rem;"></div>
         </div>
 
         <!-- Logs -->
@@ -286,10 +302,13 @@
             if (!dt) { alert('Sélectionne une date et heure'); return; }
 
             try {
+                let timezone = null;
+                try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) { }
                 const res = await fetch('/api/system/time', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ datetime: dt.replace('T', ' ') }),
+                    // Heure du téléphone convertie en instant absolu : pas d'ambiguïté de fuseau
+                    body: JSON.stringify({ epoch_ms: new Date(dt).getTime(), timezone }),
                 });
                 if (res.ok) {
                     const status = document.getElementById('timeStatus');
@@ -326,7 +345,7 @@
         }
         async function doShutdown() {
             try {
-                await fetch('/api/system/shutdown', { method: 'POST' });
+                await apiFetch('/api/system/shutdown', { method: 'POST' });
                 document.getElementById('shutdownConfirm').innerHTML =
                     '<span style="color: var(--green);">✅ Arrêt en cours… Vous pouvez débrancher dans 10 secondes.</span>';
             } catch (e) {
@@ -362,19 +381,22 @@
             btn.textContent = '⏳ Scan en cours…';
             btn.disabled = true;
             try {
-                const res = await fetch('/api/wifi/scan');
+                const res = await apiFetch('/api/wifi/scan');
                 const data = await res.json();
                 const list = document.getElementById('wifiList');
                 const container = document.getElementById('wifiNetworks');
                 if (data.networks.length === 0) {
                     container.innerHTML = '<span class="form-hint">Aucun réseau trouvé</span>';
                 } else {
-                    container.innerHTML = data.networks.map(n =>
-                        `<button class="btn btn-outline btn-block" style="margin-bottom:0.25rem; text-align:left;" onclick="selectWifi('${escapeHtml(n.ssid)}')">
+                    container.innerHTML = data.networks.map((n, i) =>
+                        `<button class="btn btn-outline btn-block" style="margin-bottom:0.25rem; text-align:left;" data-idx="${i}">
                             <span>${escapeHtml(n.ssid)}</span>
-                            <span style="float:right; color:var(--text-muted);">${n.signal}dBm · ${n.security}</span>
+                            <span style="float:right; color:var(--text-muted);">${n.signal}% · ${escapeHtml(n.security)}</span>
                         </button>`
                     ).join('');
+                    container.querySelectorAll('button[data-idx]').forEach(b => {
+                        b.onclick = () => selectWifi(data.networks[Number(b.dataset.idx)].ssid);
+                    });
                 }
                 list.style.display = 'block';
             } catch (e) {
@@ -396,6 +418,39 @@
             input.type = input.type === 'password' ? 'text' : 'password';
         }
 
+        async function restartHotspot() {
+            try {
+                await apiFetch('/api/wifi/hotspot', { method: 'POST' });
+                showToast('Hotspot redémarré : reconnectez-vous au Wi-Fi Aurion', 'success');
+            } catch (e) {
+                showToast('Hotspot : ' + e.message, 'error');
+            }
+        }
+
+        async function uploadUpdate() {
+            const input = document.getElementById('updateFile');
+            const statusEl = document.getElementById('updateStatus');
+            const btn = document.getElementById('updateBtn');
+            if (!input.files.length) { showToast('Choisissez un fichier', 'info'); return; }
+            if (!confirm('Installer cette mise à jour ? La caméra va redémarrer.')) return;
+            const form = new FormData();
+            form.append('binary', input.files[0]);
+            btn.disabled = true;
+            statusEl.style.display = 'block';
+            statusEl.style.color = 'var(--text-muted)';
+            statusEl.textContent = '⏳ Envoi et vérification…';
+            try {
+                const res = await apiFetch('/api/system/update', { method: 'POST', body: form });
+                statusEl.style.color = 'var(--green)';
+                statusEl.textContent = '✅ ' + await res.text();
+                setTimeout(() => location.reload(), 15000);
+            } catch (e) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '❌ ' + e.message;
+            }
+            btn.disabled = false;
+        }
+
         async function connectWifi() {
             const password = document.getElementById('wifiPassword').value;
             if (!password) { alert('Entrez le mot de passe'); return; }
@@ -409,11 +464,12 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ssid: selectedSsid, password }),
                 });
+                if (!res.ok) throw new Error(await res.text());
                 const data = await res.json();
                 statusEl.style.color = data.success ? 'var(--green)' : 'var(--red)';
-                statusEl.innerHTML = data.message;
+                statusEl.textContent = data.message;
                 if (data.ip_address) {
-                    statusEl.innerHTML += '<br><strong>Accès SSH: ssh pi@' + data.ip_address + '</strong>';
+                    statusEl.innerHTML += '<br><strong>Interface : http://' + escapeHtml(data.ip_address) + ':8080</strong>';
                 }
                 updateWifiStatus();
             } catch (e) {

@@ -9,6 +9,12 @@ pub struct NetworkMock {
     active: Mutex<bool>,
 }
 
+impl Default for NetworkMock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkMock {
     pub fn new() -> Self {
         Self {

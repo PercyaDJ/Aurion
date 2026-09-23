@@ -35,6 +35,7 @@ pub struct ExposureController {
 }
 
 impl ExposureController {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         iso_min: u32,
         iso_max: u32,
@@ -138,6 +139,21 @@ impl ExposureController {
         // Reset log_state to avoid integral windup
         self.log_state = clamped_delta;
 
+        self.current
+    }
+
+    /// One-shot metering used by the preview: correct the exposure directly
+    /// towards the target (no EMA, no rate limit), bounded to ×8 / ÷8 per
+    /// call so a single bad frame cannot send it to an extreme.
+    pub fn jump(&mut self, histogram: &[u32; 256]) -> ExposureSettings {
+        let measured = self.compute_percentile(histogram);
+        let mult = if measured < 1.0 {
+            8.0
+        } else {
+            (self.target_brightness / measured).clamp(0.125, 8.0)
+        };
+        self.apply_multiplier(mult);
+        self.log_state = 0.0;
         self.current
     }
 
@@ -326,6 +342,22 @@ mod tests {
         ctrl.reset();
         assert_eq!(ctrl.current().iso, 100);
         assert_eq!(ctrl.current().shutter_us, 1_000_000);
+    }
+
+    #[test]
+    fn test_jump_converges_fast() {
+        let mut ctrl = default_controller();
+        ctrl.set(ExposureSettings::new(400, 4_000_000));
+        // Frame twice too dark → exposure doubles in a single step.
+        let before = ctrl.current();
+        let after = ctrl.jump(&make_histogram_for_brightness(30));
+        let ratio = (after.shutter_us as f64 * after.iso as f64)
+            / (before.shutter_us as f64 * before.iso as f64);
+        assert!((ratio - 2.0).abs() < 0.05, "ratio={}", ratio);
+        // Black frame → bounded ×8, never beyond the limits.
+        for _ in 0..10 { ctrl.jump(&make_histogram_for_brightness(0)); }
+        assert_eq!(ctrl.current().shutter_us, 30_000_000);
+        assert_eq!(ctrl.current().iso, 3200);
     }
 
     #[test]

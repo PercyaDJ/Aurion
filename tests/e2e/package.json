@@ -1,0 +1,12 @@
+{
+  "name": "aurion-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests of the Aurion web interface",
+  "scripts": {
+    "test": "node ui_test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

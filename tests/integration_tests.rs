@@ -15,6 +15,7 @@ use aurion::ports::system::SystemPort;
 
 /// Helper: run the Watch loop until a phase change or frame limit.
 /// Returns the final phase.
+#[allow(clippy::too_many_arguments)]
 async fn run_watch_loop(
     sm: &mut StateMachine,
     detector: &mut AuroraDetector,

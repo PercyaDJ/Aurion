@@ -25,7 +25,11 @@ const FLUSH_EVERY_N_LINES: u32 = 10;
 impl SessionLogger {
     /// Create a new session logger. Creates the session directory.
     pub fn new(base_dir: &Path) -> Result<Self, SessionLoggerError> {
-        let now = chrono::Local::now();
+        Self::new_at(base_dir, chrono::Local::now())
+    }
+
+    /// Create a session logger named after `now` (injected clock).
+    pub fn new_at(base_dir: &Path, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
         let session_name = now.format("%Y-%m-%d_%H-%M").to_string();
         let session_dir = base_dir.join("sessions").join(&session_name);
 

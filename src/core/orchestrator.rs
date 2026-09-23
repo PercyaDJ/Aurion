@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 
@@ -10,6 +11,8 @@ use chrono::Datelike;
 use crate::core::session_logger::SessionLogger;
 use crate::core::state_machine::StateMachine;
 use crate::ports::camera::CameraPort;
+use crate::ports::clock::ClockPort;
+use crate::ports::network::NetworkApPort;
 use crate::ports::storage::StoragePort;
 use crate::ports::system::SystemPort;
 use crate::web::AppState;
@@ -24,11 +27,40 @@ pub struct Orchestrator<C: CameraPort, S: StoragePort, Sys: SystemPort> {
     camera: C,
     storage: S,
     system: Sys,
+    clock: Arc<dyn ClockPort>,
+    network: Option<Box<dyn NetworkApPort>>,
 }
+
+/// Delay between the "Déconnexion" click and the hotspot shutdown, so the
+/// phone receives the answer and the user can walk away.
+const DISCONNECT_DELAY: Duration = Duration::from_secs(15);
 
 impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     pub fn new(state: AppState, camera: C, storage: S, system: Sys) -> Self {
-        Self { state, camera, storage, system }
+        Self {
+            state,
+            camera,
+            storage,
+            system,
+            clock: Arc::new(crate::adapters::pc::ClockReal::new()),
+            network: None,
+        }
+    }
+
+    /// Use another clock (tests / simulation with virtual time).
+    pub fn with_clock(mut self, clock: Arc<dyn ClockPort>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// Hotspot to switch off when the night starts.
+    pub fn with_network(mut self, network: Box<dyn NetworkApPort>) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    fn now(&self) -> chrono::DateTime<chrono::Local> {
+        self.clock.now_local()
     }
 
     /// Main entry point — run the full autonomous loop.
@@ -40,15 +72,15 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.wait_for_disconnect().await;
 
         // ─── DISCONNECT timer ───────────────────────────────
+        if self.is_shutdown().await {
+            return Ok(());
+        }
         info!("Orchestrator: disconnect requested, 15s timer...");
         self.set_phase(Phase::Disconnect).await;
-        sleep(Duration::from_secs(15)).await;
+        sleep(DISCONNECT_DELAY).await;
 
         // ─── Stop AP (best-effort) ──────────────────────────
-        #[cfg(feature = "rpi")]
-        {
-            use crate::ports::network::NetworkApPort;
-            let network = crate::adapters::rpi::NetworkRpi::new();
+        if let Some(ref network) = self.network {
             if let Err(e) = network.stop_ap().await {
                 warn!("Orchestrator: failed to stop AP: {}", e);
             }
@@ -59,7 +91,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // ─── Log system clock immediately (critical for diagnosis without screen) ─
         {
-            let sys_now = chrono::Local::now();
+            let sys_now = self.now();
             let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
             info!("Orchestrator: {}", clock_msg);
             self.log(&clock_msg).await;
@@ -80,7 +112,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 if self.is_shutdown().await {
                     return Ok(());
                 }
-                let now = chrono::Local::now();
+                let now = self.now();
                 if time_range.contains(now.time()) {
                     break;
                 }
@@ -121,13 +153,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let mut storage_ok = false;
 
             // First attempt: direct write (USB already mounted via fstab/boot)
-            if std::fs::create_dir_all(&configured_path).is_ok() {
-                if std::fs::write(&probe_path, b"ok").is_ok() {
+            if std::fs::create_dir_all(&configured_path).is_ok()
+                && std::fs::write(&probe_path, b"ok").is_ok() {
                     let _ = std::fs::remove_file(&probe_path);
                     self.log(&format!("USB accessible: {}", config.storage.mount_point)).await;
                     storage_ok = true;
                 }
-            }
 
             // Second attempt: try to (re)mount then retry
             if !storage_ok {
@@ -135,13 +166,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 self.log("USB: montage en cours...").await;
                 let _ = self.storage.mount().await; // ignore if already mounted
                 sleep(Duration::from_secs(3)).await;
-                if std::fs::create_dir_all(&configured_path).is_ok() {
-                    if std::fs::write(&probe_path, b"ok").is_ok() {
+                if std::fs::create_dir_all(&configured_path).is_ok()
+                    && std::fs::write(&probe_path, b"ok").is_ok() {
                         let _ = std::fs::remove_file(&probe_path);
                         self.log(&format!("USB monte et accessible: {}", config.storage.mount_point)).await;
                         storage_ok = true;
                     }
-                }
             }
 
             if !storage_ok {
@@ -157,7 +187,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
         let storage_path: &Path = configured_path.as_path();
 
-        let mut session_logger = match SessionLogger::new(storage_path) {
+        let mut session_logger = match SessionLogger::new_at(storage_path, self.now()) {
             Ok(l) => {
                 info!("Orchestrator: session logger at {:?}", l.session_path());
                 Some(l)
@@ -173,7 +203,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self.log(&format!("Mode: {}", capture_mode_str)).await;
         // Dump effective config to session.log so we can verify from SSH next morning
         if let Some(ref mut sl) = session_logger {
-            sl.log_text(&format!("=== CONFIG EFFECTIVE ==="));
+            sl.log_text("=== CONFIG EFFECTIVE ===");
             sl.log_text(&format!("Mode: {}", capture_mode_str));
             sl.log_text(&format!("Format: {:?}", config.capture.output_format));
             sl.log_text(&format!("Intervalle: {}s", config.capture.capture_interval_secs));
@@ -181,7 +211,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             sl.log_text(&format!("Minuteur: {:?}h", config.time_range.duration_hours));
             sl.log_text(&format!("detection_capture_enabled: {}", config.detection.detection_capture_enabled));
             sl.log_text(&format!("Mount point: {}", config.storage.mount_point));
-            sl.log_text(&format!("======================="));
+            sl.log_text("=======================");
         }
 
         // ─── CALIBRATION: 3 frames to stabilize exposure ────
@@ -231,7 +261,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let deadline: Option<chrono::NaiveTime> = if let Some(hours) = config.time_range.duration_hours {
             // Timer mode: run for N hours from now
             let secs = (hours * 3600.0) as i64;
-            let end = chrono::Local::now() + chrono::Duration::seconds(secs);
+            let end = self.now() + chrono::Duration::seconds(secs);
             let msg = format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"));
             self.log(&msg).await;
             if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
@@ -248,7 +278,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut consecutive_detections = 0u32;
         let mut frame_number = 0u64;
         let mut consecutive_io_errors = 0u32;
-        let loop_start = chrono::Local::now();
+        let loop_start = self.now();
         let mut has_started_range = false;
         let mut wait_iters = 0u64;
 
@@ -260,7 +290,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
 
             // Check time limit
-            let now = chrono::Local::now();
+            let now = self.now();
             let mut should_stop = false;
             let mut wait_for_start = false;
 
@@ -287,7 +317,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             };
 
             if wait_for_start {
-                if wait_iters % 30 == 0 {
+                if wait_iters.is_multiple_of(30) {
                     let wait_msg = format!(
                         "Attente du début de plage (actuel: {}, début: {})",
                         now.format("%H:%M:%S"), config.time_range.start
@@ -417,21 +447,21 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 };
             let frame = &analysis_frame;
 
-            // ROI crop
+            // ─── Exposure update (metering on the sky ROI only) ─
             let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
-            let roi_height = (frame.height as f64 * config.detection.roi_top_percent as f64 / 100.0) as u32;
-
-            // ─── Exposure update ────────────────────────────
             let hist = compute_histogram(roi_data);
             exposure_ctrl.update(&hist, current_phase);
 
             // ─── Detection ──────────────────────────────────
-            let det_result = detector.analyze(roi_data, frame.width, roi_height);
+            // The detector extracts the ROI itself: give it the full frame
+            // (passing the already-cropped ROI used to shrink the analysed
+            // area to roi² — e.g. 65 % × 65 % = 42 % of the sky).
+            let det_result = detector.analyze(&frame.data, frame.width, frame.height);
 
             // ─── Session logging ────────────────────────────
             if let Some(ref mut logger) = session_logger {
                 let event = SessionEvent {
-                    timestamp: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+                    timestamp: self.now().format("%Y-%m-%dT%H:%M:%S").to_string(),
                     phase: format!("{:?}", current_phase),
                     capture_mode: capture_mode_str.to_string(),
                     exposure_us: exposure.shutter_us,
@@ -471,7 +501,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     }
 
                     // Watch interval (hot-reloadable)
-                    sleep(Duration::from_secs(live_watch_interval as u64)).await;
+                    sleep(Duration::from_secs(live_watch_interval)).await;
                 }
 
                 Phase::Run => {
@@ -526,7 +556,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         is_aurora: bool,
     ) {
 
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let timestamp = self.now().format("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
         info!("Orchestrator: save_frame frame={} format={:?} aurora={}", frame_num, config.capture.output_format, is_aurora);
 

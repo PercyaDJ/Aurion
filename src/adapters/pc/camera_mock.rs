@@ -6,12 +6,29 @@ use tracing::info;
 use crate::core::models::{CaptureFormat, CaptureFrame, ExposureSettings, FrameMetadata};
 use crate::ports::camera::{CameraError, CameraPort};
 
+/// Sky simulated by the synthetic frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkyPattern {
+    /// Aurora on frames where `index % 5 >= 3` (two consecutive hits every 5 frames).
+    Intermittent,
+    /// Always a dark sky, never an aurora.
+    Dark,
+    /// Aurora on every frame.
+    Aurora,
+}
+
 /// PC mock camera: reads JPG files from a test data directory.
 /// Cycles through files in order to simulate a sequence of captures.
+/// Without test files, generates synthetic frames following a [`SkyPattern`].
 pub struct CameraMock {
     test_dir: PathBuf,
     frame_index: Mutex<usize>,
     connected: bool,
+    pattern: SkyPattern,
+    /// Number of upcoming captures that must fail (failure injection).
+    failures_left: Mutex<u32>,
+    /// Total number of capture attempts.
+    attempts: Mutex<u32>,
 }
 
 impl CameraMock {
@@ -20,16 +37,40 @@ impl CameraMock {
             test_dir,
             frame_index: Mutex::new(0),
             connected: true,
+            pattern: SkyPattern::Intermittent,
+            failures_left: Mutex::new(0),
+            attempts: Mutex::new(0),
         }
     }
 
     /// Create a mock that generates synthetic frames (no test data needed).
     pub fn synthetic() -> Self {
-        Self {
-            test_dir: PathBuf::from("testdata/watch_sequences"),
-            frame_index: Mutex::new(0),
-            connected: true,
-        }
+        Self::new(PathBuf::from("testdata/watch_sequences"))
+    }
+
+    /// Synthetic frames following `pattern` (ignores test data files).
+    pub fn with_pattern(pattern: SkyPattern) -> Self {
+        let mut cam = Self::new(PathBuf::from("/nonexistent/aurion-testdata"));
+        cam.pattern = pattern;
+        cam
+    }
+
+    /// Make the next `n` captures fail.
+    pub fn fail_next(self, n: u32) -> Self {
+        *self.failures_left.lock().unwrap() = n;
+        self
+    }
+
+    /// A camera that is not plugged in.
+    pub fn disconnected() -> Self {
+        let mut cam = Self::with_pattern(SkyPattern::Dark);
+        cam.connected = false;
+        cam
+    }
+
+    /// Number of capture attempts so far (successful or not).
+    pub fn attempts(&self) -> u32 {
+        *self.attempts.lock().unwrap()
     }
 
     fn generate_synthetic_frame(
@@ -48,8 +89,11 @@ impl CameraMock {
                 let base = 5u8;
                 let gradient = (y as f64 / height as f64 * 10.0) as u8;
 
-                // Simulate aurora at certain frame indices (every 5th frame)
-                let is_aurora_frame = index % 5 >= 3;
+                let is_aurora_frame = match self.pattern {
+                    SkyPattern::Intermittent => index % 5 >= 3,
+                    SkyPattern::Dark => false,
+                    SkyPattern::Aurora => true,
+                };
 
                 if is_aurora_frame && y < height * 65 / 100 {
                     // Green aurora glow in top 65%
@@ -92,8 +136,16 @@ impl CameraMock {
 #[async_trait]
 impl CameraPort for CameraMock {
     async fn capture_jpg(&self, exposure: &ExposureSettings, _tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
+        *self.attempts.lock().unwrap() += 1;
         if !self.connected {
             return Err(CameraError::NotConnected);
+        }
+        {
+            let mut left = self.failures_left.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return Err(CameraError::CaptureFailed("injected failure".into()));
+            }
         }
 
         let index = self.next_index();

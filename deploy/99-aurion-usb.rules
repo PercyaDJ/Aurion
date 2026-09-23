@@ -1,0 +1,3 @@
+# Aurion : toute clé USB (FAT32 / exFAT / NTFS) est montée automatiquement
+# sur le dossier de capture, quelle que soit la clé (pas de liaison à un UUID).
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", RUN+="/usr/local/sbin/aurion-helper usb-add %k"

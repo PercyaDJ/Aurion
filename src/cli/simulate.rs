@@ -23,7 +23,8 @@ pub async fn run_simulation() -> anyhow::Result<()> {
     let config = AppConfig::default();
 
     // Create mocks
-    let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 20, 30, 0).unwrap();
+    // 21:25 → user disconnects at 21:30, inside the default 21:00–06:00 window
+    let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 21, 25, 0).unwrap();
     let clock = ClockMock::accelerated(start_time, 60.0);
     let camera = CameraMock::synthetic();
     let storage = StorageMock::new(PathBuf::from("./output"));
@@ -163,9 +164,13 @@ pub async fn run_simulation() -> anyhow::Result<()> {
             let histogram = compute_histogram(&frame.data);
             exposure_ctrl.update(&histogram, Phase::Run);
 
-            // Save frame
-            let filename = format!("aurora_{:04}.jpg", run_frames);
-            storage.save_file(&filename, &frame.data).await?;
+            // Save frame (encode the RGB pixels as a real JPEG)
+            let filename = format!("aurora_{}_{:05}.jpg", clock.now().format("%Y%m%d_%H%M%S"), run_frames);
+            let img = image::RgbImage::from_raw(frame.width, frame.height, frame.data.clone())
+                .ok_or_else(|| anyhow::anyhow!("invalid frame size"))?;
+            let mut jpg = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut jpg, image::ImageFormat::Jpeg)?;
+            storage.save_file(&filename, jpg.get_ref()).await?;
 
             info!(
                 "[RUN] Frame #{} saved | ISO {} / {}µs | {}",

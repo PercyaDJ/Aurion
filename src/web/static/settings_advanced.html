@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aurion — Réglages avancés</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/common.js"></script>
 </head>
 
 <body>
@@ -314,7 +314,10 @@
                 document.getElementById('storageCritical').value = cfg.storage.critical_percent;
 
                 document.getElementById('wifiSsid').value = cfg.network.ssid;
-                document.getElementById('wifiPassword').value = cfg.network.password;
+                // Le mot de passe n'est jamais renvoyé par le serveur : laisser le
+                // champ vide conserve le mot de passe actuel.
+                document.getElementById('wifiPassword').value = '';
+                document.getElementById('wifiPassword').placeholder = 'Inchangé (laisser vide)';
 
                 // New detection params
                 if (cfg.detection.red_threshold !== undefined) {
@@ -346,12 +349,6 @@
                     document.getElementById('satRejectVal').textContent = cfg.exposure.saturation_reject;
                 }
 
-                // Load real WiFi password from separate endpoint
-                try {
-                    const pwdRes = await fetch('/api/config/wifi-password');
-                    const pwdData = await pwdRes.json();
-                    document.getElementById('wifiPassword').value = pwdData.password;
-                } catch (_) { /* fallback: keep masked value */ }
             } catch (e) {
                 showToast('Erreur chargement config', 'error');
             }
@@ -376,7 +373,14 @@
                 cfg.storage.critical_percent = parseInt(document.getElementById('storageCritical').value);
 
                 cfg.network.ssid = document.getElementById('wifiSsid').value;
-                cfg.network.password = document.getElementById('wifiPassword').value;
+                const newPwd = document.getElementById('wifiPassword').value;
+                if (newPwd) {
+                    if (newPwd.length < 10 || newPwd.length > 63) {
+                        showToast('Le mot de passe Wi-Fi doit faire entre 10 et 63 caractères', 'error');
+                        return;
+                    }
+                    cfg.network.password = newPwd;
+                }
 
                 // New detection params
                 cfg.detection.red_threshold = parseFloat(document.getElementById('redThreshold').value);
@@ -389,15 +393,16 @@
                 cfg.exposure.target_brightness = parseFloat(document.getElementById('targetBrightness').value);
                 cfg.exposure.saturation_reject = parseFloat(document.getElementById('satReject').value);
 
-                await fetch('/api/config', {
+                await apiFetch('/api/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(cfg),
                 });
 
+                document.getElementById('wifiPassword').value = '';
                 showToast('Configuration sauvegardée ✅', 'success');
             } catch (e) {
-                showToast('Erreur de sauvegarde', 'error');
+                showToast('Erreur de sauvegarde : ' + e.message, 'error');
             }
         }
 

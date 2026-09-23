@@ -1,174 +1,249 @@
-//! API integration tests using axum-test.
-//! Tests the critical HTTP endpoints for correctness, security, and error handling.
+//! API contract tests: every endpoint used by the web interface answers
+//! with the fields the pages rely on.
 
-#[cfg(test)]
-mod api_tests {
-    use axum_test::TestServer;
-    use serde_json::{json, Value};
+mod common;
 
-    use aurion::core::config::AppConfig;
-    use aurion::web::AppState;
+use axum::http::StatusCode;
+use serde_json::{json, Value};
 
-    /// Build a test server with default AppState.
-    fn make_server() -> TestServer {
-        let config = AppConfig::default();
-        let state = AppState::new(config);
-
-        let app = aurion::web::build_router(state);
-        TestServer::new(app).unwrap()
+#[tokio::test]
+async fn status_contract() {
+    let t = common::env();
+    let res = t.server.get("/api/status").await;
+    res.assert_status_ok();
+    let body: Value = res.json();
+    for key in ["phase", "time", "date", "epoch_ms", "warnings", "usb_mounted", "usb_writable", "default_password", "time_synced"] {
+        assert!(body.get(key).is_some(), "missing '{}'", key);
     }
+    assert_eq!(body["phase"], "ARM");
+    assert!(body["warnings"].is_array());
+    // Default password is flagged
+    assert_eq!(body["default_password"], true);
+    assert!(body["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("Mot de passe")));
+}
 
-    // ─── GET /api/status ──────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_get_status_returns_200() {
-        let server = make_server();
-        let response = server.get("/api/status").await;
-        response.assert_status_ok();
-
-        let body: Value = response.json();
-        assert!(body.get("phase").is_some(), "missing 'phase' field");
-        assert!(body.get("time").is_some(), "missing 'time' field");
+#[tokio::test]
+async fn config_contract_used_by_settings_pages() {
+    let t = common::env();
+    let body: Value = t.server.get("/api/config").await.json();
+    let paths = [
+        "/exposure/iso_min", "/exposure/iso_max", "/exposure/shutter_min_us", "/exposure/shutter_max_us",
+        "/exposure/ev_step_max", "/exposure/target_brightness", "/exposure/saturation_reject",
+        "/detection/roi_top_percent", "/detection/green_threshold", "/detection/luminosity_threshold",
+        "/detection/variation_threshold", "/detection/consecutive_required", "/detection/detection_capture_enabled",
+        "/detection/red_threshold", "/detection/blue_threshold", "/detection/area_min_percent",
+        "/detection/hysteresis_on", "/detection/hysteresis_off", "/detection/moon_mask_enabled",
+        "/capture/watch_interval_secs", "/capture/preview_interval_secs", "/capture/output_format",
+        "/capture/focal_length_mm", "/capture/capture_interval_secs",
+        "/time_range/start", "/time_range/end", "/time_range/duration_hours",
+        "/storage/mount_point", "/storage/warning_percent", "/storage/critical_percent",
+        "/network/ssid", "/network/password", "/network/channel", "/web/port", "/preset_name",
+    ];
+    for p in paths {
+        assert!(body.pointer(p).is_some(), "config JSON is missing {}", p);
     }
+    assert_eq!(body["network"]["password"], "********");
+}
 
-    // ─── GET /api/config ─────────────────────────────────────
+#[tokio::test]
+async fn update_config_roundtrip_and_persistence() {
+    let t = common::env();
+    let mut cfg: Value = t.server.get("/api/config").await.json();
+    cfg["exposure"]["iso_max"] = json!(1600);
+    cfg["capture"]["output_format"] = json!("Jpg");
 
-    #[tokio::test]
-    async fn test_get_config_returns_valid_json() {
-        let server = make_server();
-        let response = server.get("/api/config").await;
-        response.assert_status_ok();
+    let res = t.server.post("/api/config").json(&cfg).await;
+    res.assert_status_ok();
+    let saved: Value = res.json();
+    assert_eq!(saved["exposure"]["iso_max"], 1600);
+    assert_eq!(saved["network"]["password"], "********", "POST response must not leak the password");
 
-        let body: Value = response.json();
-        // Must have exposure and detection sub-objects
-        assert!(body.get("exposure").is_some(), "missing 'exposure'");
-        assert!(body.get("detection").is_some(), "missing 'detection'");
-        // WiFi password must be masked
-        let password = body["network"]["password"].as_str().unwrap_or("");
-        assert_eq!(password, "********", "WiFi password should be masked in GET /api/config");
+    // Persisted atomically in the config dir
+    let on_disk = aurion::core::config::AppConfig::load(&t.config_dir().join("aurion.json")).unwrap();
+    assert_eq!(on_disk.exposure.iso_max, 1600);
+    assert_eq!(on_disk.network.password, "aurora2024", "masked value must not overwrite the real password");
+}
+
+#[tokio::test]
+async fn update_config_rejects_invalid_values() {
+    let t = common::env();
+    let mut cfg: Value = t.server.get("/api/config").await.json();
+    cfg["exposure"]["iso_min"] = json!(3200);
+    cfg["exposure"]["iso_max"] = json!(100);
+    let res = t.server.post("/api/config").json(&cfg).await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(res.text().contains("ISO"));
+    // Unchanged
+    let now: Value = t.server.get("/api/config").await.json();
+    assert_eq!(now["exposure"]["iso_max"], 3200);
+}
+
+#[tokio::test]
+async fn update_config_changes_wifi_password() {
+    let t = common::env();
+    let mut cfg: Value = t.server.get("/api/config").await.json();
+    cfg["network"]["password"] = json!("UnMotDePasseSolide42");
+    t.server.post("/api/config").json(&cfg).await.assert_status_ok();
+    assert_eq!(t.state.config.read().await.network.password, "UnMotDePasseSolide42");
+    let body: Value = t.server.get("/api/config/is-default-password").await.json();
+    assert_eq!(body["default"], false);
+}
+
+#[tokio::test]
+async fn logs_are_timestamped_array() {
+    let t = common::env();
+    t.state.add_log("hello".into()).await;
+    let body: Value = t.server.get("/api/logs").await.json();
+    let logs = body["logs"].as_array().unwrap();
+    assert!(logs[0].as_str().unwrap().ends_with("hello"));
+    assert!(logs[0].as_str().unwrap().starts_with('['));
+}
+
+#[tokio::test]
+async fn log_buffer_is_bounded() {
+    let t = common::env();
+    for i in 0..700 {
+        t.state.add_log(format!("line {}", i)).await;
     }
+    let body: Value = t.server.get("/api/logs").await.json();
+    let logs = body["logs"].as_array().unwrap();
+    assert_eq!(logs.len(), 500);
+    assert!(logs.last().unwrap().as_str().unwrap().ends_with("line 699"));
+}
 
-    // ─── POST /api/config ────────────────────────────────────
+#[tokio::test]
+async fn disconnect_starts_the_night_only_once() {
+    let t = common::env();
+    t.server.post("/api/disconnect").await.assert_status_ok();
+    let body: Value = t.server.get("/api/status").await.json();
+    assert_eq!(body["phase"], "DISCONNECT");
+    // Second click (or click during the night) is refused
+    t.server.post("/api/disconnect").await.assert_status(StatusCode::CONFLICT);
+}
 
-    #[tokio::test]
-    async fn test_update_config_preserves_masked_password() {
-        let server = make_server();
+#[tokio::test]
+async fn presets_flow() {
+    let t = common::env();
+    let list: Value = t.server.get("/api/presets").await.json();
+    assert_eq!(list["presets"].as_array().unwrap().len(), 3);
 
-        // First get the config
-        let get_resp = server.get("/api/config").await;
-        let mut config: Value = get_resp.json();
+    t.server.post("/api/presets").json(&json!({"name": "Nuit Laponie"})).await.assert_status(StatusCode::CREATED);
+    let list: Value = t.server.get("/api/presets").await.json();
+    assert!(list["presets"].as_array().unwrap().iter().any(|p| p["name"] == "Nuit Laponie" && p["is_builtin"] == false));
 
-        // Simulate frontend: sends back masked password
-        config["network"]["password"] = json!("********");
+    // The preset file never contains the Wi-Fi password
+    let file = std::fs::read_to_string(t.config_dir().join("presets/Nuit_Laponie.json")).unwrap();
+    assert!(!file.contains("aurora2024"));
 
-        let post_resp = server.post("/api/config").json(&config).await;
-        post_resp.assert_status_ok();
+    t.server.post("/api/presets/Moonlight/apply").await.assert_status_ok();
+    assert_eq!(t.state.config.read().await.exposure.iso_max, 800);
+    t.server.post("/api/presets/Nuit%20Laponie/apply").await.assert_status_ok();
+    assert_eq!(t.state.config.read().await.exposure.iso_max, 3200);
 
-        // Verify via /api/config/wifi-password that real password was NOT overwritten
-        let pw_resp = server.get("/api/config/wifi-password").await;
-        pw_resp.assert_status_ok();
-        let pw_body: Value = pw_resp.json();
-        let stored_pw = pw_body["password"].as_str().unwrap_or("");
-        assert_ne!(stored_pw, "********", "Real password was overwritten with masked value");
+    t.server.delete("/api/presets/Nuit%20Laponie").await.assert_status(StatusCode::NO_CONTENT);
+    t.server.delete("/api/presets/Moonlight").await.assert_status(StatusCode::FORBIDDEN);
+    t.server.post("/api/presets/Inconnu/apply").await.assert_status(StatusCode::NOT_FOUND);
+    t.server.post("/api/presets").json(&json!({"name": "FullDark"})).await.assert_status(StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn storage_endpoint_reports_capture_drive() {
+    let t = common::env();
+    let body: Value = t.server.get("/api/storage").await.json();
+    assert!(body["total_gb"].as_f64().unwrap() > 0.0);
+    assert!(body["summary"].as_str().unwrap().contains("libre"));
+}
+
+#[tokio::test]
+async fn storage_endpoint_when_drive_missing() {
+    let t = common::env_with(|c| c.storage.mount_point = "/nonexistent/aurion".into());
+    let body: Value = t.server.get("/api/storage").await.json();
+    assert_eq!(body["status"], "Error");
+    let status: Value = t.server.get("/api/status").await.json();
+    assert_eq!(status["usb_mounted"], false);
+    assert!(status["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("USB")));
+}
+
+#[tokio::test]
+async fn diagnostics_has_version() {
+    let t = common::env();
+    let body: Value = t.server.get("/api/diagnostics").await.json();
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert!(body.get("timezone").is_some());
+}
+
+#[tokio::test]
+async fn system_actions_disabled_off_device() {
+    let t = common::env();
+    t.server.post("/api/system/shutdown").await.assert_status(StatusCode::NOT_IMPLEMENTED);
+    t.server.get("/api/wifi/scan").await.assert_status(StatusCode::NOT_IMPLEMENTED);
+    t.server.post("/api/wifi/hotspot").await.assert_status(StatusCode::NOT_IMPLEMENTED);
+    t.server.get("/api/wifi/status").await.assert_status_ok();
+}
+
+#[tokio::test]
+async fn time_sync_rules() {
+    let t = common::env();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    // Auto sync with a clock already right: nothing to do, marked as synced
+    let res = t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms, "auto": true})).await;
+    res.assert_status_ok();
+    assert_eq!(res.json::<Value>()["changed"], false);
+    assert_eq!(t.server.get("/api/status").await.json::<Value>()["time_synced"], true);
+
+    // Large drift requires the privileged helper (disabled here)
+    t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms + 3_600_000})).await
+        .assert_status(StatusCode::NOT_IMPLEMENTED);
+
+    // Invalid inputs
+    t.server.post("/api/system/time").json(&json!({"datetime": "now; reboot"})).await.assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/system/time").json(&json!({"epoch_ms": 0})).await.assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms, "timezone": "../../etc/shadow"})).await
+        .assert_status(StatusCode::BAD_REQUEST);
+    t.server.post("/api/system/time").json(&json!({})).await.assert_status(StatusCode::BAD_REQUEST);
+
+    // Never during a capture
+    *t.state.phase.write().await = aurion::core::models::Phase::Run;
+    t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms + 3_600_000})).await
+        .assert_status(StatusCode::CONFLICT);
+    let auto = t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms + 3_600_000, "auto": true})).await;
+    auto.assert_status_ok();
+    assert_eq!(auto.json::<Value>()["changed"], false);
+}
+
+#[tokio::test]
+async fn preview_refused_during_capture() {
+    let t = common::env();
+    *t.state.phase.write().await = aurion::core::models::Phase::Watch;
+    t.server.post("/api/preview/capture").await.assert_status(StatusCode::CONFLICT);
+    t.server.get("/api/preview").await.assert_status(StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn static_pages_are_served_from_the_binary() {
+    let t = common::env();
+    for page in ["/", "/index.html", "/dashboard.html", "/gallery.html", "/settings.html",
+                 "/settings_advanced.html", "/presets.html", "/preview.html", "/storage.html", "/diagnostics.html"] {
+        let res = t.server.get(page).await;
+        res.assert_status_ok();
+        assert!(res.header("content-type").to_str().unwrap().starts_with("text/html"), "{}", page);
+        let html = res.text();
+        assert!(html.contains("/js/common.js"), "{} must load common.js", page);
+        assert!(!html.contains("fonts.googleapis.com"), "{} must work offline", page);
     }
+    let css = t.server.get("/css/style.css").await;
+    css.assert_status_ok();
+    assert!(css.header("content-type").to_str().unwrap().starts_with("text/css"));
+    t.server.get("/nope.html").await.assert_status(StatusCode::NOT_FOUND);
+}
 
-    // ─── GET /api/logs ───────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_get_logs_returns_array() {
-        let server = make_server();
-        let response = server.get("/api/logs").await;
-        response.assert_status_ok();
-
-        let body: Value = response.json();
-        assert!(body.get("logs").is_some(), "missing 'logs' field");
-        assert!(body["logs"].is_array(), "'logs' should be an array");
-    }
-
-    // ─── POST /api/gallery/delete — security ────────────────
-
-    #[tokio::test]
-    async fn test_delete_rejects_path_traversal() {
-        let server = make_server();
-
-        let payload = json!({ "filenames": ["../../../etc/passwd"] });
-        let response = server.post("/api/gallery/delete").json(&payload).await;
-        response.assert_status_ok(); // returns 200 with errors array
-
-        let body: Value = response.json();
-        let deleted = body["deleted"].as_u64().unwrap_or(99);
-        assert_eq!(deleted, 0, "Path traversal should not delete any file");
-
-        let errors = body["errors"].as_array().expect("errors array expected");
-        assert!(!errors.is_empty(), "Should report error for path traversal attempt");
-    }
-
-    #[tokio::test]
-    async fn test_delete_rejects_slash_in_filename() {
-        let server = make_server();
-        let payload = json!({ "filenames": ["subdir/evil.jpg"] });
-        let response = server.post("/api/gallery/delete").json(&payload).await;
-        response.assert_status_ok();
-
-        let body: Value = response.json();
-        assert_eq!(body["deleted"].as_u64().unwrap_or(99), 0);
-    }
-
-    // ─── POST /api/disconnect ────────────────────────────────
-
-    #[tokio::test]
-    async fn test_disconnect_transitions_phase() {
-        let server = make_server();
-        // POST /api/disconnect directly sets phase to Disconnect
-        let response = server.post("/api/disconnect").await;
-        response.assert_status_ok();
-
-        // Verify phase changed
-        let status = server.get("/api/status").await;
-        let body: Value = status.json();
-        let phase = body["phase"].as_str().unwrap_or("");
-        assert_eq!(phase, "DISCONNECT", "Phase should be 'DISCONNECT' after calling /api/disconnect");
-    }
-
-    // ─── GET /api/gallery/sessions ───────────────────────────
-
-    #[tokio::test]
-    async fn test_get_sessions_returns_array() {
-        let server = make_server();
-        let response = server.get("/api/gallery/sessions").await;
-        response.assert_status_ok();
-
-        // Should return a JSON array (empty if no sessions on disk)
-        let body: Value = response.json();
-        assert!(body.is_array(), "Sessions response should be an array");
-    }
-
-    // ─── GET /api/diagnostics ────────────────────────────────
-
-    #[tokio::test]
-    async fn test_diagnostics_has_version() {
-        let server = make_server();
-        let response = server.get("/api/diagnostics").await;
-        response.assert_status_ok();
-
-        let body: Value = response.json();
-        let version = body["version"].as_str().unwrap_or("");
-        // Version doit être non-vide et ressembler à un semver (contient au moins un point)
-        assert!(!version.is_empty(), "version field should be present and non-empty");
-        assert!(version.contains('.'), "version should look like a semver string (x.y.z)");
-    }
-
-    // ─── GET /api/config/is-default-password ──────────────
-
-    #[tokio::test]
-    async fn test_is_default_password_returns_true_for_default() {
-        let server = make_server();
-        // La config par défaut a le mot de passe "aurora2024"
-        let response = server.get("/api/config/is-default-password").await;
-        response.assert_status_ok();
-
-        let body: Value = response.json();
-        assert!(body["default"].as_bool().unwrap_or(false),
-            "Default config should report default password");
+#[tokio::test]
+async fn captive_portal_redirects_every_os() {
+    let t = common::env();
+    for probe in ["/hotspot-detect.html", "/library/test/success.html", "/generate_204", "/gen_204",
+                  "/connecttest.txt", "/ncsi.txt", "/redirect", "/canonical.html", "/success.txt"] {
+        let res = t.server.get(probe).await;
+        res.assert_status(StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(res.header("location"), "http://192.168.4.1:8080/", "{}", probe);
     }
 }

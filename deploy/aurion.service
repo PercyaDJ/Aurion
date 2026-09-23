@@ -1,0 +1,27 @@
+[Unit]
+Description=Aurion — caméra autonome d'aurores boréales
+Documentation=https://github.com/PercyaDJ/Aurion
+After=network.target NetworkManager.service systemd-udev-trigger.service
+Wants=network.target
+# No hard dependency on the USB key: the hotspot and the interface must
+# start even when the key is missing (the UI then shows a warning).
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=@AURION_USER@
+WorkingDirectory=/opt/aurion
+Environment=AURION_CONFIG_DIR=/opt/aurion/config
+Environment=RUST_LOG=info
+ExecStart=/opt/aurion/aurion run
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=45
+WatchdogSec=180
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
