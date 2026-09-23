@@ -60,6 +60,7 @@ Aucune vulnérabilité (« vulnerability ») connue ; aucun avis ne concerne le 
 
 | Risque | Niveau | Pourquoi il reste | Piste |
 |---|---|---|---|
+| Image carte SD : mot de passe Wi-Fi d'usine commun (`aurora2024`) jusqu'à ce que l'utilisateur le change | Moyen | choix d'accessibilité pour un public non technique (le mot de passe est imprimé dans le guide) ; l'interface affiche une alerte tant qu'il n'est pas changé. L'installation par script ou paquet génère toujours un mot de passe unique | écran de première connexion qui impose le changement (plan D4) |
 | Pas d'authentification applicative | Moyen | choix d'ergonomie : le Wi-Fi WPA2 fait office de clé | PIN optionnel (plan d'action A3) |
 | `nmcli` reçoit le mot de passe du hotspot en argument pendant une fraction de seconde | Faible | limitation de `nmcli` ; processus root, aucun autre utilisateur sur le Pi | fichier de connexion NetworkManager en 0600 |
 | Hotspot en WPA2-PSK (pas WPA3) | Faible | compatibilité avec tous les téléphones | option WPA3-SAE |

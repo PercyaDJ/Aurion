@@ -16,7 +16,8 @@ Trois possibilités, au choix (détails dans le [README](README.md)) :
 
 | Depuis | Commande |
 |---|---|
-| le Pi, par git (recommandé) | `git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion && sudo ~/aurion/install.sh` |
+| une carte SD neuve (recommandé) | image `aurion-…-raspios-arm64.img.xz` avec Raspberry Pi Imager : voir [docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md) |
+| le Pi, depuis un clone du dépôt | `sudo ./install.sh` |
 | le Pi, paquet Debian | `sudo apt install ./aurion_1.5.0_arm64.deb` |
 | le Pi, avec internet | `curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh \| sudo bash` |
 | un PC Windows | `.\scripts\deploy.ps1 utilisateur@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` |

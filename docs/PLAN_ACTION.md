@@ -7,7 +7,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 
 | ID | Action | Effort | Critère de réussite |
 |---|---|---|---|
-| V1 | Premier essai complet sur le Pi : installation (`git clone -b rpi` puis `sudo ./install.sh`), hotspot, portail captif iOS et Android, preview, darks, nuit courte en mode minuteur (0,5 h) | S | Wi-Fi visible, page ouverte seule, DNG + JPEG + miniatures sur la clé, `sudo journalctl -u aurion` sans erreur |
+| V1 | Premier essai complet sur le Pi : installation avec l'image carte SD (docs/GUIDE_DEMARRAGE.md), hotspot, portail captif iOS et Android, preview, darks, nuit courte en mode minuteur (0,5 h) | S | Wi-Fi visible, page ouverte seule, DNG + JPEG + miniatures sur la clé, `sudo journalctl -u aurion` sans erreur |
 | V2 | Vérifier les options `rpicam-still` utilisées (`--thumb`, `--denoise`, `--awb daylight`, `--raw`) sur votre version de Raspberry Pi OS | S | une capture manuelle avec ces options réussit ; `aurion bench` et le journal indiquent « EXIF thumbnail » |
 | V3 | Test de coupure : débrancher l'alimentation pendant une capture, rebrancher | S | clé réparée au montage, aucune image tronquée, journal lisible jusqu'à la dernière minute |
 | V4 | Recalibrer les seuils de détection (la zone analysée est désormais de 65 % au lieu de 42 %) sur de vraies images d'aurore et de ciel vide | M | aucun faux positif sur une nuit sans aurore, détection d'une aurore faible visible à l'œil |
@@ -59,5 +59,6 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Action | Effort |
 |---|---|---|
 | D1 | Dépôt APT signé (GitHub Pages) : `sudo apt install aurion` et mises à jour par `apt upgrade` | M |
-| D2 | Image carte SD prête à flasher (Raspberry Pi OS + Aurion) construite par la CI | L |
-| D3 | Rendre le dépôt public ou utiliser un jeton en lecture seule dédié pour `git clone -b rpi` | S |
+| D2 | ~~Image carte SD prête à flasher construite par la CI~~ : fait en 1.5.0 (`scripts/build-image.sh`, release automatique) | - |
+| D3 | Rendre le dépôt public (téléchargement de l'image sans compte GitHub pour les utilisateurs) | S |
+| D4 | Réinitialisation du mot de passe Wi-Fi sans regraver la carte (fichier sur la clé USB, ou bouton) | S |

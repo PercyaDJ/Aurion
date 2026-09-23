@@ -10,8 +10,8 @@
 #    (jeton repris de l'URL du clone pour un dépôt privé).
 # 3. Sinon : compile sur le Pi (15 à 30 min, secours).
 #
-# Le plus rapide : cloner directement la branche prête à l'emploi
-#   git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion && sudo ~/aurion/install.sh
+# Le plus simple reste l'image carte SD prête à l'emploi (onglet Releases,
+# docs/GUIDE_DEMARRAGE.md) : aucune commande à taper.
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

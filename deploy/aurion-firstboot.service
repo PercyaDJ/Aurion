@@ -1,0 +1,14 @@
+[Unit]
+Description=Aurion : installation au premier démarrage
+ConditionPathExists=/usr/lib/aurion/firstboot-pending
+After=local-fs.target systemd-udev-settle.service userconfig.service NetworkManager.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/lib/aurion/aurion-firstboot.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -12,7 +12,8 @@ Résultat au 23/09/2026 : **tous les tests passent.**
 | Simulation | `tests/simulation_tests.rs` | 16 | nuits entières en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne ou absente, disque plein, RAW, rechargement à chaud, hotspot, captures façon Pi (JPEG 1280×960 + EXIF), pixels chauds, empilement, verrou d'exposition, classement des aurores |
 | Non-régression | `tests/regression_tests.rs` | 11 | un test par bug corrigé + valeurs de référence de la détection (écart toléré 5 %) |
 | Helper root | `tests/helper_test.sh` | 42 cas | arguments valides et malveillants, commandes générées, crochets ignorés sous sudo |
-| Installeur | `tests/install_test.sh` | 38 contrôles | installation dans une fausse racine, mise à jour, mode paquet, réparation d'une config invalide, désinstallation |
+| Image carte SD | `tests/image_test.sh` | 11 contrôles | fabrication de l'image sur une copie factice de Raspberry Pi OS : partition agrandie, système de fichiers sain, Aurion et l'installation au premier démarrage présents, compte de maintenance, SSH désactivé |
+| Installeur | `tests/install_test.sh` | 39 contrôles | installation dans une fausse racine, mise à jour, mode paquet, réparation d'une config invalide, désinstallation |
 | Interface (bout en bout) | `tests/e2e/ui_test.mjs` | 24 étapes | les 9 pages dans Chromium, format téléphone : aucune erreur JavaScript, réglages enregistrés sur disque, presets, galerie, meilleures aurores, darks, lancement de la nuit |
 | Fumée ARM | manuel (qemu) | - | le binaire arm64 final démarre, sert les pages et l'API, bloque le CSRF |
 | Analyse statique | clippy, shellcheck | - | 0 avertissement en mode `-D warnings` |
@@ -29,6 +30,7 @@ cargo test                                          # 177 tests Rust
 cargo clippy --all-targets -- -D warnings           # analyse statique (ajouter --features rpi)
 bash tests/helper_test.sh                           # helper root
 sudo -E bash tests/install_test.sh target/debug/aurion   # installeur (fausse racine, root requis)
+bash scripts/package.sh && sudo bash tests/image_test.sh  # image carte SD (root, périphériques loop)
 cd tests/e2e && npm install && node ui_test.mjs     # navigateur (après cargo build)
 cargo llvm-cov --summary-only                       # couverture (cargo install cargo-llvm-cov)
 cargo audit                                         # dépendances (cargo install cargo-audit)

@@ -12,6 +12,7 @@
 #   --no-hardening       ne pas optimiser le système pour la carte SD
 #   --no-power-saving    garder Bluetooth, audio et LED actifs
 #   --no-packages        ne pas lancer apt (installation depuis le paquet .deb)
+#   --default-wifi-password  garder le mot de passe Wi-Fi d'usine (image SD grand public)
 #   --no-start           ne pas démarrer le service à la fin
 #
 # Réinstaller par-dessus une version existante conserve la configuration
@@ -35,6 +36,7 @@ COUNTRY="FR"
 HARDENING=1
 POWER_SAVING=1
 PACKAGES=1
+RANDOM_PASSWORD=1
 START=1
 UNINSTALL=0
 
@@ -50,10 +52,11 @@ while [[ $# -gt 0 ]]; do
     --no-hardening) HARDENING=0; shift ;;
     --no-power-saving) POWER_SAVING=0; shift ;;
     --no-packages) PACKAGES=0; shift ;;
+    --default-wifi-password) RANDOM_PASSWORD=0; shift ;;
     --no-start) START=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     -y|--yes) shift ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "Option inconnue : $1" ;;
   esac
 done
@@ -172,9 +175,13 @@ EOF
     [[ -d "$home/Aurion/config/presets" ]] && cp -r "$home/Aurion/config/presets" "$CONFIG_DIR/" || true
   fi
   if [[ ! -f "$cfg" ]]; then
-    WIFI_PASSWORD=$(random_password)
-    sed "s/\"password\": \"aurora2024\"/\"password\": \"$WIFI_PASSWORD\"/" "$DEFAULT_CFG" >"$cfg"
-    NEW_PASSWORD=1
+    if [[ $RANDOM_PASSWORD -eq 1 ]]; then
+      WIFI_PASSWORD=$(random_password)
+      sed "s/\"password\": \"aurora2024\"/\"password\": \"$WIFI_PASSWORD\"/" "$DEFAULT_CFG" >"$cfg"
+      NEW_PASSWORD=1
+    else
+      cp "$DEFAULT_CFG" "$cfg"
+    fi
   fi
   chown -R "$SERVICE_USER:$group" "$CONFIG_DIR"
   chmod 0600 "$cfg"

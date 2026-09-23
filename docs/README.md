@@ -2,6 +2,7 @@
 
 | Document | Contenu |
 |---|---|
+| [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md) | **Commencer ici** : préparer la carte SD, brancher, première nuit (sans connaissance technique) |
 | [AUDIT_CODE.md](AUDIT_CODE.md) | Audit du code : architecture, qualité, couverture, bugs corrigés, dette restante |
 | [AUDIT_SECURITE.md](AUDIT_SECURITE.md) | Audit de sécurité : modèle de menace, failles corrigées, dépendances, risques résiduels |
 | [TESTS.md](TESTS.md) | Tous les types de tests, comment les lancer, résultats |

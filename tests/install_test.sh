@@ -92,6 +92,11 @@ bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --no-hardening >"$
 check "config invalide sauvegardée" '[[ -f "$CFG.invalid" ]]'
 check "nouvelle config valide" '"$BIN" --config-dir "$R/opt/aurion/config" check-config >/dev/null'
 
+echo "▶ image SD : mot de passe d'usine conservé"
+rm -f "$CFG"
+bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --no-packages --default-wifi-password >"$WORK/out3b.log" 2>&1 || { cat "$WORK/out3b.log"; exit 1; }
+check "mot de passe d'usine en mode image" 'grep -q "\"password\": \"aurora2024\"" "$CFG"'
+
 echo "▶ désinstallation"
 bash "$REPO/scripts/install.sh" --uninstall >"$WORK/out4.log" 2>&1 || { cat "$WORK/out4.log"; exit 1; }
 check "service supprimé" '[[ ! -f "$R/etc/systemd/system/aurion.service" ]]'

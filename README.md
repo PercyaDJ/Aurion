@@ -3,33 +3,29 @@
 Caméra autonome de capture d'aurores boréales pour Raspberry Pi 4/5 et HQ Camera (IMX477).
 Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit, puis on récupère les photos.
 
-## Installation sur le Raspberry Pi (clé en main, sans compilation)
+## Installation (aucune connaissance technique nécessaire)
 
-Prérequis : Raspberry Pi OS **64 bits** (Lite ou Desktop), caméra HQ branchée, clé USB en exFAT ou FAT32.
+1. Téléchargez l'image **aurion-…-raspios-arm64.img.xz** dans l'onglet *Releases* de ce dépôt.
+2. Copiez-la sur une carte micro-SD avec **Raspberry Pi Imager** (*Utiliser une image personnalisée*, puis **Non** aux réglages personnalisés).
+3. Branchez la caméra, la carte SD, la clé USB (exFAT), puis l'alimentation.
+4. Après 3 à 5 minutes, rejoignez le Wi-Fi **Aurion** (mot de passe **aurora2024**) : la page s'ouvre toute seule.
 
-**Le plus simple : cloner la branche prête à l'emploi**
-```bash
-git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion
-sudo ~/aurion/install.sh
-```
-Mise à jour : `cd ~/aurion && git pull && sudo ./install.sh`. La branche `rpi` contient le binaire compilé ; elle est
-republiée automatiquement par GitHub Actions à chaque modification de `main`. Dépôt privé : mettre un jeton dans l'URL
-(`https://<JETON>@github.com/...`).
+Guide illustré pas à pas, branchements et dépannage : **[docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md)**.
 
-**Ou le paquet Debian** (onglet *Releases*) : `sudo apt install ./aurion_1.5.0_arm64.deb`
+L'image est construite et publiée automatiquement par GitHub Actions à chaque nouvelle version.
+Mise à jour ensuite depuis le téléphone : *Diagnostics*, *Mise à jour du logiciel*, fichier `aurion` de la nouvelle version.
 
-**Ou depuis un clone de `main`** : `sudo ./install.sh` télécharge l'archive précompilée de la dernière release
-(ou compile sur le Pi en dernier recours).
+<details>
+<summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-**Ou depuis le PC** : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` (Windows),
-`scripts/deploy.sh pi@aurion.local` (Linux / macOS).
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.5.0_arm64.deb`
+- Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.5.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
-À la fin, l'installeur affiche **le nom et le mot de passe du Wi-Fi** (générés pour cet appareil) : notez-les.
-Réinstaller par-dessus une version existante conserve la configuration.
+Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
+</details>
 
-**Mise à jour sans câble ni SSH** : Diagnostics, *Mise à jour du logiciel*, fichier `aurion` de la nouvelle archive.
-
-Guide détaillé et dépannage : [DEPLOY_RPI.md](DEPLOY_RPI.md). Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
+Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
 
 ## Utilisation sur le terrain
 

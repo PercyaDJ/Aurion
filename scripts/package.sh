@@ -34,18 +34,14 @@ install -m 0644 config/default.json "$OUT/config/"
 cat >"$OUT/LISEZMOI.txt" <<TXT
 # Aurion $VERSION pour Raspberry Pi (64 bits)
 
-Prêt à l'emploi, sans compilation. Trois façons d'installer :
+Installation sur un Raspberry Pi OS existant, sans compilation :
 
-1. Cloner cette branche (le plus simple, mises à jour par git pull) :
+    tar xzf $NAME.tar.gz && sudo ./$NAME/install.sh
 
-       git clone -b rpi https://github.com/PercyaDJ/Aurion.git ~/aurion
-       sudo ~/aurion/install.sh
+(ou le paquet : sudo apt install ./aurion_${VERSION}_arm64.deb)
 
-   Mise à jour : cd ~/aurion && git pull && sudo ./install.sh
-
-2. Paquet Debian : sudo apt install ./aurion_${VERSION}_arm64.deb
-
-3. Archive : tar xzf $NAME.tar.gz && sudo ./$NAME/install.sh
+Le plus simple pour une carte SD neuve : l'image aurion-${VERSION}-raspios-arm64.img.xz
+à copier avec Raspberry Pi Imager (voir docs/GUIDE_DEMARRAGE.md).
 
 À la fin, le nom et le mot de passe du Wi-Fi s'affichent : notez-les.
 Mise à jour possible aussi depuis le téléphone : Diagnostics, Mise à jour du
