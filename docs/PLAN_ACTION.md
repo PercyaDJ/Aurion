@@ -16,6 +16,8 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V7 | Vérifier l'heure du Pi 4 après une coupure (présence de `fake-hwclock` sur l'image) | S | l'heure au redémarrage est proche de l'heure de la coupure, sinon documenter l'écart |
 | V8 | Pi 5 en expédition : réveil par l'alarme RTC après l'extinction, consommation éteint (avec et sans `POWER_OFF_ON_HALT=1` dans l'EEPROM), comportement de la batterie quand la charge devient très faible | S | le Pi se rallume seul à l'heure programmée ; consommation mesurée consignée dans GUIDE_EXPEDITION.md |
 | V9 | Pi 4 + module DS3231 (`dtoverlay=i2c-rtc,ds3231`) : `/sys/class/rtc/rtc0` présent, heure juste après une coupure sans téléphone, démarrage automatique en expédition | S | journal « Heure donnée par l'horloge matérielle » ; nuit démarrée seule |
+| V11 | Prise directe (`--immediate`) : comparer `capture_ms` et la consommation avec et sans, vérifier la qualité des DNG | S | option activée par défaut si le gain est réel et les DNG identiques |
+| V12 | Mise à jour depuis GitHub par le partage de connexion d'un iPhone et d'un Android, retour au Wi-Fi Aurion | S | version affichée après reconnexion, retour arrière fonctionnel |
 | V10 | ISO maximal utile pour le RAW : vérifier au-delà de quel ISO le gain devient numérique (sans effet sur le DNG) sur l'IMX477 | S | valeur mesurée ; `iso_max` par défaut ajusté si nécessaire |
 
 ## Énergie (P1)
@@ -23,7 +25,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Action | Effort | Gain attendu |
 |---|---|---|---|
 | E1 | Mesurer le courant (testeur USB) : repos, surveillance, capture, avec et sans le bloc d'économie d'énergie | S | chiffres réels d'autonomie par capacité de batterie |
-| E2 | Option « fréquence CPU réduite » (`arm_freq`) dans l'installeur, si E1 montre un gain | S | moins de consommation et de chauffe |
+| E2 | ~~Fréquence CPU réduite~~ : profil d'énergie de nuit fait en 1.8.0 (processeur au minimum en surveillance) ; reste à mesurer le gain (E1) et, si utile, `arm_freq` en capture | S | moins de consommation et de chauffe |
 | E3 | Planification : Pi éteint en journée et réveil programmé (Pi 5 : RTC intégrée + `rtcwake`) | M | autonomie sur plusieurs nuits |
 | E4 | Mode « économie maximale » : capture seulement en RAW, galerie générée à la demande | S | quelques % de CPU en moins |
 

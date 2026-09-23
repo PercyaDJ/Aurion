@@ -195,6 +195,13 @@
                 <span class="form-hint">Aucun scintillement dans le timelapse ; le lissage d'exposition se fait ensuite en post-traitement.</span>
             </div>
             <div class="form-group">
+                <label class="form-label" style="display:flex;gap:0.5rem;align-items:center;">
+                    <input type="checkbox" id="immediateCapture"> Prise directe, sans préchauffage (expérimental)
+                </label>
+                <span class="form-hint">Peut raccourcir chaque prise et la consommation. Comparez la durée réelle des prises
+                    (journal de nuit, champ capture_ms) avec et sans. Pris en compte au prochain démarrage.</span>
+            </div>
+            <div class="form-group">
                 <label class="form-label">Débruitage du capteur (JPEG uniquement, le RAW reste brut)</label>
                 <select class="form-input" id="ispDenoise">
                     <option value="cdn_hq">Haute qualité</option>
@@ -374,6 +381,7 @@
                 // Photo quality
                 document.getElementById('awbMode').value = cfg.capture.awb || 'daylight';
                 document.getElementById('lockInRun').checked = !!cfg.exposure.lock_in_run;
+                document.getElementById('immediateCapture').checked = !!cfg.capture.immediate;
                 const dn = cfg.capture.denoise || {};
                 document.getElementById('ispDenoise').value = dn.isp_denoise || 'cdn_hq';
                 document.getElementById('hotPixels').checked = !!dn.hot_pixels;
@@ -434,6 +442,7 @@
                 // Photo quality
                 cfg.capture.awb = document.getElementById('awbMode').value;
                 cfg.exposure.lock_in_run = document.getElementById('lockInRun').checked;
+                cfg.capture.immediate = document.getElementById('immediateCapture').checked;
                 cfg.capture.denoise = cfg.capture.denoise || {};
                 cfg.capture.denoise.isp_denoise = document.getElementById('ispDenoise').value;
                 cfg.capture.denoise.hot_pixels = document.getElementById('hotPixels').checked;

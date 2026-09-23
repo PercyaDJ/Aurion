@@ -20,7 +20,7 @@ use crate::ports::camera::CameraPort;
 use crate::ports::clock::ClockPort;
 use crate::ports::network::NetworkApPort;
 use crate::ports::storage::StoragePort;
-use crate::ports::system::SystemPort;
+use crate::ports::system::{PowerProfile, SystemPort};
 use crate::web::{AppState, AutoStart};
 
 /// Orchestrator — autonomous night capture loop.
@@ -321,12 +321,14 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             info!("Orchestrator: SAFE mode → Run directly");
             sm.set_phase(Phase::Run);
             self.set_phase(Phase::Run).await;
+            self.power_profile(PowerProfile::Capture).await;
             self.log("Phase: RUN (SAFE mode — capture toute la nuit)").await;
             if let Some(ref mut sl) = session_logger { sl.log_text("Phase: RUN (SAFE mode)"); }
         } else {
             info!("Orchestrator: FILTER mode → Watch");
             sm.set_phase(Phase::Watch);
             self.set_phase(Phase::Watch).await;
+            self.power_profile(PowerProfile::Watch).await;
             self.log("Phase: WATCH (FILTER mode — attente détection)").await;
             if let Some(ref mut sl) = session_logger { sl.log_text("Phase: WATCH (FILTER mode)"); }
         }
@@ -467,7 +469,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             // Immutable params (mount_point, output_format, time_range) use the snapshot.
             let live_cfg: AppConfig = self.state.config.read().await.clone();
             detector.update_config(&live_cfg.detection);
-            let live_capture_interval = live_cfg.capture.capture_interval_secs.max(1);
+            // 0 = next photo right after this one (the exposure sets the pace)
+            let live_capture_interval = live_cfg.capture.capture_interval_secs;
             let live_watch_interval = live_cfg.capture.watch_interval_secs.max(5);
             drop(live_cfg);
 
@@ -477,9 +480,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             //   → raw_frame saved to storage (no second capture)
             // In JPG mode: capture_jpg() for analysis + save
             // Camera always writes temp files to /tmp, not the USB drive.
+            // Watching the sky (FILTER mode, nothing saved): a JPEG is enough,
+            // no RAW readout / DNG writing for a frame that is thrown away.
+            let wants_raw = current_phase == Phase::Run && config.capture.output_format.captures_raw();
+            let capture_started = tokio::time::Instant::now();
             let (analysis_frame, raw_frame_opt): (CaptureFrame, Option<CaptureFrame>) =
-                match config.capture.output_format {
-                    OutputFormat::Jpg => {
+                match wants_raw {
+                    false => {
                         match self.camera.capture_jpg(&exposure, Path::new("/tmp")).await {
                             Ok(f) => { consecutive_io_errors = 0; (f, None) }
                             Err(e) => {
@@ -501,7 +508,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                             }
                         }
                     }
-                    OutputFormat::RawDng | OutputFormat::RawAndJpg | OutputFormat::JpgAuroraRaw => {
+                    true => {
                         // Single capture: returns (dng_frame, jpg_frame)
                         match self.camera.capture_raw_and_jpg(&exposure, Path::new("/tmp")).await {
                             Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
@@ -525,6 +532,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                         }
                     }
                 };
+            let capture_ms = capture_started.elapsed().as_millis() as u64;
             let frame = &analysis_frame;
 
             // ─── Exposure update (metering on the sky ROI only) ─
@@ -558,6 +566,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     consecutive_hits: consecutive_detections,
                     moon_mask_active: det_result.moon_masked,
                     frame_number: (current_phase == Phase::Run).then_some(frame_number),
+                    capture_ms: Some(capture_ms),
                 };
                 if let Err(e) = logger.log_event(&event) {
                     warn!("Orchestrator: log event failed: {}", e);
@@ -589,6 +598,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                             info!("Orchestrator: aurora CONFIRMED → RUN");
                             sm.set_phase(Phase::Run);
                             self.set_phase(Phase::Run).await;
+                            self.power_profile(PowerProfile::Capture).await;
                             self.log("🌌 Aurore confirmée → capture intensive!").await;
                         }
                     } else {
@@ -617,7 +627,16 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     // (conservative: don't stop on momentary gaps)
 
                     // Wait for configured capture interval (hot-reloadable timelapse pacing)
-                    sleep(Duration::from_secs(live_capture_interval as u64)).await;
+                    if live_capture_interval > 0 {
+                        sleep(Duration::from_secs(live_capture_interval as u64)).await;
+                    } else {
+                        // Back to back. Safety net: a camera answering instantly
+                        // (fault) must not make the loop spin on the CPU.
+                        let spent = capture_started.elapsed();
+                        if spent < Duration::from_secs(1) {
+                            sleep(Duration::from_secs(1) - spent).await;
+                        }
+                    }
                 }
 
                 _ => {
@@ -726,8 +745,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         match raw_frame {
             Some(raw) => {
                 let dng_bytes = if !raw.raw_bytes.is_empty() { &raw.raw_bytes } else { &raw.data };
-                if let Err(e) = self.storage.save_file(&night.image(&format!("{}.dng", base)), dng_bytes).await {
+                let dng_name = format!("{}.dng", base);
+                if let Err(e) = self.storage.save_file(&night.image(&dng_name), dng_bytes).await {
                     error!("Orchestrator: save RAW failed: {}", e);
+                } else if !config.capture.output_format.saves_jpg() {
+                    // RAW only: the gallery still gets a preview of each frame
+                    self.save_thumbnail(night, analysis_frame, &dng_name).await;
                 }
             }
             None if matches!(config.capture.output_format, OutputFormat::RawDng | OutputFormat::RawAndJpg) => {
@@ -922,6 +945,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 AutoStart::Blocked("heure à confirmer : ouvrez cette page une fois depuis le téléphone")
             } else if !key_ok {
                 AutoStart::Blocked("clé USB absente")
+            } else if self.state.online_update_running.load(std::sync::atomic::Ordering::SeqCst) {
+                AutoStart::Blocked("mise à jour du logiciel en cours")
             } else {
                 let left = idle_needed.saturating_sub(self.state.idle_for());
                 if left.is_zero() {
@@ -939,6 +964,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             sleep(Duration::from_secs(1)).await;
         }
         *self.state.auto_start.write().await = AutoStart::Off;
+    }
+
+    /// Apply a night power profile (best effort: never stops the night).
+    async fn power_profile(&self, profile: PowerProfile) {
+        if let Err(e) = self.system.set_power_profile(profile).await {
+            warn!("Orchestrator: power profile {:?}: {}", profile, e);
+        }
     }
 
     /// Set the shared phase (visible to web UI).

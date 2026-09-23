@@ -1,6 +1,6 @@
 # Guide expédition : plusieurs nuits sans toucher à la caméra
 
-Version couverte : **1.7.0**. Pour qui : le photographe qui pose Aurion pour une ou deux semaines et veut récupérer
+Version couverte : **1.8.0**. Pour qui : le photographe qui pose Aurion pour une ou deux semaines et veut récupérer
 des RAW exploitables pour le timelapse, la retouche des pics d'aurore et l'observation.
 
 Analogie : Aurion devient un piège photographique. On le règle une fois, il travaille chaque nuit, et on relève
@@ -39,37 +39,57 @@ dans ces conditions (froid, réglages de l'époque).
 | 1 nuit | environ 14 000 mAh | une batterie de 20 000 mAh |
 | 14 nuits | environ 196 000 mAh | une batterie chargée par nuit (rotation de 2 batteries rechargées le jour), ou recharge solaire |
 
-Aucun réglage logiciel ne fait tenir 14 nuits sur une seule batterie de 20 000 mAh. Ce que fait Aurion :
-- **il ne consomme rien le jour** : il s'éteint à la fin de chaque nuit (Pi 5 : il se rallume seul) ;
-- la nuit : analyse sur la miniature, aucun ré-encodage, Wi-Fi coupé, Bluetooth, audio et LED coupés ;
-- l'arrêt est propre si la batterie faiblit (sous-tension persistante), et la nuit reprend seule quand on la remplace.
+### Ce qui consomme, et ce qu'Aurion coupe
 
-À vérifier sur votre matériel : la consommation du Pi 5 éteint en attente de réveil (PLAN_ACTION.md, V8), et si
-votre batterie coupe sa sortie quand le Pi s'éteint (beaucoup le font : sur Pi 4 c'est sans conséquence, il faut
-de toute façon la rebrancher le soir ; sur Pi 5 il faut une batterie qui garde sa sortie active, ou une
-alimentation qui ne se coupe pas).
+Un Raspberry Pi n'est pas un appareil photo à microcontrôleur : **il ne sait pas s'endormir entre deux photos**.
+Processeur, mémoire, contrôleur USB et régulateurs restent alimentés ; au repos il consomme donc toujours une part
+fixe (à mesurer sur votre montage, tâche E1 du plan d'action). Entre deux photos, Aurion ne fait **rien** : aucun
+calcul, aucune écriture. Ce qui est coupé :
 
-## 3. Stockage : choisir le format selon la durée
+| Poste | Mesure |
+|---|---|
+| Wi-Fi | coupé toute la nuit |
+| Bluetooth, audio, LED | désactivés à l'installation |
+| Port Ethernet | coupé la nuit si aucun câble n'est branché (profil d'énergie) |
+| Processeur en surveillance (*Aurores seulement*) | fréquence minimale ; une petite photo JPEG par minute, **jamais de RAW** tant que l'aurore n'est pas confirmée (2 détections de suite) |
+| Processeur en capture | fréquence normale (l'outil caméra encode chaque image) |
+| Journée | Pi éteint après la nuit (Pi 5 : rallumé seul le soir) |
 
-Tailles estimées (remplacées sur l'accueil par les tailles réelles dès la première nuit) : JPEG environ 4 Mo,
-DNG environ 24 Mo. À une image toutes les 10 s, au plus 360 images par heure (moins en pratique : le temps de pose
-s'ajoute).
+Aucun réglage logiciel ne fait tenir 14 nuits sur une seule batterie de 20 000 mAh.
 
-| Format | Par heure, au plus | Nuit de 10 h | 14 nuits |
+À vérifier sur votre matériel : la consommation en surveillance et en capture (E1), celle du Pi 5 éteint en attente
+de réveil (V8), et si votre batterie coupe sa sortie quand le Pi s'éteint (beaucoup le font : sur Pi 4 c'est sans
+conséquence, il faut de toute façon la rebrancher le soir ; sur Pi 5 il faut une batterie qui garde sa sortie
+active).
+
+## 3. Stockage : RAW seul, photos à la suite
+
+Par défaut, Aurion enregistre **uniquement le RAW** (DNG) et prend les photos **à la suite** : chaque pose dure le
+temps choisi par l'exposition automatique, puis la suivante démarre (pas de rafale, pas de pause). La cadence dépend
+donc de la lumière : poses courtes pendant une aurore forte, longues par ciel sombre.
+
+Correction : dans la version 1.7, j'avais annoncé environ 100 Go par nuit. C'était faux. J'étais parti d'un DNG
+de 24 Mo, d'un JPEG en plus et d'une photo toutes les 10 s sans compter le temps de pose. Avec votre mesure (DNG de
+nuit de 12 à 15 Mo, 14 Mo retenus) et environ 2 s de délai de l'outil caméra par prise (hypothèse, mesurée
+maintenant à chaque photo, champ `capture_ms`) :
+
+| Temps de pose | Photos par heure | Par heure (DNG 14 Mo) | Nuit de 10 h |
 |---|---|---|---|
-| RAW + JPG | environ 10 Go | environ 100 Go | environ 1,4 To |
-| RAW seul | environ 8,6 Go | environ 86 Go | environ 1,2 To |
-| **JPG + RAW des aurores** | environ 1,4 Go, plus 8,6 Go par heure d'aurore | environ 14 Go sans aurore | environ 200 Go, plus les RAW des aurores |
-| JPG seul | environ 1,4 Go | environ 14 Go | environ 200 Go |
+| 20 s (ciel sombre) | environ 160 | environ 2,3 Go | environ 23 Go |
+| 15 s | environ 210 | environ 3 Go | environ 30 Go |
+| 5 s (aurore) | environ 510 | environ 7,2 Go | - |
+| 2 s (aurore forte) | environ 900 | environ 12,6 Go | - |
 
-Pour une expédition, **JPG + RAW des aurores** est le bon compromis :
-- le JPEG de toute la nuit sert au timelapse et à l'observation ;
-- le RAW est enregistré dès qu'une aurore est détectée et **10 minutes après la dernière détection**, pour garder
-  la fin de l'épisode en RAW ;
-- chaque RAW a son JPEG jumeau de même nom.
+Pour 14 nuits en mode *Toute la nuit*, compter quelques centaines de Go (plus s'il y a beaucoup d'aurores fortes) :
+clé ou disque USB de 512 Go conseillé. En mode *Aurores seulement*, l'enregistrement ne commence qu'à la première
+aurore confirmée (puis continue jusqu'à la fin de la nuit) : rien n'est écrit les nuits sans aurore.
 
-L'accueil affiche l'autonomie de la clé en heures **et en nuits**. Clé conseillée : 256 à 512 Go en exFAT.
-Quand la clé est pleine, la nuit s'arrête proprement : aucune photo n'est jamais effacée automatiquement.
+Dès la première nuit, l'accueil calcule l'autonomie de la clé **sur le débit réel** de la dernière nuit (tailles et
+cadence mesurées), en heures et en nuits. Quand la clé est pleine, la nuit s'arrête proprement : aucune photo n'est
+jamais effacée automatiquement.
+
+Pour espacer les photos (moins de fichiers), *Réglages photo*, **Pause entre deux photos**. D'autres formats
+restent disponibles (*Réglages photo*) : RAW + JPG, JPG seul, JPG + RAW des aurores.
 
 ## 4. Récupérer les photos : le workflow
 
@@ -78,7 +98,7 @@ Sur la clé USB (ou dans le ZIP d'une nuit), chaque nuit a son dossier :
 ```text
 sessions/2026-01-15_21-00/
     RAW/        les DNG (import Lightroom, LRTimelapse, Darktable)
-    JPG/        les JPEG de toute la nuit (timelapse rapide)
+    JPG/        les JPEG, si un format avec JPEG est choisi
     thumbs/     miniatures de la galerie
     aurores.csv les images avec aurore, de la plus forte à la plus faible
     event.jsonl un événement par image : heure, ISO, pose, score
@@ -89,8 +109,8 @@ sessions/2026-01-15_21-00/
   C'est la voie la plus rapide pour des dizaines de Go (le Wi-Fi du Pi est fait pour le contrôle et quelques images).
 - **Les plus belles images** : ouvrir `aurores.csv` dans un tableur, la première ligne est l'image la plus forte ;
   les colonnes `jpg` et `raw` donnent les noms des fichiers.
-- **Timelapse rapide depuis les JPEG** (les noms commencent par la date et l'heure, l'ordre alphabétique est l'ordre
-  chronologique) :
+- **Timelapse rapide depuis les JPEG** (formats avec JPEG ; les noms commencent par la date et l'heure, l'ordre
+  alphabétique est l'ordre chronologique) :
 
   ```bash
   ffmpeg -framerate 25 -pattern_type glob -i 'JPG/*.jpg' -c:v libx264 -pix_fmt yuv420p nuit.mp4
@@ -112,9 +132,9 @@ Réglages conseillés pour une expédition (détail dans [GUIDE_PHOTO.md](GUIDE_
 
 ## 6. Check-list avant de partir
 
-1. Carte SD à jour (dernière release), clé USB exFAT vide, 256 Go et plus.
-2. Accueil : **Plusieurs nuits (expédition)** coché, format **JPG + RAW des aurores**, plage horaire adaptée à
-   la latitude et à la saison.
+1. Carte SD à jour (dernière release), clé ou disque USB exFAT vide, 512 Go conseillés.
+2. Accueil : **Plusieurs nuits (expédition)** coché, format **RAW**, plage horaire adaptée à la latitude et à la
+   saison.
 3. Vérifications de l'accueil sans point rouge ; autonomie de la clé en nuits supérieure à la durée du séjour.
 4. Pi 4 : téléphone disponible le soir ou module horloge installé. Pi 5 : pile de l'horloge conseillée.
 5. Une nuit d'essai de 30 minutes en conditions réelles avant de partir.

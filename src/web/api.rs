@@ -18,19 +18,19 @@ use crate::web::AppState;
 /// Crop factor of the IMX477 sensor (Raspberry Pi HQ Camera).
 const HQ_CAMERA_CROP_FACTOR: f64 = 5.6;
 
-type ApiError = (StatusCode, String);
+pub(crate) type ApiError = (StatusCode, String);
 
-fn err(status: StatusCode, msg: impl Into<String>) -> ApiError {
+pub(crate) fn err(status: StatusCode, msg: impl Into<String>) -> ApiError {
     (status, msg.into())
 }
 
 /// Phases during which the night capture is running (camera busy,
 /// clock and binary must not be touched).
-fn capture_in_progress(phase: Phase) -> bool {
+pub(crate) fn capture_in_progress(phase: Phase) -> bool {
     matches!(phase, Phase::Disconnect | Phase::Calibration | Phase::Watch | Phase::Run)
 }
 
-fn require_system_actions(state: &AppState) -> Result<(), ApiError> {
+pub(crate) fn require_system_actions(state: &AppState) -> Result<(), ApiError> {
     if state.system_actions {
         Ok(())
     } else {
@@ -195,9 +195,10 @@ pub fn bytes_per_capture(config: &AppConfig, images: &[(String, u64)]) -> u64 {
             .collect();
         if v.is_empty() { fallback } else { v.iter().sum::<u64>() / v.len() as u64 }
     };
-    // Typical: JPEG ~4 MB, DNG 12.3 Mpx 16-bit ~24 MB (replaced by real sizes after the first night)
+    // Typical: JPEG ~4 MB, night DNG 12 to 15 MB (field measurement);
+    // replaced by the real sizes after the first night.
     let jpg = avg("jpg", 4_000_000);
-    let dng = avg("dng", 24_000_000);
+    let dng = avg("dng", 14_000_000);
     use crate::core::models::OutputFormat::*;
     let thumb = 20_000;
     match config.capture.output_format {
@@ -210,10 +211,14 @@ pub fn bytes_per_capture(config: &AppConfig, images: &[(String, u64)]) -> u64 {
     }
 }
 
-/// Hours of capture the free space allows (SAFE mode: one frame every
-/// interval + exposure).
+/// Seconds `rpicam-still` needs beyond the exposure (camera start, files):
+/// assumption until the first night gives the real throughput.
+const CAPTURE_OVERHEAD_SECS: f64 = 2.0;
+
+/// Hours of capture the free space allows without any measured night
+/// (SAFE mode: one frame every pause + longest exposure + overhead).
 pub fn capacity_hours(config: &AppConfig, free_bytes: u64, bytes_per_frame: u64) -> f64 {
-    let period = config.capture.capture_interval_secs as f64 + config.exposure.shutter_max_us as f64 / 1e6;
+    let period = config.capture.capture_interval_secs as f64 + config.exposure.shutter_max_us as f64 / 1e6 + CAPTURE_OVERHEAD_SECS;
     let frames = free_bytes as f64 / bytes_per_frame.max(1) as f64;
     round1(frames * period / 3600.0)
 }
@@ -266,7 +271,13 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         })
         .await
         .unwrap_or_default();
-        let hours = capacity_hours(&config, free, bytes_per_capture(&config, &images));
+        // Measured throughput of the last night first, model otherwise
+        let m2 = mount.clone();
+        let rate = tokio::task::spawn_blocking(move || crate::web::gallery::recent_night_rate(&m2)).await.ok().flatten();
+        let hours = match rate {
+            Some(bytes_per_hour) if bytes_per_hour > 0.0 => round1(free as f64 / bytes_per_hour),
+            _ => capacity_hours(&config, free, bytes_per_capture(&config, &images)),
+        };
         capacity = Some(hours);
         let free_gb = free as f64 / 1e9;
         if hours < planned {
@@ -472,6 +483,9 @@ pub async fn update_config(
     // Substitute it BEFORE validating (the mask itself is too short).
     if update.network.password == PASSWORD_MASK {
         update.network.password = config.network.password.clone();
+    }
+    if update.online_update.password == PASSWORD_MASK {
+        update.online_update.password = config.online_update.password.clone();
     }
     update.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -870,7 +884,7 @@ pub async fn get_diagnostics(State(_state): State<AppState>) -> Json<Diagnostics
 
     let now = chrono::Local::now();
     Json(DiagnosticsResponse {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: crate::VERSION.to_string(),
         platform,
         hostname,
         uptime,
@@ -1212,36 +1226,52 @@ pub async fn system_update(
         }
     }
     let data = binary.filter(|d| !d.is_empty()).ok_or_else(|| err(StatusCode::BAD_REQUEST, "Aucun binaire reçu"))?;
-    validate_update_binary(&data).map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    install_binary(&state, &data).await.map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    Ok("Mise à jour appliquée. Rechargez la page dans 15 secondes.".to_string())
+}
 
-    let target = match &state.update.target {
-        Some(t) => t.clone(),
-        None => std::env::current_exe()
-            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Binaire courant introuvable: {}", e)))?,
-    };
+/// Check, stage, try and install a new binary (upload or online update).
+/// The previous binary is kept as `.prev` (rollback). Returns the version
+/// printed by the new binary; the service restarts 2 s later.
+pub(crate) async fn install_binary(state: &AppState, data: &[u8]) -> Result<String, String> {
+    validate_update_binary(data)?;
+    let target = update_target(state)?;
     let staged = target.with_extension("new");
     let backup = target.with_extension("prev");
 
-    crate::core::config::write_atomic(&staged, &data, 0o755)
-        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Écriture impossible: {}", e)))?;
+    crate::core::config::write_atomic(&staged, data, 0o755).map_err(|e| format!("Écriture impossible: {}", e))?;
 
     // Refuse a binary that does not even start.
     let staged_str = staged.to_string_lossy().to_string();
-    if let Err(e) = crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
-        let _ = std::fs::remove_file(&staged);
-        return Err(err(StatusCode::BAD_REQUEST, format!("Le nouveau binaire ne démarre pas: {}", e)));
-    }
+    let version = match crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
+        Ok(v) => v.trim().to_string(),
+        Err(e) => {
+            let _ = std::fs::remove_file(&staged);
+            return Err(format!("Le nouveau binaire ne démarre pas: {}", e));
+        }
+    };
 
     if target.exists() {
-        std::fs::copy(&target, &backup)
-            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Sauvegarde de l'ancien binaire impossible: {}", e)))?;
+        std::fs::copy(&target, &backup).map_err(|e| format!("Sauvegarde de l'ancien binaire impossible: {}", e))?;
     }
-    std::fs::rename(&staged, &target)
-        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Remplacement impossible: {}", e)))?;
+    std::fs::rename(&staged, &target).map_err(|e| format!("Remplacement impossible: {}", e))?;
 
-    tracing::info!("OTA: {} remplacé ({} octets), ancienne version dans {:?}", target.display(), data.len(), backup);
-    state.add_log(format!("Mise à jour installée ({} Mo). Redémarrage…", data.len() / 1_048_576)).await;
+    tracing::info!("OTA: {} remplacé ({} octets, {}), ancienne version dans {:?}", target.display(), data.len(), version, backup);
+    state.add_log(format!("Mise à jour installée : {} ({} Mo). Redémarrage…", version, data.len() / 1_048_576)).await;
+    schedule_restart(state);
+    Ok(version)
+}
 
+/// Binary replaced by updates (the running executable in production).
+pub(crate) fn update_target(state: &AppState) -> Result<std::path::PathBuf, String> {
+    match &state.update.target {
+        Some(t) => Ok(t.clone()),
+        None => std::env::current_exe().map_err(|e| format!("Binaire courant introuvable: {}", e)),
+    }
+}
+
+/// Exit 2 s later so that systemd starts the new binary (`Restart=always`).
+pub(crate) fn schedule_restart(state: &AppState) {
     if state.update.restart {
         tokio::spawn(async {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -1249,7 +1279,6 @@ pub async fn system_update(
             std::process::exit(0);
         });
     }
-    Ok("Mise à jour appliquée. Rechargez la page dans 15 secondes.".to_string())
 }
 
 #[cfg(test)]
@@ -1300,12 +1329,12 @@ mod tests {
     fn capacity_estimation() {
         let mut c = AppConfig::default();
         c.capture.output_format = crate::core::models::OutputFormat::RawDng;
-        c.capture.capture_interval_secs = 10;
-        c.exposure.shutter_max_us = 20_000_000;
-        // No image yet: typical DNG size (24 MB); one frame every 30 s
+        c.capture.capture_interval_secs = 0;
+        c.exposure.shutter_max_us = 28_000_000;
+        // No image yet: typical night DNG (14 MB); back to back, 28 s + 2 s overhead
         let per = bytes_per_capture(&c, &[]);
-        assert_eq!(per, 24_000_000);
-        let hours = capacity_hours(&c, 24_000_000 * 120, per);
+        assert_eq!(per, 14_000_000);
+        let hours = capacity_hours(&c, 14_000_000 * 120, per);
         assert!((hours - 1.0).abs() < 0.05, "{}", hours);
         // Real sizes from the key replace the estimate
         let imgs = vec![("aurora_x.dng".to_string(), 10_000_000), ("aurora_y.dng".to_string(), 12_000_000)];

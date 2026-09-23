@@ -17,9 +17,9 @@
   "capture": {
     "watch_interval_secs": 60,
     "preview_interval_secs": 30,
-    "output_format": "RawAndJpg",
+    "output_format": "RawDng",
     "focal_length_mm": 2.7,
-    "capture_interval_secs": 10
+    "capture_interval_secs": 0
   },
   "time_range": {
     "start": "21:00:00",

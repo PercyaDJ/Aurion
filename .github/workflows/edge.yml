@@ -1,0 +1,63 @@
+name: Edge
+
+# Development channel for fast trial and error: on every push to main, the
+# arm64 binary is rebuilt and published in the "edge" pre-release. The Pi
+# installs it from the phone (Diagnostics, "Mettre à jour depuis GitHub",
+# channel "Développement") in a few minutes, without a computer.
+# The stable channel (/releases/latest) is not affected.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: edge
+  cancel-in-progress: true
+
+jobs:
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Binaire Raspberry Pi (arm64, statique)
+        id: build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          export AURION_BUILD="$v-edge.${GITHUB_SHA::7}"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
+            cargo build --release --locked --features rpi --target aarch64-unknown-linux-musl
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-musl/release/aurion dist/aurion-arm64
+          (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256)
+          echo "build=$AURION_BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Déplacer le tag edge sur ce commit
+        run: |
+          git tag -f edge "$GITHUB_SHA"
+          git push -f origin refs/tags/edge
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: edge
+          name: Développement (${{ steps.build.outputs.build }})
+          prerelease: true
+          make_latest: false
+          body: |
+            Version de développement **${{ steps.build.outputs.build }}**, reconstruite à chaque modification de `main`.
+            Installation depuis le téléphone : *Diagnostics*, *Mettre à jour depuis GitHub*, canal *Développement*.
+            Retour à la version précédente en un geste sur la même page. Pour une nuit importante, préférez la
+            dernière version stable.
+          files: |
+            dist/aurion-arm64
+            dist/aurion-arm64.sha256

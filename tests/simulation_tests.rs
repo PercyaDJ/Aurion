@@ -631,3 +631,53 @@ async fn pi5_sleeps_until_the_night_then_resumes_by_itself() {
     assert_eq!(night.system.shutdown_count(), 2);
     assert!(!night.state.paths.night_marker.exists());
 }
+
+// ─── RAW only, back to back, watching without RAW ───────────
+
+#[tokio::test(start_paused = true)]
+async fn raw_only_back_to_back_follows_the_exposure_time() {
+    let (night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawDng;
+        c.capture.capture_interval_secs = 0;
+        c.exposure.shutter_min_us = 5_000_000;
+        c.exposure.shutter_max_us = 5_000_000; // fixed 5 s exposure
+        c.time_range.duration_hours = Some(0.25);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark).with_real_exposure(), storage, clock()).await;
+
+    let files = images(&night.capture);
+    assert!(files.iter().all(|f| f.ends_with(".dng")), "RAW only: no JPEG saved");
+    // 15 min of 5 s exposures back to back: about 180 frames, no pause
+
+    assert!((170..=181).contains(&files.len()), "{} frames", files.len());
+    assert!(thumb_path(&night.capture, &files[0]).exists(), "a RAW-only night still has gallery previews");
+    let events = session_events(&night.capture);
+    let run: Vec<_> = events.iter().filter(|e| e["phase"] == "Run").collect();
+    assert!(run.iter().all(|e| e["capture_ms"].as_u64().unwrap() >= 5000), "real capture time logged");
+}
+
+#[tokio::test(start_paused = true)]
+async fn watching_the_sky_never_captures_raw() {
+    let (night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawDng;
+        c.detection.detection_capture_enabled = true; // FILTER: watch, 1 frame / min
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    let camera = CameraMock::with_pattern(SkyPattern::Dark);
+    let raw_calls = camera.raw_calls();
+    run_night(&night, camera, storage, clock()).await;
+    assert_eq!(raw_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no RAW readout while nothing is saved");
+    assert!(images(&night.capture).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn night_power_profiles_follow_the_phase() {
+    use aurion::ports::system::PowerProfile;
+    let (night, _) = setup(|c| c.detection.detection_capture_enabled = true);
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Intermittent), storage, clock()).await;
+    let p = night.system.profiles();
+    assert_eq!(p.first(), Some(&PowerProfile::Watch), "watching: CPU at minimum");
+    assert!(p.contains(&PowerProfile::Capture), "aurora confirmed: normal CPU for the captures");
+}

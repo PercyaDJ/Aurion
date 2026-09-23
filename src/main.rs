@@ -7,7 +7,7 @@ use aurion::core::config::{AppConfig, DEFAULT_WIFI_PASSWORD};
 use aurion::web::{AppState, Paths};
 
 #[derive(Parser)]
-#[command(name = "aurion", version, about = "Aurion — Autonomous aurora capture camera")]
+#[command(name = "aurion", version = aurion::VERSION, about = "Aurion — Autonomous aurora capture camera")]
 struct Cli {
     /// Configuration directory (default: $AURION_CONFIG_DIR or ./config)
     #[arg(long, global = true)]
@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         // ─── RUN: production mode ───────────────────────────
         Commands::Run => {
-            tracing::info!("Aurion {}: production mode (config: {})", env!("CARGO_PKG_VERSION"), paths.config_file.display());
+            tracing::info!("Aurion {}: production mode (config: {})", aurion::VERSION, paths.config_file.display());
 
             let mut config = load_config(&paths);
             // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
@@ -151,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
                 aurion::adapters::rpi::CameraRpi::new()
                     .with_isp_denoise(&cfg.capture.denoise.isp_denoise)
                     .with_awb(&cfg.capture.awb)
+                    .with_immediate(cfg.capture.immediate)
             };
             #[cfg(not(feature = "rpi"))]
             let camera = aurion::adapters::pc::CameraMock::synthetic();

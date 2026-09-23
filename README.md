@@ -13,14 +13,16 @@ Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit
 Guide illustré pas à pas, branchements et dépannage : **[docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md)**.
 
 L'image est construite et publiée automatiquement par GitHub Actions à chaque nouvelle version.
-Mise à jour ensuite depuis le téléphone : *Diagnostics*, *Mise à jour du logiciel*, fichier `aurion` de la nouvelle version.
+Mise à jour ensuite depuis le téléphone, sans ordinateur : *Diagnostics*, **Mettre à jour depuis GitHub** (version stable
+ou de développement, par le partage de connexion du téléphone), et retour arrière en un geste.
+Boucle essai / correction : [docs/GUIDE_DEVELOPPEMENT.md](docs/GUIDE_DEVELOPPEMENT.md).
 
 <details>
 <summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.7.0_arm64.deb`
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.8.0_arm64.deb`
 - Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.7.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.8.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
 Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>
@@ -117,10 +119,10 @@ Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Princip
 | detection | `detection_capture_enabled` | false | false = SAFE, true = FILTER |
 | | `roi_top_percent` | 65 | part haute de l'image analysée (50 à 99) |
 | | `consecutive_required` | 2 | détections consécutives pour confirmer |
-| capture | `output_format` | RawAndJpg | `Jpg`, `RawDng`, `RawAndJpg` ou `JpgAuroraRaw` (RAW pendant les aurores) |
+| capture | `output_format` | RawDng | `RawDng` (RAW seul), `RawAndJpg`, `Jpg` ou `JpgAuroraRaw` (RAW pendant les aurores) |
 | | `awb` | daylight | balance des blancs fixe (pas de scintillement en timelapse) |
 | | `denoise.stack_frames` | 0 | JPEG empilé toutes les N images (0 = non) |
-| | `capture_interval_secs` | 10 | cadence du timelapse |
+| | `capture_interval_secs` | 0 | pause entre deux photos (0 = à la suite, la pose donne la cadence) |
 | time_range | `start` / `end` | 21:00 / 06:00 | plage horaire (heure locale) |
 | | `duration_hours` | null | minuteur, prioritaire sur la plage |
 | network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |

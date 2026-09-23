@@ -165,6 +165,7 @@ mod tests {
             consecutive_hits: 0,
             moon_mask_active: false,
             frame_number: None,
+            capture_ms: None,
         };
 
         logger.log_event(&event).unwrap();
@@ -201,6 +202,7 @@ mod tests {
                 consecutive_hits: 2,
                 moon_mask_active: false,
                 frame_number: Some(0),
+                capture_ms: None,
             };
             // Only 1 line (below flush threshold of 10) — relies on Drop to flush
             logger.log_event(&event).unwrap();

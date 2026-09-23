@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.7.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.8.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -97,7 +97,8 @@ Les journaux système sont en RAM : pour garder le journal d'une nuit, se fier �
 
 | Méthode | Procédure | Retour arrière |
 |---|---|---|
-| Interface | *Diagnostics*, *Mise à jour du logiciel*, choisir le fichier `aurion` de la release | l'ancienne version reste dans `/opt/aurion/aurion.prev` |
+| Depuis GitHub (sans ordinateur) | *Diagnostics*, *Mettre à jour depuis GitHub* : canal stable ou développement, partage de connexion du téléphone | bouton *Revenir à la version précédente* |
+| Par fichier | *Diagnostics*, *Mise à jour par fichier*, fichier `aurion-arm64` de la release | idem (`/opt/aurion/aurion.prev`) |
 | Paquet | `sudo apt install ./aurion_X.Y.Z_arm64.deb` | réinstaller le paquet précédent |
 | Script | `sudo ./install.sh` depuis un clone à jour | idem |
 

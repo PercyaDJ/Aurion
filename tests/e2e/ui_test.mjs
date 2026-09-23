@@ -270,9 +270,12 @@ try {
     assert(!fs.existsSync(path.join(nightDir, 'thumbs/aurora_20260305_213100_00000.jpg')), 'thumbnail still present');
   });
 
-  await step('diagnostics : version affichée', async () => {
+  await step('diagnostics : version affichée et mise à jour depuis GitHub', async () => {
     await page.goto(base + '/diagnostics.html');
-    await page.waitForFunction(() => document.getElementById('sysVersion').textContent.startsWith('v'));
+    await page.waitForFunction(() => /^\d+\.\d+\.\d+/.test(document.getElementById('sysVersion').textContent));
+    await page.waitForFunction(() => /^\d+\.\d+\.\d+/.test(document.getElementById('currentVersion').textContent));
+    assert(await page.locator('#updChannel option[value=dev]').count() === 1, 'dev channel offered');
+    assert(await page.locator('#rollbackBtn').isHidden(), 'no previous version yet');
   });
 
   await step('portail captif : redirection vers l\'interface', async () => {
@@ -280,7 +283,7 @@ try {
     assert(res.status === 307 && res.headers.get('location').startsWith('http://192.168.4.1:'), 'status ' + res.status);
   });
 
-  await step('accueil : mode expédition et format RAW pendant les aurores', async () => {
+  await step('accueil : mode expédition et RAW par défaut', async () => {
     await page.goto(base + '/index.html');
     await page.waitForSelector('#checks [data-check=usb]');
     await page.check('#expeditionToggle');
@@ -293,7 +296,8 @@ try {
     await page.waitForSelector('#autoStartCard[hidden]', { state: 'attached' });
     saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
     assert(saved.expedition.enabled === false, 'expedition off');
-    assert(await page.locator('#nightFormat option[value=JpgAuroraRaw]').count() === 1, 'format offered');
+    assert(await page.inputValue('#nightFormat') === 'RawDng', 'RAW only by default');
+    assert((await page.locator('#nightFormat option').first().textContent()).includes('conseillé'), 'RAW recommended first');
   });
 
   await step('lancement de la nuit depuis l\'accueil (mode, durée, format)', async () => {

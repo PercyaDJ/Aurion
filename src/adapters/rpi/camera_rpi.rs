@@ -17,6 +17,8 @@ pub struct CameraRpi {
     isp_denoise: String,
     /// `rpicam-still --awb` mode
     awb: String,
+    /// `rpicam-still --immediate` (experimental)
+    immediate: bool,
 }
 
 /// Width used when a capture has no EXIF thumbnail and must be decoded.
@@ -43,7 +45,7 @@ impl CameraRpi {
             error!("CameraRpi: rpicam-still NOT found — camera unavailable");
         }
 
-        Self { connected, isp_denoise: "cdn_hq".into(), awb: "daylight".into() }
+        Self { connected, isp_denoise: "cdn_hq".into(), awb: "daylight".into(), immediate: false }
     }
 
     /// Choose the white balance mode (validated by the config).
@@ -51,6 +53,12 @@ impl CameraRpi {
         if crate::core::config::AWB_MODES.contains(&mode) {
             self.awb = mode.to_string();
         }
+        self
+    }
+
+    /// Capture without preview phase (experimental, see `CaptureConfig::immediate`).
+    pub fn with_immediate(mut self, on: bool) -> Self {
+        self.immediate = on;
         self
     }
 
@@ -94,8 +102,12 @@ impl CameraRpi {
             cmd.arg("--raw");
         }
 
-        // Minimal warmup time (ms) — just enough for the ISP pipeline
-        cmd.arg("-t").arg("100");
+        if self.immediate {
+            cmd.arg("--immediate");
+        } else {
+            // Minimal warmup time (ms) — just enough for the ISP pipeline
+            cmd.arg("-t").arg("100");
+        }
 
         cmd
     }

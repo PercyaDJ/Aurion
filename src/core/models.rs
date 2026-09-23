@@ -238,6 +238,10 @@ pub struct SessionEvent {
     /// written to the key. Lets the gallery rank images by aurora strength.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame_number: Option<u64>,
+    /// Wall time of the capture (camera start, exposure, files), to measure
+    /// the real overhead of `rpicam-still` beyond the exposure itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_ms: Option<u64>,
 }
 
 // ─── Time Range ────────────────────────────────────────────

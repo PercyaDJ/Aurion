@@ -29,6 +29,13 @@ impl SystemPort for SystemRpi {
             .map_err(SystemError::ShutdownFailed)
     }
 
+    async fn set_power_profile(&self, profile: crate::ports::system::PowerProfile) -> Result<(), SystemError> {
+        crate::sys::helper(&["power-profile", profile.as_str()], None, Duration::from_secs(10))
+            .await
+            .map(|_| ())
+            .map_err(SystemError::ShutdownFailed)
+    }
+
     fn can_wake(&self) -> bool {
         crate::sys::rtc_info().wake_capable
     }

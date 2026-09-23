@@ -102,7 +102,7 @@ if [[ $APT -eq 1 ]]; then
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base
+    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base curl
     command -v rpicam-still >/dev/null || apt-get install -y --no-install-recommends rpicam-apps-lite || apt-get install -y --no-install-recommends rpicam-apps
     apt-get clean
     rm -rf /var/lib/apt/lists/*

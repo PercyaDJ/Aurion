@@ -56,6 +56,17 @@ pub struct AppConfig {
     /// Several nights in a row without anyone touching the camera.
     #[serde(default)]
     pub expedition: ExpeditionConfig,
+    /// Wi-Fi used for updates from GitHub (phone hotspot or home Wi-Fi).
+    #[serde(default)]
+    pub online_update: OnlineUpdateConfig,
+}
+
+/// Network the Pi joins for a few minutes to download an update.
+/// Empty SSID: use the current connection (Pi already on the home Wi-Fi).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct OnlineUpdateConfig {
+    pub ssid: String,
+    pub password: String,
 }
 
 /// Expedition mode: at power-on the night starts on its own once nobody has
@@ -174,6 +185,10 @@ pub struct CaptureConfig {
     /// the DNG "as shot" white balance is identical across the sequence.
     #[serde(default = "default_awb")]
     pub awb: String,
+    /// Experimental: `rpicam-still --immediate` (no preview phase before the
+    /// capture). Compare `capture_ms` in event.jsonl with and without it.
+    #[serde(default)]
+    pub immediate: bool,
 }
 
 fn default_awb() -> String { "daylight".into() }
@@ -181,7 +196,9 @@ fn default_awb() -> String { "daylight".into() }
 /// Accepted values for `rpicam-still --awb`.
 pub const AWB_MODES: [&str; 7] = ["daylight", "cloudy", "auto", "incandescent", "tungsten", "fluorescent", "indoor"];
 
-fn default_capture_interval() -> u32 { 10 }
+/// Pause between two photos during the capture: 0 = back to back (the
+/// exposure itself sets the pace, as in a classic timelapse).
+fn default_capture_interval() -> u32 { 0 }
 
 /// Noise reduction settings (see `core::denoise`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -307,6 +324,7 @@ impl AppConfig {
             web: self.web.clone(),
             preset_name: preset_name.to_string(),
             expedition: self.expedition.clone(),
+            online_update: self.online_update.clone(),
         }
     }
 
@@ -315,6 +333,9 @@ impl AppConfig {
     pub fn masked(&self) -> AppConfig {
         let mut cfg = self.clone();
         cfg.network.password = PASSWORD_MASK.to_string();
+        if !cfg.online_update.password.is_empty() {
+            cfg.online_update.password = PASSWORD_MASK.to_string();
+        }
         cfg
     }
 
@@ -381,11 +402,6 @@ impl AppConfig {
         }
 
         // ─── Capture ─────────────────────────────────────────
-        if self.capture.capture_interval_secs < 1 {
-            return Err(ConfigError::ValidationError(
-                "L'intervalle de capture doit être >= 1 seconde".into(),
-            ));
-        }
         if self.capture.watch_interval_secs < 5 {
             return Err(ConfigError::ValidationError(
                 "L'intervalle d'observation doit être >= 5 secondes".into(),
@@ -451,6 +467,10 @@ impl AppConfig {
         validate::validate_wpa_passphrase(&self.network.password, MIN_WIFI_PASSWORD_LEN)
             .map_err(ConfigError::ValidationError)?;
         validate::validate_channel(self.network.channel).map_err(ConfigError::ValidationError)?;
+        if !self.online_update.ssid.is_empty() {
+            validate::validate_ssid(&self.online_update.ssid).map_err(ConfigError::ValidationError)?;
+            validate::validate_wpa_passphrase(&self.online_update.password, 8).map_err(ConfigError::ValidationError)?;
+        }
 
         // ─── Web ─────────────────────────────────────────────
         if self.web.port < 1024 {
@@ -513,9 +533,10 @@ impl Default for AppConfig {
                 preview_interval_secs: 30,
                 output_format: OutputFormat::RawDng,
                 focal_length_mm: 2.7,
-                capture_interval_secs: 10,
+                capture_interval_secs: 0,
                 denoise: DenoiseConfig::default(),
                 awb: default_awb(),
+                immediate: false,
             },
             time_range: TimeRangeConfig {
                 start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
@@ -535,6 +556,7 @@ impl Default for AppConfig {
             web: WebConfig { port: 8080 },
             preset_name: "FullDark".into(),
             expedition: ExpeditionConfig::default(),
+            online_update: OnlineUpdateConfig::default(),
         }
     }
 }
@@ -655,10 +677,11 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_capture_interval() {
-        let mut config = AppConfig::default();
-        config.capture.capture_interval_secs = 0; // Must be >= 1
-        assert!(config.validate().is_err());
+    fn test_back_to_back_capture_is_the_default() {
+        let config = AppConfig::default();
+        assert_eq!(config.capture.capture_interval_secs, 0, "no pause: the exposure sets the pace");
+        assert_eq!(config.capture.output_format, OutputFormat::RawDng, "RAW only by default");
+        assert!(config.validate().is_ok());
     }
 
     #[test]

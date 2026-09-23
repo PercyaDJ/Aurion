@@ -53,6 +53,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static binfmt-support parted mtools
           bash scripts/package.sh
+          # Bare binary: update from the phone (Diagnostics, "depuis GitHub")
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          cp "dist/aurion-$v-rpi-arm64/aurion" dist/aurion-arm64
+          (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256)
 
       - name: Image carte SD (Raspberry Pi OS Lite 64 bits + Aurion)
         if: steps.version.outputs.skip == 'false'
@@ -78,10 +82,11 @@ jobs:
             Guide pas à pas : docs/GUIDE_DEMARRAGE.md
 
             Autres fichiers : paquet `.deb` (`sudo apt install ./aurion_*.deb`) et archive `.tar.gz`
-            pour une installation sur un Raspberry Pi OS existant, fichier `aurion` pour la mise à jour
-            depuis le téléphone (dans l'archive).
+            pour une installation sur un Raspberry Pi OS existant. `aurion-arm64` : utilisé par la mise à jour
+            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*).
           files: |
             dist/*.img.xz
             dist/*.tar.gz
             dist/*.deb
             dist/*.sha256
+            dist/aurion-arm64

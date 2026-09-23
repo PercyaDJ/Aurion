@@ -609,10 +609,14 @@
                         <div class="gallery-item${selectedClass}" data-filename="${img.filename}"
                              onclick="handleItemClick(event, '${img.filename}', '${img.size_display}', '${img.modified}', true)">
                             <div class="select-checkbox">✓</div>
-                            <div class="raw-placeholder">
+                            <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
+                                 onload="if (!this.naturalWidth) this.onerror()"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="raw-placeholder" style="display:none;">
                                 <span class="raw-icon">🎞️</span>
                                 <span>RAW</span>
                             </div>
+                            <span class="raw-badge">RAW</span>
                             <div class="item-info">${img.filename}</div>
                         </div>`;
                 } else {

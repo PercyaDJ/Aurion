@@ -41,7 +41,7 @@ rejet des valeurs extrêmes : avions et satellites disparaissent. Désactivé pa
 
 | Réglage | Recommandation | Pourquoi |
 |---|---|---|
-| Format | RAW + JPG (défaut) | DNG pour la retouche, JPEG pour la galerie et le montage rapide |
+| Format | RAW seul (défaut) | DNG pour la retouche et le timelapse ; les miniatures de la galerie sont gardées. RAW + JPG si vous voulez aussi des JPEG |
 | Balance des blancs | Lumière du jour (défaut) | identique sur toute la séquence : pas de scintillement de couleur, même balance « as shot » dans tous les DNG |
 | Verrouiller l'exposition pendant la capture | activé pour une séquence continue | zéro scintillement ; la rampe jour/nuit se fait ensuite (LRTimelapse, Lightroom) |
 | Intervalle | 5 à 10 s pour une aurore active, 20 à 30 s sinon | fluidité contre place disque |

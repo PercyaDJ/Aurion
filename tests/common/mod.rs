@@ -50,6 +50,11 @@ pub fn test_config(capture: &Path) -> AppConfig {
 }
 
 pub fn env_with(config_fn: impl FnOnce(&mut AppConfig)) -> TestEnv {
+    env_custom(config_fn, |_| {})
+}
+
+/// Test environment with custom update settings (online update tests).
+pub fn env_custom(config_fn: impl FnOnce(&mut AppConfig), update_fn: impl FnOnce(&mut UpdateSettings)) -> TestEnv {
     let dir = tempfile::tempdir().unwrap();
     let capture = dir.path().join("capture");
     std::fs::create_dir_all(&capture).unwrap();
@@ -66,7 +71,11 @@ pub fn env_with(config_fn: impl FnOnce(&mut AppConfig)) -> TestEnv {
 
     let state = AppState::with_paths(config, paths)
         .with_system_actions(false)
-        .with_update_settings(UpdateSettings { target: Some(dir.path().join("bin/aurion")), restart: false });
+        .with_update_settings({
+            let mut u = UpdateSettings { target: Some(dir.path().join("bin/aurion")), restart: false, ..Default::default() };
+            update_fn(&mut u);
+            u
+        });
     let server = TestServer::new(aurion::web::build_router(state.clone())).unwrap();
     TestEnv { dir, state, server }
 }

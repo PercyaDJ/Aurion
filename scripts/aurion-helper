@@ -43,6 +43,8 @@ RUN_DIR=/run/aurion
 # Dry-run (tests): never write into the real /run
 [[ "$DRYRUN" == "1" ]] && RUN_DIR="${AURION_RUN_DIR:-${TMPDIR:-/tmp}/aurion-helper-dryrun.$$}"
 AP_CON=aurion-ap
+# Bumped when commands change: the application checks it (Diagnostics).
+HELPER_VERSION=2
 RTC_DIR=/sys/class/rtc/rtc0
 # Dry-run (tests): a fake RTC folder, never the real /sys
 [[ "$DRYRUN" == "1" ]] && RTC_DIR="${AURION_FAKE_RTC:-/nonexistent/aurion-rtc}"
@@ -307,6 +309,44 @@ cmd_shutdown() {
   run systemctl poweroff
 }
 
+# Night power profile. "watch": CPU at its lowest frequency (one small
+# photo per minute, nothing to compute in between); "capture": normal
+# frequency (the camera tool encodes each frame); both switch the Ethernet
+# port off when no cable is plugged. "day": everything back to normal.
+CPUFREQ_DIR=/sys/devices/system/cpu/cpufreq
+NET_DIR=/sys/class/net
+if [[ "$DRYRUN" == "1" ]]; then
+  CPUFREQ_DIR="${AURION_FAKE_CPUFREQ:-/nonexistent/aurion-cpufreq}"
+  NET_DIR="${AURION_FAKE_NET:-/nonexistent/aurion-net}"
+fi
+
+set_governor() {
+  local gov="$1" policy
+  for policy in "$CPUFREQ_DIR"/policy*; do
+    [[ -w "$policy/scaling_governor" ]] || continue
+    grep -qw "$gov" "$policy/scaling_available_governors" 2>/dev/null || continue
+    echo "$gov" >"$policy/scaling_governor"
+  done
+}
+
+cmd_power_profile() {
+  local profile="${1:-}"
+  case "$profile" in
+    watch)   set_governor powersave ;;
+    capture) set_governor ondemand ;;
+    day)     set_governor ondemand ;;
+    *) die "profil inconnu: ${profile:-<vide>} (watch, capture ou day)" ;;
+  esac
+  if [[ -e "$NET_DIR/eth0" ]]; then
+    if [[ "$profile" == "day" ]]; then
+      run ip link set eth0 up
+    elif [[ "$(cat "$NET_DIR/eth0/carrier" 2>/dev/null || echo 0)" != "1" ]]; then
+      run ip link set eth0 down   # no cable: the Ethernet PHY is useless at night
+    fi
+  fi
+  echo "profil $profile"
+}
+
 # ─── USB capture drive ───────────────────────────────────────
 
 mount_opts() {
@@ -372,6 +412,8 @@ case "$cmd" in
   set-timezone)  cmd_set_timezone "$@" ;;
   shutdown)      cmd_shutdown ;;
   rtc-wake)      cmd_rtc_wake "$@" ;;
+  power-profile) cmd_power_profile "$@" ;;
+  version)       echo "$HELPER_VERSION" ;;
   usb-add)       cmd_usb_add "$@" ;;
   mount-usb)     cmd_mount_usb ;;
   umount-usb)    cmd_umount_usb ;;

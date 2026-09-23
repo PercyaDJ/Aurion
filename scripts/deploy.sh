@@ -3,7 +3,7 @@
 # Send Aurion to a Raspberry Pi and install it, from a Linux/macOS PC.
 #
 #   scripts/deploy.sh pi@aurion.local                 # builds then deploys
-#   scripts/deploy.sh pi@192.168.1.42 dist/aurion-1.7.0-rpi-arm64.tar.gz
+#   scripts/deploy.sh pi@192.168.1.42 dist/aurion-1.8.0-rpi-arm64.tar.gz
 #
 # Windows: scripts\deploy.ps1 (same arguments).
 # ─────────────────────────────────────────────────────────────

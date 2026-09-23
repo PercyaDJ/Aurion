@@ -55,6 +55,19 @@ Surfaces analysées : API HTTP (42 routes, dont 9 de portail captif), pages web,
 | Démarrage automatique (expédition) | jamais sans heure fiable ni clé présente ; toute requête `/api/` le repousse de 5 min ; les sondes du portail captif ne comptent pas | simulations `expedition_*` |
 | Heure lue sur l'horloge matérielle | valeur ignorée si antérieure à 2024 (horloge non réglée) ; appliquée par le helper existant | `rtc_detection` |
 
+### Revue de la 1.8.0
+
+| Point | Analyse | Test |
+|---|---|---|
+| Mise à jour depuis GitHub | adresse d'API fixe (dépôt du projet), téléchargement accepté seulement s'il commence par `https://github.com/PercyaDJ/Aurion/releases/download/`, taille plafonnée, puis mêmes contrôles que l'envoi manuel (ELF arm64, exécution d'essai, remplacement atomique, ancienne version conservée) ; aucune action root ; refusée pendant une nuit | `update_tests.rs`, `asset_selection_and_origin_check` |
+| Le helper root n'est jamais mis à jour par le téléphone | un fichier téléchargé par le compte du service ne doit pas devenir un programme root ; la version attendue est vérifiée et signalée | revue, `helper_test.sh` (`version`) |
+| Mot de passe du partage de connexion | validé comme les autres (SSID, WPA 8 à 63), stocké dans la config (0600), jamais renvoyé (masqué), transmis au helper par l'entrée standard | `online_update_rejects_bad_requests` |
+| `aurion-helper power-profile` | 3 valeurs fixes ; en simulation, jamais le vrai `/sys` ; Ethernet laissé actif si un câble est branché | `helper_test.sh` (8 cas) |
+| Retour arrière | échange de deux fichiers du compte du service, refusé pendant une nuit | `rollback_swaps_current_and_previous` |
+
+Risque accepté : les versions ne sont pas signées. Le téléchargement passe en HTTPS depuis le dépôt du projet ; qui
+peut modifier le dépôt peut donc livrer une version (plan A2 : signature Ed25519).
+
 ## 4. Le helper root (`scripts/aurion-helper`)
 
 Seul programme exécutable en root par le service. Principes :

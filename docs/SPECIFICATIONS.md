@@ -1,6 +1,6 @@
 # Spécifications fonctionnelles
 
-Version couverte : **1.7.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
+Version couverte : **1.8.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
 
 ## 1. Utilisateurs
 
@@ -52,6 +52,10 @@ Version couverte : **1.7.0**. Ce document décrit **ce que fait** Aurion (le com
 | F26 | Mode expédition | départ automatique 5 min après la dernière requête à l'interface, seulement avec heure fiable et clé présente ; raison affichée sinon | `expedition_*` |
 | F27 | Réveil programmé (Pi 5) | fin de nuit en expédition : réveil 10 min avant la plage suivante ; nuit lancée plus de 2 h avant son début : extinction et réveil, puis reprise | `pi5_*` |
 | F28 | Horloge matérielle | lue au démarrage si présente et valide ; mise à jour quand le téléphone donne l'heure ; source affichée | `rtc_detection`, api_tests |
+| F30 | RAW seul, à la suite | format RAW par défaut ; aucune pause entre deux photos par défaut (la pose donne la cadence) ; pause réglable | `raw_only_back_to_back_follows_the_exposure_time` |
+| F31 | Surveillance sobre | en surveillance, aucune lecture ni écriture de RAW ; profil d'énergie selon la phase | `watching_the_sky_never_captures_raw`, `night_power_profiles_follow_the_phase` |
+| F32 | Mise à jour depuis GitHub | canal stable ou développement, via partage de connexion ou connexion actuelle, retour automatique au Wi-Fi Aurion, résultat affiché | `update_tests.rs` |
+| F33 | Retour arrière | un geste rétablit la version précédente (et inversement) | `rollback_swaps_current_and_previous` |
 | F29 | Autonomie en nuits | l'accueil affiche le nombre de nuits que la clé peut contenir (mode expédition) | `preflight_in_expedition_mode_*` |
 
 ## 4. Règles de gestion
@@ -64,7 +68,7 @@ Version couverte : **1.7.0**. Ce document décrit **ce que fait** Aurion (le com
 | R4 | Aucun réglage système (heure, Wi-Fi, mise à jour) n'est possible pendant une nuit |
 | R5 | Minuteur : une nuit reprise s'arrête à l'heure de fin prévue et ne capture jamais plus que sa durée initiale (si l'horloge du Pi retarde après la coupure, seule la seconde borne s'applique) |
 | R7 | Le fichier `aurion-reset-wifi.txt` n'agit qu'une fois (renommé `.done`) |
-| R8 | La capacité affichée se base sur la taille moyenne des photos de la dernière nuit (fichiers de moins de 200 ko ignorés), sinon JPEG 4 Mo et DNG 24 Mo |
+| R8 | La capacité affichée se base sur le débit réel de la dernière nuit (au moins 20 images sur 15 min) ; à défaut, sur la taille moyenne des photos (fichiers de moins de 200 ko ignorés) ou JPEG 4 Mo et DNG 14 Mo, avec la pose maximale plus 2 s par prise |
 | R9 | Une nuit reprise continue dans son dossier, avec la numérotation qui suit la dernière image enregistrée |
 | R10 | En plage horaire, une nuit lancée à l'avance reprend tant que la fin de cette nuit-là n'est pas passée |
 | R11 | Le départ automatique n'a jamais lieu tant que l'heure n'est pas fiable (téléphone ou horloge matérielle) |

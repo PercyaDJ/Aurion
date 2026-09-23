@@ -154,6 +154,23 @@ pub fn recent_image_sizes(mount: &FsPath, max: usize) -> Vec<(String, u64)> {
     sample(scan_images(mount, None))
 }
 
+/// Bytes written per hour during the most recent night that lasted at least
+/// 15 min with 20 images or more: the most honest capacity estimate, since
+/// it includes the real exposure times, pauses and file sizes.
+pub fn recent_night_rate(mount: &FsPath) -> Option<f64> {
+    for s in session_names(mount).into_iter().rev() {
+        let files = night_folder_images(mount, &s);
+        let stamps: Vec<NaiveDateTime> = files.iter().filter_map(|f| parse_image_timestamp(&f.info.filename)).collect();
+        let (Some(a), Some(b)) = (stamps.iter().min(), stamps.iter().max()) else { continue };
+        let hours = (*b - *a).num_seconds() as f64 / 3600.0;
+        if files.len() >= 20 && hours >= 0.25 {
+            let bytes: u64 = files.iter().map(|f| f.info.size_bytes).sum();
+            return Some(bytes as f64 / hours);
+        }
+    }
+    None
+}
+
 /// Find an image by name: root of the key, then night folders.
 pub fn resolve_image(mount: &FsPath, name: &str) -> Option<ImageFile> {
     if !validate::is_safe_image_name(name) {
@@ -588,17 +605,18 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
     if !validate::is_safe_image_name(&filename) {
         return bad_request("Nom de fichier invalide");
     }
-    if matches!(validate::extension_lower(&filename).as_deref(), Some("dng") | Some("raw")) {
-        return StatusCode::NO_CONTENT.into_response();
-    }
     let mount = mount_point(&state).await;
     let (m, name) = (mount.clone(), filename.clone());
     let Some(image) = tokio::task::spawn_blocking(move || resolve_image(&m, &name)).await.ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
+    // Written at capture time (also for RAW-only nights)
     if let Ok(data) = tokio::fs::read(thumb_path(&mount, &image)).await {
         return jpeg(data);
+    }
+    if layout::is_raw(&filename) {
+        return StatusCode::NO_CONTENT.into_response(); // a DNG is never decoded here
     }
     let cache_path = state.paths.thumb_cache_dir.join(&filename);
     if let Ok(data) = tokio::fs::read(&cache_path).await {

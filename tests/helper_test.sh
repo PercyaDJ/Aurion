@@ -42,6 +42,27 @@ has   "@1767225600" "$HELPER" set-time 1767225600
 ko    "$HELPER" set-time 0
 ko    "$HELPER" set-time "1767225600; reboot"
 ko    "$HELPER" set-time 9999999999
+# version (checked by the application)
+has   "2" "$HELPER" version
+
+# power-profile (night energy saving)
+CPU_FAKE=$(mktemp -d); NET_FAKE=$(mktemp -d)
+mkdir -p "$CPU_FAKE/policy0" "$NET_FAKE/eth0"
+echo ondemand >"$CPU_FAKE/policy0/scaling_governor"
+echo "ondemand powersave performance" >"$CPU_FAKE/policy0/scaling_available_governors"
+echo 0 >"$NET_FAKE/eth0/carrier"
+ok    env AURION_FAKE_CPUFREQ="$CPU_FAKE" AURION_FAKE_NET="$NET_FAKE" "$HELPER" power-profile watch
+ok    test "$(cat "$CPU_FAKE/policy0/scaling_governor")" = powersave
+has   "eth0 down" env AURION_FAKE_CPUFREQ="$CPU_FAKE" AURION_FAKE_NET="$NET_FAKE" "$HELPER" power-profile capture
+ok    test "$(cat "$CPU_FAKE/policy0/scaling_governor")" = ondemand
+echo 1 >"$NET_FAKE/eth0/carrier"
+out=$(env AURION_FAKE_CPUFREQ="$CPU_FAKE" AURION_FAKE_NET="$NET_FAKE" "$HELPER" power-profile watch 2>&1)
+ok    test "${out/eth0 down/}" = "$out"   # cable plugged: Ethernet kept
+has   "eth0 up" env AURION_FAKE_CPUFREQ="$CPU_FAKE" AURION_FAKE_NET="$NET_FAKE" "$HELPER" power-profile day
+ko    "$HELPER" power-profile turbo
+ko    "$HELPER" power-profile "watch; reboot"
+rm -rf "$CPU_FAKE" "$NET_FAKE"
+
 # rtc-wake (Raspberry Pi 5 power-on alarm)
 RTC_FAKE=$(mktemp -d); : >"$RTC_FAKE/wakealarm"
 WAKE_AT=$(( $(date +%s) + 3600 ))

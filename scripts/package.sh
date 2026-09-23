@@ -65,7 +65,7 @@ Architecture: arm64
 Maintainer: PercyaDJ <noreply@users.noreply.github.com>
 Section: graphics
 Priority: optional
-Depends: bash, sudo, iw, nftables, rfkill, dosfstools, exfatprogs
+Depends: bash, sudo, iw, nftables, rfkill, dosfstools, exfatprogs, curl
 Recommends: rpicam-apps | rpicam-apps-lite, network-manager | hostapd, dnsmasq-base | dnsmasq
 Description: Caméra autonome d'aurores boréales pour Raspberry Pi
  Hotspot Wi-Fi, interface web pour smartphone, capture RAW/JPEG de nuit

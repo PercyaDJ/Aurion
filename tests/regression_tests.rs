@@ -156,7 +156,7 @@ fn legacy_config_file_loads_with_defaults() {
       "preset_name":"Default"
     }"#).unwrap();
     let cfg = AppConfig::load(&path).unwrap();
-    assert_eq!(cfg.capture.capture_interval_secs, 10);
+    assert_eq!(cfg.capture.capture_interval_secs, 0, "missing field: photos back to back");
     assert!(cfg.detection.moon_mask_enabled);
     assert!(!cfg.detection.detection_capture_enabled);
 }
@@ -168,6 +168,6 @@ fn white_balance_is_fixed_by_default() {
     assert_eq!(AppConfig::default().capture.awb, "daylight");
     let shipped = AppConfig::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/default.json")).unwrap();
     assert_eq!(shipped.capture.awb, "daylight");
-    assert_eq!(shipped.capture.output_format, aurion::core::models::OutputFormat::RawAndJpg, "RAW kept for editing");
+    assert_eq!(shipped.capture.output_format, aurion::core::models::OutputFormat::RawDng, "RAW only by default");
     assert!(!shipped.capture.denoise.hot_pixels, "no costly JPEG re-encoding by default");
 }

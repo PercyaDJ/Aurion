@@ -90,11 +90,11 @@
                 <div class="field-label">Mode</div>
                 <div class="segmented" role="radiogroup">
                     <label><input type="radio" name="mode" id="modeSafe" value="safe" checked>
-                        <span><b>Toute la nuit</b><small>Une photo toutes les <span id="intervalLabel">10</span> s, les aurores
-                                sont marquées. Idéal timelapse.</small></span></label>
+                        <span><b>Toute la nuit</b><small><span id="intervalLabel">Photos à la suite</span>, chaque pose dure le
+                                temps choisi par l'exposition automatique ; les aurores sont marquées. Idéal timelapse.</small></span></label>
                     <label><input type="radio" name="mode" id="modeFilter" value="filter">
-                        <span><b>Aurores seulement</b><small>Surveille le ciel et n'enregistre que pendant les aurores.
-                                Économise la clé.</small></span></label>
+                        <span><b>Aurores seulement</b><small>Surveille le ciel (une petite photo par minute) et ne commence à
+                                enregistrer qu'à la première aurore confirmée. Économise la clé et la batterie.</small></span></label>
                 </div>
 
                 <div class="field-row">
@@ -104,9 +104,8 @@
                 <div class="field-row">
                     <label class="field-label" for="nightFormat">Photos</label>
                     <select id="nightFormat" class="form-select">
-                        <option value="RawAndJpg">RAW + JPG (conseillé)</option>
-                        <option value="RawDng">RAW seulement</option>
-                        <option value="JpgAuroraRaw">JPG + RAW des aurores (expédition)</option>
+                        <option value="RawDng">RAW (conseillé)</option>
+                        <option value="RawAndJpg">RAW + JPG</option>
                         <option value="Jpg">JPG seulement (plus léger)</option>
                     </select>
                 </div>
@@ -212,7 +211,8 @@
 
         function fillNightForm(cfg) {
             document.getElementById(cfg.detection.detection_capture_enabled ? 'modeFilter' : 'modeSafe').checked = true;
-            document.getElementById('intervalLabel').textContent = cfg.capture.capture_interval_secs;
+            const pause = cfg.capture.capture_interval_secs;
+            document.getElementById('intervalLabel').textContent = pause > 0 ? `Une photo, puis ${pause} s de pause` : 'Photos à la suite';
             const sel = document.getElementById('nightLength');
             const start = cfg.time_range.start.substring(0, 5), end = cfg.time_range.end.substring(0, 5);
             sel.innerHTML = `<option value="range">De ${start} à ${end}</option>` +
@@ -222,7 +222,11 @@
                 sel.insertAdjacentHTML('beforeend', `<option value="${d}">${fmtHours(d)} à partir de maintenant</option>`);
             }
             sel.value = d ? String(d) : 'range';
-            document.getElementById('nightFormat').value = cfg.capture.output_format;
+            const fmtSel = document.getElementById('nightFormat');
+            if (![...fmtSel.options].some(o => o.value === cfg.capture.output_format)) {
+                fmtSel.insertAdjacentHTML('beforeend', `<option value="${cfg.capture.output_format}">JPG + RAW des aurores</option>`);
+            }
+            fmtSel.value = cfg.capture.output_format;
         }
 
         async function loadPreflight() {
@@ -396,7 +400,7 @@
         document.getElementById('nightFormat').addEventListener('change', async () => {
             // La capacité dépend du format : recalcul côté serveur avec le format choisi
             if (!config) return;
-            const est = { RawAndJpg: 28, RawDng: 24, Jpg: 4, JpgAuroraRaw: 4 };
+            const est = { RawAndJpg: 18, RawDng: 14, Jpg: 4, JpgAuroraRaw: 4 };
             const cur = est[config.capture.output_format], next = est[document.getElementById('nightFormat').value];
             if (preflight && preflight.capacity_hours != null && cur && next) {
                 document.getElementById('capacityLine').textContent =

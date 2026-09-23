@@ -13,6 +13,7 @@ pub struct SystemMock {
     /// Simulate a Raspberry Pi 5 (RTC wake-up alarm).
     wake: bool,
     wakes: Arc<std::sync::Mutex<Vec<chrono::DateTime<chrono::Utc>>>>,
+    profiles: Arc<std::sync::Mutex<Vec<crate::ports::system::PowerProfile>>>,
 }
 
 impl SystemMock {
@@ -30,6 +31,11 @@ impl SystemMock {
         self.wakes.lock().unwrap().clone()
     }
 
+    /// Power profiles applied so far.
+    pub fn profiles(&self) -> Vec<crate::ports::system::PowerProfile> {
+        self.profiles.lock().unwrap().clone()
+    }
+
     /// Number of shutdown requests received.
     pub fn shutdown_count(&self) -> usize {
         self.shutdowns.load(Ordering::SeqCst)
@@ -41,6 +47,11 @@ impl SystemPort for SystemMock {
     async fn shutdown(&self) -> Result<(), SystemError> {
         self.shutdowns.fetch_add(1, Ordering::SeqCst);
         warn!("SystemMock: SHUTDOWN requested (simulated — not actually shutting down)");
+        Ok(())
+    }
+
+    async fn set_power_profile(&self, profile: crate::ports::system::PowerProfile) -> Result<(), SystemError> {
+        self.profiles.lock().unwrap().push(profile);
         Ok(())
     }
 

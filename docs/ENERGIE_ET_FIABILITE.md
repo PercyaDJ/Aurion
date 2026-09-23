@@ -12,6 +12,8 @@
 | Services inutiles arrêtés (bluetooth, ModemManager, triggerhappy) | `install.sh` | moins de réveils |
 | Runtime limité à 2 threads | `main.rs` | moins de réveils CPU |
 | Journaux en RAM | `install.sh` | pas d'écriture sur la carte SD |
+| Surveillance (*Aurores seulement*) : petite photo JPEG par minute, aucun RAW tant que l'aurore n'est pas confirmée ; processeur au minimum | `orchestrator`, `aurion-helper power-profile watch` | moins de calcul et d'écriture par photo de surveillance |
+| Port Ethernet coupé la nuit sans câble | `aurion-helper power-profile` | un circuit de moins alimenté |
 | Rien le jour : extinction à la fin de chaque nuit ; Pi 5 éteint jusqu'au soir (réveil par son horloge) au lieu d'attendre allumé | `orchestrator`, `aurion-helper rtc-wake` | toute la batterie sert aux nuits (détail : GUIDE_EXPEDITION.md) |
 | Interface : rafraîchissement suspendu quand l'écran du téléphone est éteint ou l'onglet caché | `js/common.js` (`aurionPoll`) | moins de requêtes, moins de réveils du Pi pendant la préparation |
 

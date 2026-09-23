@@ -34,6 +34,10 @@ pub struct CameraMock {
     /// Produce Pi-like captures: full-resolution JPEG (with hot pixels) in
     /// `raw_bytes` + EXIF thumbnail used for analysis.
     jpeg_output: bool,
+    /// Each capture lasts its exposure time (virtual time in tests).
+    real_exposure: bool,
+    /// RAW captures requested (shared with the test).
+    raw_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// Size of the full-resolution JPEG produced in `jpeg_output` mode.
@@ -52,7 +56,20 @@ impl CameraMock {
             failures_left: Mutex::new(0),
             attempts: Mutex::new(0),
             jpeg_output: false,
+            real_exposure: false,
+            raw_calls: Default::default(),
         }
+    }
+
+    /// Captures take their exposure time, like the real sensor.
+    pub fn with_real_exposure(mut self) -> Self {
+        self.real_exposure = true;
+        self
+    }
+
+    /// Counter of RAW captures (clone it before handing the camera over).
+    pub fn raw_calls(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
+        self.raw_calls.clone()
     }
 
     /// Produce captures like `rpicam-still` (see [`CameraMock::jpeg_output`]).
@@ -192,6 +209,9 @@ impl CameraPort for CameraMock {
         }
 
         let index = self.next_index();
+        if self.real_exposure {
+            tokio::time::sleep(std::time::Duration::from_micros(exposure.shutter_us)).await;
+        }
 
         // Try to read from test data files
         let files: Vec<PathBuf> = std::fs::read_dir(&self.test_dir)
@@ -241,6 +261,7 @@ impl CameraPort for CameraMock {
 
     async fn capture_raw(&self, exposure: &ExposureSettings, tmp_dir: &std::path::Path) -> Result<CaptureFrame, CameraError> {
         // Mock: return same as JPG but marked as RAW
+        self.raw_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut frame = self.capture_jpg(exposure, tmp_dir).await?;
         frame.format = CaptureFormat::RawDng;
         Ok(frame)

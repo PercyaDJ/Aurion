@@ -178,13 +178,42 @@
             </button>
         </div>
 
+        <!-- Update from GitHub, without a computer -->
+        <div class="card fade-in" id="githubUpdateCard">
+            <div class="card-header">
+                <span class="card-title">⬆️ Mettre à jour depuis GitHub</span>
+                <span class="badge badge-phase" id="currentVersion">…</span>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                Aurion télécharge lui-même la nouvelle version. Il rejoint pour cela le <b>partage de connexion de votre
+                téléphone</b> (ou le Wi-Fi de la maison) pendant 2 à 5 minutes, puis revient sur son Wi-Fi.
+            </span>
+            <label class="form-label" for="updChannel">Version</label>
+            <select class="form-select" id="updChannel" style="margin-bottom: 0.5rem;">
+                <option value="stable">Stable (dernière version publiée)</option>
+                <option value="dev">Développement (dernière modification, pour les essais)</option>
+            </select>
+            <label class="form-label" for="updSsid">Partage de connexion ou Wi-Fi à utiliser</label>
+            <input type="text" id="updSsid" class="form-input" autocapitalize="off" spellcheck="false"
+                placeholder="Nom du partage de connexion (vide : connexion actuelle)" style="margin-bottom: 0.5rem;">
+            <input type="password" id="updPassword" class="form-input" autocomplete="off" placeholder="Mot de passe"
+                style="margin-bottom: 0.5rem;">
+            <button class="btn btn-primary btn-block" id="githubUpdateBtn" onclick="startGithubUpdate()">Mettre à jour maintenant</button>
+            <p class="muted small" style="margin-top:0.5rem;">Ensuite : activez le partage de connexion du téléphone,
+                attendez 2 à 5 min, puis reconnectez-vous au Wi-Fi Aurion et revenez sur cette page.</p>
+            <div id="githubUpdateStatus" class="muted small" style="margin-top: 0.5rem;"></div>
+            <div id="helperWarning" class="warning-box warning" style="display:none;margin-top:0.5rem;"></div>
+            <button class="btn btn-outline btn-block" id="rollbackBtn" onclick="rollbackUpdate()" style="margin-top:0.75rem;display:none;">
+                Revenir à la version précédente</button>
+        </div>
+
         <!-- Software update (OTA) -->
         <div class="card fade-in">
             <div class="card-header">
-                <span class="card-title">⬆️ Mise à jour du logiciel</span>
+                <span class="card-title">⬆️ Mise à jour par fichier</span>
             </div>
             <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
-                Choisissez le fichier <code>aurion</code> (binaire Raspberry Pi 64 bits) fourni avec une nouvelle version.
+                Choisissez le fichier <code>aurion-arm64</code> téléchargé depuis la page <i>Releases</i> du projet.
                 Il est vérifié avant installation ; l'ancienne version est conservée en secours.
             </span>
             <input type="file" id="updateFile" class="form-input" style="margin-bottom: 0.5rem;">
@@ -249,7 +278,7 @@
                 } else {
                     document.getElementById('sysCpuTemp').textContent = 'N/A';
                 }
-                document.getElementById('sysVersion').textContent = 'v' + diag.version;
+                document.getElementById('sysVersion').textContent = diag.version;
 
                 // USB status from /api/status
                 const usbOk = status.usb_mounted;
@@ -317,6 +346,72 @@
         }
 
         refreshLogs();
+        async function loadUpdateStatus() {
+            try {
+                const u = await (await apiFetch('/api/system/update/status')).json();
+                document.getElementById('currentVersion').textContent = u.version;
+                document.getElementById('rollbackBtn').style.display = u.rollback_available ? '' : 'none';
+                const l = u.last || {};
+                const el = document.getElementById('githubUpdateStatus');
+                el.textContent = l.message
+                    ? `Dernière mise à jour (${l.at}, ${l.channel === 'dev' ? 'développement' : 'stable'}) : `
+                      + (l.running ? 'en cours. ' : l.ok ? 'réussie. ' : 'échec. ') + l.message
+                    : '';
+                const w = document.getElementById('helperWarning');
+                w.style.display = u.helper_outdated ? '' : 'none';
+                w.textContent = u.helper_outdated
+                    ? "Le programme système d'Aurion (aurion-helper) est d'une version plus ancienne : certaines fonctions "
+                      + "(réveil programmé, profil d'énergie) restent inactives. Installez une fois l'image carte SD ou le paquet .deb de cette version."
+                    : '';
+            } catch (_) { }
+        }
+
+        async function loadUpdateWifi() {
+            try {
+                const cfg = await (await apiFetch('/api/config')).json();
+                if (cfg.online_update) {
+                    document.getElementById('updSsid').value = cfg.online_update.ssid || '';
+                    document.getElementById('updPassword').value = cfg.online_update.password || '';
+                }
+            } catch (_) { }
+        }
+
+        async function startGithubUpdate() {
+            const ssid = document.getElementById('updSsid').value.trim();
+            const password = document.getElementById('updPassword').value;
+            const channel = document.getElementById('updChannel').value;
+            const msg = ssid
+                ? `Aurion va couper son Wi-Fi et rejoindre « ${ssid} ».\n\nActivez ce partage de connexion maintenant, puis reconnectez-vous au Wi-Fi Aurion dans 2 à 5 minutes.`
+                : "Aurion va télécharger la mise à jour avec sa connexion actuelle.";
+            if (!confirm(msg)) return;
+            const btn = document.getElementById('githubUpdateBtn');
+            btn.disabled = true;
+            try {
+                const res = await apiFetch('/api/system/update/online', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, ssid, password }),
+                });
+                const st = await res.json();
+                document.getElementById('githubUpdateStatus').textContent = st.message;
+                showToast('Mise à jour lancée', 'success');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+            btn.disabled = false;
+        }
+
+        async function rollbackUpdate() {
+            if (!confirm('Revenir à la version précédente ? Aurion redémarre (15 s).')) return;
+            try {
+                await apiFetch('/api/system/rollback', { method: 'POST' });
+                showToast('Version précédente rétablie : rechargez dans 15 s', 'success');
+                setTimeout(() => location.reload(), 15000);
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        loadUpdateStatus();
+        loadUpdateWifi();
+        aurionPoll(loadUpdateStatus, 10000);
         updateDiagnostics();
         updateWifiStatus();
         aurionPoll(refreshLogs, 5000);

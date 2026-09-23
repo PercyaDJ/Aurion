@@ -1,5 +1,38 @@
 # Journal des versions
 
+## 1.8.0
+
+Objectif : RAW seul, photos à la suite, le moins de consommation possible, et des cycles essai / correction de
+quelques minutes depuis le téléphone.
+
+### Photo et stockage
+- **RAW seul par défaut** (DNG), photos **à la suite** : la pause entre deux photos vaut 0 par défaut, la pose
+  choisie par l'exposition automatique donne la cadence. Réglable (*Pause entre deux photos*).
+- Miniatures de galerie aussi pour les nuits en RAW seul.
+- Autonomie de la clé calculée sur le **débit réel** de la dernière nuit ; taille type d'un DNG de nuit ramenée à
+  14 Mo (mesure de terrain 12 à 15 Mo). Correction des chiffres de stockage de la 1.7 (surestimés).
+- Durée réelle de chaque prise enregistrée (`capture_ms` dans `event.jsonl`).
+
+### Consommation
+- Surveillance (*Aurores seulement*) : plus aucun RAW lu ni écrit tant que l'aurore n'est pas confirmée.
+- Profil d'énergie de nuit (`aurion-helper power-profile`) : processeur au minimum en surveillance, normal en
+  capture, port Ethernet coupé s'il n'y a pas de câble.
+- Option expérimentale **Prise directe** (`rpicam-still --immediate`) à comparer sur le terrain.
+
+### Mises à jour sans ordinateur
+- **Mettre à jour depuis GitHub** (*Diagnostics*) : canal stable (dernière release) ou développement (pré-release
+  `edge` reconstruite à chaque modification de `main`). Le Pi rejoint le partage de connexion du téléphone, télécharge,
+  vérifie, installe, puis revient sur son Wi-Fi ; résultat conservé après le redémarrage.
+- **Revenir à la version précédente** en un geste.
+- Version affichée avec le commit pour les versions de développement (`1.8.0-edge.xxxxxxx`).
+- Le binaire nu `aurion-arm64` est joint à chaque release ; `curl` ajouté aux paquets installés.
+- Version du programme système (`aurion-helper version`) vérifiée : *Diagnostics* signale quand l'image ou le
+  `.deb` doit être réinstallé.
+
+### Tests
+- 220 tests Rust (30 nuits simulées, dont RAW à la suite avec vraie durée de pose, surveillance sans RAW,
+  profils d'énergie ; mise à jour contre un faux GitHub, retour arrière), 57 cas du helper, 29 étapes navigateur.
+
 ## 1.7.0
 
 Objectif : poser Aurion pour une expédition de plusieurs semaines, dans l'ordre stable, fiable, simple, complet.

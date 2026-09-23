@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.7.0**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.8.0**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -96,8 +96,8 @@ stateDiagram-v2
 | (reprise) | si `night.json` existe et que la nuit n'est pas finie : hotspot 5 min avec compte à rebours, puis reprise | `orchestrator::resume_window`, `core/night.rs` |
 | DISCONNECT | 15 s pour que la réponse arrive au téléphone, puis arrêt du hotspot | `orchestrator::run` |
 | CALIBRATION | 3 poses d'essai pour caler ISO et temps de pose | `exposure.rs` |
-| WATCH | une pose toutes les `watch_interval_secs` (60 s), rien n'est enregistré | `detection.rs` |
-| RUN | une pose toutes les `capture_interval_secs` (10 s), enregistrement JPEG et/ou DNG, marquage `_AURORA` ; en FILTER, une fois l'aurore confirmée la capture continue jusqu'à la fin (pas de retour en WATCH) | `orchestrator::save_frame` |
+| WATCH | une pose JPEG toutes les `watch_interval_secs` (60 s), jamais de RAW, rien n'est enregistré ; profil d'énergie « watch » | `detection.rs`, `orchestrator` |
+| RUN | poses à la suite (pause `capture_interval_secs`, 0 par défaut ; plancher de sécurité de 1 s par cycle), profil « capture », enregistrement JPEG et/ou DNG, marquage `_AURORA` ; en FILTER, une fois l'aurore confirmée la capture continue jusqu'à la fin (pas de retour en WATCH) | `orchestrator::save_frame` |
 | SHUTDOWN | journal vidé, `sync`, suppression de `night.json`, extinction ; déclenché aussi quand la clé passe sous le seuil critique (5 % ou 50 Mo libres) | `orchestrator::run` |
 
 Attente : en mode plage horaire, si la nuit est lancée avant l'heure de début, l'orchestrateur attend (contrôle
@@ -219,7 +219,9 @@ flowchart LR
 | `aurion-X.Y.Z-rpi-arm64.tar.gz` | `scripts/package.sh` | `install.sh`, `deploy.sh`, `deploy.ps1` |
 | binaire `aurion` seul | idem | mise à jour depuis l'interface (Diagnostics) |
 
-Publier une version : changer `version` dans `Cargo.toml` et pousser sur `main`.
+Publier une version : changer `version` dans `Cargo.toml` et pousser sur `main`. Chaque push sur `main` publie
+aussi la pré-release **edge** (workflow `edge.yml`, binaire `aurion-arm64` seul, version `X.Y.Z-edge.<commit>`),
+installable depuis le téléphone (voir GUIDE_DEVELOPPEMENT.md).
 
 ## 11. Interfaces (API HTTP)
 
@@ -237,7 +239,8 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET /api/preview`, `POST /api/preview/capture` | aperçu |
 | `GET/POST /api/darks` | série de darks |
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
-| `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour |
+| `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour par fichier |
+| `POST /api/system/update/online`, `GET /api/system/update/status`, `POST /api/system/rollback` | mise à jour depuis GitHub (stable ou `edge`), résultat et version du helper, retour à la version précédente |
 | `GET /api/wifi/scan`, `/api/wifi/status`, `POST /api/wifi/connect`, `/api/wifi/hotspot` | mode maintenance (Wi-Fi de la maison) |
 | `GET /api/gallery[?session=<nuit>&limit=N]` | images (1000 plus récentes par défaut, `truncated` si plus) |
 | `GET /api/gallery/stats`, `/api/gallery/sessions`, `/api/gallery/best` | galerie (sessions avec nombre de RAW) |

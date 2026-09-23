@@ -12,9 +12,32 @@ pub trait SystemPort: Send + Sync {
         false
     }
 
+    /// Night power profile (CPU frequency, unused network port).
+    async fn set_power_profile(&self, _profile: PowerProfile) -> Result<(), SystemError> {
+        Ok(())
+    }
+
     /// Program the power-on time used after the next shutdown.
     async fn schedule_wake(&self, _at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {
         Err(SystemError::WakeUnsupported)
+    }
+}
+
+/// Energy profile during the night.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerProfile {
+    /// Watching the sky: one small photo per minute, CPU at minimum.
+    Watch,
+    /// Capturing: normal CPU frequency (each frame is encoded).
+    Capture,
+}
+
+impl PowerProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PowerProfile::Watch => "watch",
+            PowerProfile::Capture => "capture",
+        }
     }
 }
 

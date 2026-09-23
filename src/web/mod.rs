@@ -18,6 +18,7 @@ pub mod captive;
 pub mod gallery;
 pub mod security;
 pub mod static_files;
+pub mod update;
 
 /// Maximum size of a regular API request body.
 const API_BODY_LIMIT: usize = 1024 * 1024;
@@ -69,6 +70,21 @@ pub struct UpdateSettings {
     /// Exit the process after a successful update so systemd restarts the
     /// new binary (`Restart=always`). Disabled in tests.
     pub restart: bool,
+    /// GitHub API used by the online update (a local server in tests).
+    pub github_api: String,
+    /// Downloads must start with this prefix (the project's releases).
+    pub download_prefix: String,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            target: None,
+            restart: true,
+            github_api: "https://api.github.com".into(),
+            download_prefix: format!("https://github.com/{}/releases/download/", crate::web::update::REPO),
+        }
+    }
 }
 
 /// Shared application state for web handlers.
@@ -101,6 +117,8 @@ pub struct AppState {
     pub clock_from_rtc: Arc<AtomicBool>,
     /// Expedition mode: state of the automatic start.
     pub auto_start: Arc<RwLock<AutoStart>>,
+    /// An online update is running in this process.
+    pub online_update_running: Arc<AtomicBool>,
 }
 
 /// Automatic start of the night (expedition mode), shown on the home screen.
@@ -139,7 +157,7 @@ impl AppState {
             log_buffer: Arc::new(RwLock::new(Vec::new())),
             time_synced: Arc::new(AtomicBool::new(false)),
             paths: Arc::new(paths),
-            update: Arc::new(UpdateSettings { target: None, restart: true }),
+            update: Arc::new(UpdateSettings::default()),
             camera_lock: Arc::new(Mutex::new(())),
             system_actions: cfg!(feature = "rpi"),
             last_preview: Arc::new(RwLock::new(None)),
@@ -149,6 +167,7 @@ impl AppState {
             last_activity: Arc::new(std::sync::Mutex::new(tokio::time::Instant::now())),
             clock_from_rtc: Arc::new(AtomicBool::new(false)),
             auto_start: Arc::new(RwLock::new(AutoStart::Off)),
+            online_update_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -220,6 +239,9 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/diagnostics", get(api::get_diagnostics))
         .route("/api/system/time", post(api::set_system_time))
         .route("/api/system/shutdown", post(api::system_shutdown))
+        .route("/api/system/update/online", post(update::start_online_update))
+        .route("/api/system/update/status", get(update::get_update_status))
+        .route("/api/system/rollback", post(update::rollback))
         .route(
             "/api/system/update",
             post(api::system_update).layer(DefaultBodyLimit::max(UPDATE_BODY_LIMIT)),

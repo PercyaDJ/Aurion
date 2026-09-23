@@ -52,10 +52,11 @@ L'heure du Pi se règle automatiquement sur celle du téléphone à chaque conne
    de photos qu'elle peut contenir), l'heure et l'alimentation. Un point rouge empêche de lancer la nuit
    et dit quoi faire ; un point orange est un conseil.
 4. Choisissez :
-   - **Toute la nuit** (conseillé, idéal pour un timelapse) : une photo toutes les 10 secondes, les photos avec
-     aurore sont marquées ; ou **Aurores seulement** : n'enregistre que pendant les aurores ;
+   - **Toute la nuit** (conseillé, idéal pour un timelapse) : photos à la suite, chaque pose durant le temps choisi
+     par l'exposition automatique ; les photos avec aurore sont marquées ; ou **Aurores seulement** : surveille le
+     ciel et ne commence à enregistrer qu'à la première aurore confirmée ;
    - la **durée** : la plage horaire habituelle (21:00 à 06:00) ou un nombre d'heures à partir de maintenant ;
-   - les **photos** : RAW + JPG (conseillé), RAW seul ou JPG seul.
+   - les **photos** : RAW (conseillé), RAW + JPG ou JPG seul.
 5. Appuyez sur **Lancer la nuit**. Le Wi-Fi se coupe au bout de 15 secondes, c'est normal : vous pouvez partir.
 6. La caméra photographie seule et s'éteint seule à la fin.
 

@@ -139,17 +139,17 @@
         <!-- Capture Interval (Run) -->
         <div class="card fade-in">
             <div class="card-header">
-                <span class="card-title">Intervalle captures (timelapse)</span>
+                <span class="card-title">Pause entre deux photos (timelapse)</span>
             </div>
             <div class="range-group">
                 <div class="range-header">
-                    <span class="form-label">Intervalle en Run <span class="tooltip-icon"
-                            onclick="event.stopPropagation(); showTooltip(this, 'Temps entre chaque photo en mode Run/SAFE. 10s = photo toutes les 10s pour un timelapse fluide.')">❓</span></span>
-                    <span class="range-value" id="captureIntervalVal">10s</span>
+                    <span class="form-label">Pause <span class="tooltip-icon"
+                            onclick="event.stopPropagation(); showTooltip(this, '0 = photos à la suite : chaque pose dure le temps choisi par l’exposition automatique, puis la suivante démarre. Une pause espace les photos et économise la clé.')">❓</span></span>
+                    <span class="range-value" id="captureIntervalVal">à la suite</span>
                 </div>
-                <input type="range" id="captureInterval" min="5" max="120" step="5" value="10"
-                    oninput="updateVal('captureIntervalVal', this.value + 's')">
-                <span class="form-hint">Intervalle entre les captures en phase Run (timelapse)</span>
+                <input type="range" id="captureInterval" min="0" max="120" step="5" value="0"
+                    oninput="updateVal('captureIntervalVal', this.value == 0 ? 'à la suite' : this.value + ' s')">
+                <span class="form-hint">Temps d'attente après chaque photo pendant la capture</span>
             </div>
         </div>
 
@@ -273,9 +273,10 @@
                 document.getElementById('intervalVal').textContent = cfg.capture.watch_interval_secs + 's';
 
                 // Capture interval (timelapse)
-                if (cfg.capture.capture_interval_secs) {
-                    document.getElementById('captureInterval').value = cfg.capture.capture_interval_secs;
-                    document.getElementById('captureIntervalVal').textContent = cfg.capture.capture_interval_secs + 's';
+                if (cfg.capture.capture_interval_secs != null) {
+                    const p = cfg.capture.capture_interval_secs;
+                    document.getElementById('captureInterval').value = p;
+                    document.getElementById('captureIntervalVal').textContent = p == 0 ? 'à la suite' : p + ' s';
                 }
 
                 document.getElementById('timeStart').value = cfg.time_range.start.substring(0, 5);
