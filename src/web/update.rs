@@ -29,7 +29,7 @@ pub const ASSET: &str = "aurion-arm64";
 /// `aurion-helper version` this application expects. An online update
 /// replaces the application only: a new helper (root) needs the SD image or
 /// the .deb once.
-pub const EXPECTED_HELPER_VERSION: &str = "2";
+pub const EXPECTED_HELPER_VERSION: &str = "3";
 /// Largest binary accepted (the real one is a few MB).
 const MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 

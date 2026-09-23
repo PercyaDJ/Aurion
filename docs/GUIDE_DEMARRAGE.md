@@ -90,12 +90,25 @@ de la caméra, la carte SD n'est que le programme.
 
 ## En combien de temps ?
 
+**Une seule fois** (préparation, au chaud) :
+
 | Étape | Durée |
 |---|---|
 | Télécharger l'image (environ 600 Mo) | selon la connexion |
 | Graver la carte SD avec Raspberry Pi Imager | quelques minutes selon la carte |
 | Premier démarrage (installation automatique, sans internet) | 3 à 5 minutes |
-| Mot de passe, cadrage, vérifications, **Lancer la nuit** | 2 à 3 minutes |
+| Mot de passe, réglages | 2 à 3 minutes |
+
+**Chaque soir** (dehors, dans le froid) :
+
+1. Brancher la batterie.
+2. Le téléphone rejoint tout seul le Wi-Fi Aurion (il le connaît déjà) : la page s'ouvre.
+3. Vérifier la liste *Prêt pour la nuit ?* ; les réglages de la veille sont déjà remplis.
+4. **Lancer la nuit**.
+
+Le Wi-Fi Aurion démarre en premier, avant tout le reste. Le temps réel entre l'allumage et le Wi-Fi prêt est affiché
+dans *Diagnostics* (« Wi-Fi prêt après l'allumage ») : c'est la mesure à vérifier sur votre Raspberry Pi. En mode
+expédition, il n'y a même rien à faire : la nuit démarre seule.
 
 ## Plusieurs nuits d'affilée
 
@@ -114,7 +127,8 @@ Cochez **Mode expert** en bas du menu pour afficher les réglages fins, les pres
 |---|---|
 | Le Wi-Fi « Aurion » n'apparaît pas | attendre 5 minutes au premier démarrage ; débrancher et rebrancher l'alimentation |
 | La page ne s'ouvre pas | taper http://192.168.4.1:8080 dans le navigateur |
-| Point rouge « Clé USB absente » | clé en exFAT ou FAT32, la rebrancher ; en essayer une autre |
+| Point rouge « Clé USB absente » | rebrancher la clé ; en essayer une autre |
+| Point rouge « Clé USB à préparer » | la clé n'est pas lisible (neuve non formatée, format d'ordinateur Linux…) : bouton **Préparer la clé** sous le point rouge. **Tout son contenu est effacé** |
 | Point rouge « Caméra non détectée » | Pi débranché, vérifier la nappe (sens et loquet) des deux côtés |
 | Point rouge « Alimentation trop faible » ou le Pi s'éteint seul | batterie 5 V / 3 A, câble court et épais |
 | Mot de passe Wi-Fi oublié | sur un ordinateur, créez un fichier vide nommé `aurion-reset-wifi.txt` à la racine de la clé USB, rebranchez la clé sur le Pi et rallumez : le mot de passe redevient **aurora2024** (le fichier est renommé `.done`, vos photos ne sont pas touchées) |

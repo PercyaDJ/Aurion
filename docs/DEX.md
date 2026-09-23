@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.9.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.10.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -137,7 +137,9 @@ la remplace par la configuration par défaut en gardant une copie.
 | Wi-Fi `Aurion` absent | premier démarrage en cours ; service arrêté ; hotspot en échec | attendre 5 min ; SSH : `systemctl status aurion`, `journalctl -u aurion \| grep -i hotspot` | débrancher, rebrancher ; `sudo systemctl restart aurion` |
 | Mot de passe Wi-Fi oublié | - | - | fichier vide `aurion-reset-wifi.txt` à la racine de la clé USB, rallumer : mot de passe `aurora2024` |
 | Point rouge « Caméra non détectée » | nappe mal insérée ou à l'envers | SSH : `rpicam-hello --list-cameras` | Pi débranché, réinsérer la nappe des deux côtés |
-| Point rouge « Clé USB absente » | clé non formatée ou en ext4 non reconnue, clé défectueuse | `findmnt /mnt/capture`, `journalctl \| grep aurion-helper` | exFAT ou FAT32 ; essayer une autre clé |
+| Point rouge « Clé USB absente » | clé mal branchée ou défectueuse | `findmnt /mnt/capture`, `journalctl \| grep aurion-helper` | rebrancher ; essayer une autre clé |
+| Point rouge « Clé USB à préparer » | clé branchée mais illisible (non formatée, ext4…) | `lsblk`, `blkid` | bouton **Préparer la clé** (efface tout, exFAT) ; ou formater sur un ordinateur |
+| Wi-Fi Aurion long à apparaître | démarrage lent du système | *Diagnostics*, « Wi-Fi prêt après l'allumage » ; `systemd-analyze blame` en SSH | noter le service le plus lent et le signaler |
 | Point orange « Place limitée » | clé presque pleine | accueil : heures de capture possibles | télécharger puis supprimer d'anciennes nuits (Photos, Par session) ou passer en JPG seul |
 | Point rouge « Alimentation trop faible » | batterie ou câble insuffisants | `vcgencmd get_throttled` (bit 0) | batterie 5 V / 3 A, câble court et épais |
 | Le Pi s'éteint seul la nuit | sous-tension persistante (arrêt de protection) ou clé pleine | `session.log` : dernière ligne ; `night.json` présent = nuit interrompue | batterie plus puissante ; à la remise sous tension, la nuit reprend seule si elle n'est pas finie |

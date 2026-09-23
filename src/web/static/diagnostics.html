@@ -51,6 +51,10 @@
                     <span class="info-label">Version</span>
                     <span class="info-value" id="sysVersion">--</span>
                 </div>
+                <div class="info-item">
+                    <span class="info-label">Wi-Fi prêt après l'allumage</span>
+                    <span class="info-value" id="sysBootTime">--</span>
+                </div>
             </div>
         </div>
 
@@ -279,6 +283,7 @@
                     document.getElementById('sysCpuTemp').textContent = 'N/A';
                 }
                 document.getElementById('sysVersion').textContent = diag.version;
+                document.getElementById('sysBootTime').textContent = diag.hotspot_ready_secs != null ? Math.round(diag.hotspot_ready_secs) + ' s' : '--';
 
                 // USB status from /api/status
                 const usbOk = status.usb_mounted;

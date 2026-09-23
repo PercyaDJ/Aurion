@@ -68,6 +68,7 @@ check "journald en RAM" 'grep -q "Storage=volatile" "$R/etc/systemd/journald.con
 check "service activé et démarré" 'grep -q "systemctl enable aurion.service" "$WORK/calls.log" && grep -q "systemd-run.*restart aurion.service" "$WORK/calls.log"'
 check "paquets installés" 'grep -q "apt-get install.*rpicam-apps" "$WORK/calls.log"'
 check "outils de réparation de la clé USB installés" 'grep -q "apt-get install.*dosfstools exfatprogs" "$WORK/calls.log"'
+check "démarrage rapide : pas d écran de démarrage ni d attente réseau" 'grep -q "^disable_splash=1" "$R/boot/firmware/config.txt" && grep -q "systemctl disable --now NetworkManager-wait-online.service" "$WORK/calls.log" && grep -q "systemctl disable --now dphys-swapfile.service" "$WORK/calls.log"'
 check "économie d énergie : Bluetooth, audio, LED" 'grep -q "^dtoverlay=disable-bt" "$R/boot/firmware/config.txt" && grep -q "^dtparam=audio=off" "$R/boot/firmware/config.txt" && grep -q "^dtparam=act_led_trigger=none" "$R/boot/firmware/config.txt"'
 check "services inutiles désactivés" 'grep -q "systemctl disable --now bluetooth.service" "$WORK/calls.log"'
 

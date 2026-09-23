@@ -63,6 +63,72 @@ fn load_config(paths: &Paths) -> AppConfig {
     }
 }
 
+/// Mount the USB key if needed, restore the settings of a new SD card from
+/// it, and apply the "forgotten password" file.
+async fn prepare_usb_key(state: &AppState, storage: &impl aurion::ports::storage::StoragePort) {
+    if !storage.is_available() {
+        if let Err(e) = storage.mount().await {
+            tracing::warn!("Storage mount failed: {} — continuing", e);
+        }
+    }
+    let file = state.paths.config_file.clone();
+    let mut config = state.config.write().await;
+    let mut restored_log = false;
+    if let Some(restored) = aurion::core::config::settings_from_usb(&config, &file) {
+        *config = restored;
+        let _ = config.save(&file);
+        aurion::core::config::mark_user_settings(&file);
+        tracing::info!("Réglages restaurés depuis la clé USB");
+        restored_log = true;
+    }
+    // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
+    let reset = aurion::core::config::apply_usb_wifi_reset(&mut config);
+    if reset {
+        tracing::warn!("Mot de passe Wi-Fi réinitialisé par le fichier de la clé USB");
+        if let Err(e) = config.save(&file) {
+            tracing::error!("Sauvegarde de la config impossible: {}", e);
+        }
+    }
+    if config.network.password == DEFAULT_WIFI_PASSWORD {
+        tracing::warn!("[Securite] Mot de passe Wi-Fi par defaut : l'accueil propose de le changer.");
+    }
+    drop(config);
+    if restored_log {
+        state.add_log("Réglages restaurés depuis la clé USB (nouvelle carte SD)".into()).await;
+    }
+    if reset && aurion::core::config::has_user_settings(&file) {
+        // Hotspot already up with the old password on a normal boot: restart it
+        restart_hotspot_if_running(state).await;
+    }
+}
+
+/// Start the Aurion Wi-Fi and record how long after power-on it was ready.
+async fn start_hotspot(state: &AppState) {
+    #[cfg(feature = "rpi")]
+    {
+        use aurion::ports::network::NetworkApPort;
+        let net = state.config.read().await.network.clone();
+        tracing::info!("Starting Wi-Fi AP: {} (channel {})", net.ssid, net.channel);
+        if let Err(e) = aurion::adapters::rpi::NetworkRpi::new().start_ap(&net.ssid, &net.password, net.channel).await {
+            tracing::warn!("Failed to start Wi-Fi AP: {} — continuing", e);
+            state.add_log(format!("Hotspot Wi-Fi non démarré: {}", e)).await;
+        }
+    }
+    if let Some(up) = aurion::sys::uptime_secs() {
+        *state.hotspot_ready_at.lock().unwrap() = Some(up);
+        state.add_log(format!("Wi-Fi Aurion prêt {:.0} s après l'allumage", up)).await;
+    }
+}
+
+#[allow(unused_variables)]
+async fn restart_hotspot_if_running(state: &AppState) {
+    #[cfg(feature = "rpi")]
+    {
+        let net = state.config.read().await.network.clone();
+        let _ = aurion::sys::helper(&["ap-start", &net.ssid, &net.channel.to_string()], Some(&net.password), std::time::Duration::from_secs(60)).await;
+    }
+}
+
 /// Minimal sd_notify(3): tell systemd we are ready / alive.
 fn sd_notify(msg: &str) {
     let Ok(socket_path) = std::env::var("NOTIFY_SOCKET") else { return };
@@ -106,40 +172,26 @@ async fn main() -> anyhow::Result<()> {
             let port = config.web.port;
             let state = AppState::with_paths(config, paths);
 
-            // The USB key first: it holds the photos and a copy of the
-            // settings (a freshly flashed SD card finds them back there).
+            // Boot order. Normal boots: the Aurion Wi-Fi first (the phone can
+            // connect at once), the USB key in parallel. New SD card: the key
+            // first, since it holds the settings (Wi-Fi password) to restore.
             #[cfg(feature = "rpi")]
             let storage = aurion::adapters::rpi::StorageRpi::new(state.config.read().await.storage.mount_point.clone());
             #[cfg(not(feature = "rpi"))]
             let storage = aurion::adapters::pc::StorageMock::new(PathBuf::from(state.config.read().await.storage.mount_point.clone()));
-            use aurion::ports::storage::StoragePort;
-            if !storage.is_available() {
-                if let Err(e) = storage.mount().await {
-                    tracing::warn!("Storage mount failed: {} — continuing", e);
-                }
+            let fresh_card = !aurion::core::config::has_user_settings(&state.paths.config_file);
+            if !fresh_card {
+                start_hotspot(&state).await;
             }
+            prepare_usb_key(&state, &storage).await;
+            if fresh_card {
+                start_hotspot(&state).await;
+            }
+            // Camera check done in the background now: the first home page
+            // on the phone shows at once (the result is cached for 30 s).
             {
-                let mut config = state.config.write().await;
-                let file = state.paths.config_file.clone();
-                if let Some(restored) = aurion::core::config::settings_from_usb(&config, &file) {
-                    *config = restored;
-                    let _ = config.save(&file);
-                    aurion::core::config::mark_user_settings(&file);
-                    tracing::info!("Réglages restaurés depuis la clé USB");
-                    drop(config);
-                    state.add_log("Réglages restaurés depuis la clé USB (nouvelle carte SD)".into()).await;
-                    config = state.config.write().await;
-                }
-                // "Mot de passe oublié" : fichier aurion-reset-wifi.txt sur la clé USB
-                if aurion::core::config::apply_usb_wifi_reset(&mut config) {
-                    tracing::warn!("Mot de passe Wi-Fi réinitialisé par le fichier de la clé USB");
-                    if let Err(e) = config.save(&file) {
-                        tracing::error!("Sauvegarde de la config impossible: {}", e);
-                    }
-                }
-                if config.network.password == DEFAULT_WIFI_PASSWORD {
-                    tracing::warn!("[Securite] Mot de passe Wi-Fi par defaut : l'accueil propose de le changer.");
-                }
+                let st = state.clone();
+                tokio::spawn(async move { aurion::web::api::camera_detected(&st).await });
             }
 
             // Hardware clock (Raspberry Pi 5, or RTC module on a Pi 4): the
@@ -155,18 +207,6 @@ async fn main() -> anyhow::Result<()> {
                 if ok {
                     state.clock_from_rtc.store(true, std::sync::atomic::Ordering::Relaxed);
                     state.add_log("Heure donnée par l'horloge matérielle (RTC)".into()).await;
-                }
-            }
-
-            // Start Wi-Fi AP
-            #[cfg(feature = "rpi")]
-            {
-                use aurion::ports::network::NetworkApPort;
-                let net = state.config.read().await.network.clone();
-                tracing::info!("Starting Wi-Fi AP: {} (channel {})", net.ssid, net.channel);
-                if let Err(e) = aurion::adapters::rpi::NetworkRpi::new().start_ap(&net.ssid, &net.password, net.channel).await {
-                    tracing::warn!("Failed to start Wi-Fi AP: {} — continuing", e);
-                    state.add_log(format!("Hotspot Wi-Fi non démarré: {}", e)).await;
                 }
             }
 

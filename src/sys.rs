@@ -225,3 +225,70 @@ mod rtc_tests {
         assert!(rtc_info_at(&rtc, &model).wake_capable);
     }
 }
+
+/// A USB disk plugged into the Pi (whole device, e.g. `sda`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct UsbDisk {
+    pub name: String,
+    pub size_bytes: u64,
+    pub model: String,
+}
+
+/// USB disks seen by the kernel. Only `sdX` devices whose sysfs path goes
+/// through a USB controller: never the SD card (`mmcblk`) nor an NVMe drive.
+pub fn usb_disks() -> Vec<UsbDisk> {
+    usb_disks_at(Path::new("/sys/block"))
+}
+
+pub fn usb_disks_at(sys_block: &Path) -> Vec<UsbDisk> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(sys_block) else { return out };
+    for e in rd.filter_map(|e| e.ok()) {
+        let name = e.file_name().to_string_lossy().to_string();
+        let valid = name.len() == 3 && name.starts_with("sd") && name.as_bytes()[2].is_ascii_lowercase();
+        if !valid {
+            continue;
+        }
+        let real = std::fs::canonicalize(e.path()).unwrap_or_default();
+        if !real.to_string_lossy().contains("/usb") {
+            continue;
+        }
+        let read = |f: &str| std::fs::read_to_string(e.path().join(f)).map(|s| s.trim().to_string()).unwrap_or_default();
+        let sectors: u64 = read("size").parse().unwrap_or(0);
+        let model = format!("{} {}", read("device/vendor"), read("device/model")).trim().to_string();
+        out.push(UsbDisk { name, size_bytes: sectors * 512, model });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Seconds since the board was powered on (boot timing in Diagnostics).
+pub fn uptime_secs() -> Option<f64> {
+    std::fs::read_to_string("/proc/uptime").ok()?.split_whitespace().next()?.parse().ok()
+}
+
+#[cfg(test)]
+mod usb_tests {
+    use super::*;
+
+    #[test]
+    fn only_usb_disks_are_listed() {
+        let d = tempfile::tempdir().unwrap();
+        let devices = d.path().join("devices");
+        let block = d.path().join("block");
+        std::fs::create_dir_all(&block).unwrap();
+        let mk = |name: &str, path: &str, sectors: &str, model: &str| {
+            let dev = devices.join(path).join(name);
+            std::fs::create_dir_all(dev.join("device")).unwrap();
+            std::fs::write(dev.join("size"), sectors).unwrap();
+            std::fs::write(dev.join("device/vendor"), "SanDisk ").unwrap();
+            std::fs::write(dev.join("device/model"), model).unwrap();
+            std::os::unix::fs::symlink(&dev, block.join(name)).unwrap();
+        };
+        mk("sda", "platform/usb2/2-1/host0/block", "250069680\n", "Ultra");
+        mk("sdb", "platform/ata/host1/block", "100\n", "SATA");        // not USB
+        mk("mmcblk0", "platform/mmc/block", "100\n", "SD");            // SD card
+        let disks = usb_disks_at(&block);
+        assert_eq!(disks, vec![UsbDisk { name: "sda".into(), size_bytes: 250069680 * 512, model: "SanDisk Ultra".into() }]);
+    }
+}

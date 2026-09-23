@@ -109,6 +109,55 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     })
 }
 
+/// USB keys plugged into the Pi, and the state of the capture drive.
+pub async fn get_usb_devices(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let mount = state.config.read().await.storage.mount_point.clone();
+    let health = crate::sys::storage_health(FsPath::new(&mount));
+    Json(serde_json::json!({
+        "devices": crate::sys::usb_disks(),
+        "mounted": health.is_mountpoint,
+        "writable": health.writable,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct FormatRequest {
+    pub device: String,
+    /// Must be "EFFACER": the whole key is erased.
+    pub confirm: String,
+}
+
+/// Prepare a USB key: erase it, one exFAT partition "AURION", mount it.
+pub async fn format_usb(State(state): State<AppState>, Json(req): Json<FormatRequest>) -> Result<String, ApiError> {
+    if req.confirm != "EFFACER" {
+        return Err(err(StatusCode::BAD_REQUEST, "Confirmation manquante"));
+    }
+    let valid = req.device.len() == 3 && req.device.starts_with("sd") && req.device.as_bytes()[2].is_ascii_lowercase();
+    if !valid {
+        return Err(err(StatusCode::BAD_REQUEST, "Périphérique invalide"));
+    }
+    if state.current_phase().await != Phase::Arm {
+        return Err(err(StatusCode::CONFLICT, "Impossible pendant une nuit"));
+    }
+    require_system_actions(&state)?;
+    state.add_log(format!("Préparation de la clé {} (effacement, exFAT)…", req.device)).await;
+    crate::sys::helper(&["usb-format", &req.device], None, Duration::from_secs(300))
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Préparation impossible : {}", e)))?;
+    // The mount is asynchronous (systemd-mount --no-block): wait for it
+    let mount = state.config.read().await.storage.mount_point.clone();
+    for _ in 0..30 {
+        if crate::sys::storage_health(FsPath::new(&mount)).writable {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    // The settings are copied on the new key right away
+    let _ = state.config.read().await.save_usb_backup();
+    state.add_log("Clé prête".into()).await;
+    Ok("Clé prête".into())
+}
+
 async fn resume_in_secs(state: &AppState) -> Option<u64> {
     state.resume_at.read().await.map(|at| at.saturating_duration_since(tokio::time::Instant::now()).as_secs())
 }
@@ -131,6 +180,9 @@ pub struct Check {
     pub level: &'static str,
     pub title: String,
     pub detail: String,
+    /// Button offered with the check ("format_usb": prepare the key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -158,7 +210,7 @@ pub struct Preflight {
 }
 
 fn check(id: &'static str, level: &'static str, title: impl Into<String>, detail: impl Into<String>) -> Check {
-    Check { id, level, title: title.into(), detail: detail.into() }
+    Check { id, level, title: title.into(), detail: detail.into(), action: None }
 }
 
 /// "4 h 48", "9 h": same wording as the web page.
@@ -223,7 +275,7 @@ pub fn capacity_hours(config: &AppConfig, free_bytes: u64, bytes_per_frame: u64)
     round1(frames * period / 3600.0)
 }
 
-async fn camera_detected(state: &AppState) -> bool {
+pub async fn camera_detected(state: &AppState) -> bool {
     if !cfg!(feature = "rpi") {
         return true; // simulated camera on PC
     }
@@ -262,8 +314,18 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
     let planned = planned_hours(&config);
     let mut capacity = None;
     if !usb_ok {
-        checks.push(check("usb", "error", "Clé USB absente",
-            "Branchez une clé USB formatée en exFAT ou FAT32 (128 Go conseillés pour le RAW)."));
+        let plugged = crate::sys::usb_disks();
+        if let Some(disk) = plugged.first() {
+            // A key is plugged but not usable: unformatted, or ext4 / NTFS...
+            let mut c = check("usb", "error", "Clé USB à préparer",
+                format!("La clé {} ({:.0} Go) n'est pas lisible par Aurion. « Préparer la clé » l'efface et la formate en exFAT.",
+                    disk.model, disk.size_bytes as f64 / 1e9));
+            c.action = Some("format_usb");
+            checks.push(c);
+        } else {
+            checks.push(check("usb", "error", "Clé USB absente",
+                "Branchez une clé USB (512 Go conseillés pour plusieurs nuits de RAW)."));
+        }
     } else if let Some((_, free)) = crate::sys::disk_usage(&mount) {
         let m = mount.clone();
         let images: Vec<(String, u64)> = tokio::task::spawn_blocking(move || {
@@ -839,6 +901,8 @@ pub struct DiagnosticsResponse {
     pub timezone: String,
     pub memory_available_mb: Option<u64>,
     pub throttled: Option<String>,
+    /// Seconds after power-on when the Aurion Wi-Fi was ready (boot speed).
+    pub hotspot_ready_secs: Option<f64>,
 }
 
 fn read_timezone() -> String {
@@ -855,7 +919,7 @@ fn read_timezone() -> String {
         .unwrap_or_else(|| chrono::Local::now().format("UTC%:z").to_string())
 }
 
-pub async fn get_diagnostics(State(_state): State<AppState>) -> Json<DiagnosticsResponse> {
+pub async fn get_diagnostics(State(state): State<AppState>) -> Json<DiagnosticsResponse> {
     let platform = if cfg!(feature = "rpi") { "Raspberry Pi" } else { "PC (dev)" }.to_string();
 
     let hostname = std::fs::read_to_string("/etc/hostname")
@@ -898,6 +962,7 @@ pub async fn get_diagnostics(State(_state): State<AppState>) -> Json<Diagnostics
         timezone: read_timezone(),
         memory_available_mb,
         throttled,
+        hotspot_ready_secs: *state.hotspot_ready_at.lock().unwrap(),
     })
 }
 

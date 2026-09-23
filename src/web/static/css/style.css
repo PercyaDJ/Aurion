@@ -845,3 +845,4 @@ html:not(.expert) .expert-only { display: none !important; }
 .switch-row:has(input:checked) { border-color: var(--accent); background: var(--accent-glow); }
 .gallery-item { position: relative; }
 .raw-badge { position: absolute; top: 6px; right: 6px; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: rgba(0,0,0,0.6); color: var(--green); }
+.check-action { margin-top: 0.4rem; }

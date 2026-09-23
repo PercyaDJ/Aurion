@@ -119,6 +119,8 @@ pub struct AppState {
     pub auto_start: Arc<RwLock<AutoStart>>,
     /// An online update is running in this process.
     pub online_update_running: Arc<AtomicBool>,
+    /// Seconds after power-on when the Aurion Wi-Fi was ready.
+    pub hotspot_ready_at: Arc<std::sync::Mutex<Option<f64>>>,
 }
 
 /// Automatic start of the night (expedition mode), shown on the home screen.
@@ -168,6 +170,7 @@ impl AppState {
             clock_from_rtc: Arc::new(AtomicBool::new(false)),
             auto_start: Arc::new(RwLock::new(AutoStart::Off)),
             online_update_running: Arc::new(AtomicBool::new(false)),
+            hotspot_ready_at: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -235,6 +238,8 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/disconnect", post(api::disconnect))
         .route("/api/darks", get(api::get_darks).post(api::capture_darks))
         .route("/api/storage", get(api::get_storage))
+        .route("/api/storage/usb", get(api::get_usb_devices))
+        .route("/api/storage/format", post(api::format_usb))
         .route("/api/logs", get(api::get_logs))
         .route("/api/diagnostics", get(api::get_diagnostics))
         .route("/api/system/time", post(api::set_system_time))

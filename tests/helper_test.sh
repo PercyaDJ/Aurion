@@ -43,7 +43,21 @@ ko    "$HELPER" set-time 0
 ko    "$HELPER" set-time "1767225600; reboot"
 ko    "$HELPER" set-time 9999999999
 # version (checked by the application)
-has   "2" "$HELPER" version
+has   "3" "$HELPER" version
+
+# usb-format: USB disks only, never the SD card or the system disk
+SB=$(mktemp -d); mkdir -p "$SB/dev/usb1/1-1/host0/block/sda" "$SB/dev/mmc/block/mmcblk0" "$SB/block"
+ln -s "$SB/dev/usb1/1-1/host0/block/sda" "$SB/block/sda"
+ln -s "$SB/dev/mmc/block/mmcblk0" "$SB/block/mmcblk0"
+has   "mkfs.exfat -L AURION /dev/sda1" env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sda
+has   "wipefs" env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sda
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format mmcblk0
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sdb
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format "sda; reboot"
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-format sda
+mkdir -p "$SB/dev/usb1/1-2/host1/block/sdb"; ln -s "$SB/dev/usb1/1-2/host1/block/sdb" "$SB/block/sdb"
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sda   # two keys: refused
+rm -rf "$SB"
 
 # power-profile (night energy saving)
 CPU_FAKE=$(mktemp -d); NET_FAKE=$(mktemp -d)

@@ -270,6 +270,12 @@ try {
     assert(!fs.existsSync(path.join(nightDir, 'thumbs/aurora_20260305_213100_00000.jpg')), 'thumbnail still present');
   });
 
+  await step('stockage : bouton préparer la clé (mode expert)', async () => {
+    await page.goto(base + '/storage.html');
+    await page.waitForSelector('#prepareKeyBtn');
+    assert((await page.textContent('#prepareKeyBtn')).includes('efface'), 'the button says it erases');
+  });
+
   await step('diagnostics : version affichée et mise à jour depuis GitHub', async () => {
     await page.goto(base + '/diagnostics.html');
     await page.waitForFunction(() => /^\d+\.\d+\.\d+/.test(document.getElementById('sysVersion').textContent));

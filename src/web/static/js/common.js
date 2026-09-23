@@ -109,3 +109,26 @@ function aurionPoll(fn, ms) {
 
 if (aurionIsExpert()) document.documentElement.classList.add('expert');
 document.addEventListener('DOMContentLoaded', aurionBuildMenu);
+
+// « Préparer la clé » : efface la clé USB et la formate en exFAT (après
+// confirmation, avec le modèle et la taille de la clé pour éviter l'erreur).
+async function aurionPrepareUsbKey(onDone) {
+    try {
+        const info = await (await apiFetch('/api/storage/usb')).json();
+        const keys = info.devices || [];
+        if (keys.length === 0) { showToast('Aucune clé USB détectée : branchez-la puis réessayez', 'error'); return; }
+        if (keys.length > 1) { showToast('Branchez une seule clé USB pendant la préparation', 'error'); return; }
+        const k = keys[0];
+        const size = (k.size_bytes / 1e9).toFixed(0);
+        if (!confirm(`Préparer la clé ${k.model || k.name} (${size} Go) ?\n\nTOUT son contenu sera effacé, puis elle sera formatée pour Aurion (exFAT). Cela prend moins d'une minute.`)) return;
+        showToast('Préparation de la clé…', 'success');
+        await apiFetch('/api/storage/format', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device: k.name, confirm: 'EFFACER' }),
+        });
+        showToast('Clé prête', 'success');
+        if (onDone) onDone();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}

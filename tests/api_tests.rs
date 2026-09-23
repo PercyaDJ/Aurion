@@ -378,3 +378,20 @@ async fn saved_settings_are_copied_on_the_usb_key() {
     assert_eq!(copy["expedition"]["enabled"], true);
     assert!(t.config_dir().join(".reglages-utilisateur").exists(), "this SD card now has user settings");
 }
+
+#[tokio::test]
+async fn prepare_usb_key_is_guarded() {
+    let t = common::env();
+    let info: Value = t.server.get("/api/storage/usb").await.json();
+    assert!(info["devices"].is_array());
+    let post = |body: Value| t.server.post("/api/storage/format").json(&body);
+    post(json!({"device": "sda", "confirm": "oui"})).await.assert_status(StatusCode::BAD_REQUEST);
+    post(json!({"device": "mmcblk0", "confirm": "EFFACER"})).await.assert_status(StatusCode::BAD_REQUEST);
+    post(json!({"device": "sda1", "confirm": "EFFACER"})).await.assert_status(StatusCode::BAD_REQUEST);
+    post(json!({"device": "sda;x", "confirm": "EFFACER"})).await.assert_status(StatusCode::BAD_REQUEST);
+    // Valid request but no system actions on a PC
+    post(json!({"device": "sda", "confirm": "EFFACER"})).await.assert_status(StatusCode::NOT_IMPLEMENTED);
+    // Never during a night
+    *t.state.phase.write().await = aurion::core::models::Phase::Run;
+    post(json!({"device": "sda", "confirm": "EFFACER"})).await.assert_status(StatusCode::CONFLICT);
+}

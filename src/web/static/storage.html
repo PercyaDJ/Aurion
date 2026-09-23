@@ -22,6 +22,15 @@
 
         <div class="card fade-in">
             <div class="card-header">
+                <span class="card-title">Préparer une clé neuve</span>
+            </div>
+            <span class="form-hint" style="display:block;margin-bottom:0.5rem;">Efface la clé USB branchée et la formate
+                pour Aurion (exFAT, nom AURION). Utile pour une clé non reconnue ou pour repartir à neuf.</span>
+            <button class="btn btn-outline btn-danger-outline btn-block" id="prepareKeyBtn" onclick="prepareKey()">Préparer la clé (efface tout)</button>
+        </div>
+
+        <div class="card fade-in">
+            <div class="card-header">
                 <span class="card-title">Clé USB</span>
                 <span class="badge badge-ok" id="storageBadge">OK</span>
             </div>
@@ -58,6 +67,7 @@
     </div>
 
     <script>
+        function prepareKey() { aurionPrepareUsbKey(updateStorage); }
 
         async function updateStorage() {
             try {

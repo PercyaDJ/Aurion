@@ -20,9 +20,9 @@ Boucle essai / correction : [docs/GUIDE_DEVELOPPEMENT.md](docs/GUIDE_DEVELOPPEME
 <details>
 <summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.9.0_arm64.deb`
+- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.10.0_arm64.deb`
 - Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.9.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.10.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
 
 Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>

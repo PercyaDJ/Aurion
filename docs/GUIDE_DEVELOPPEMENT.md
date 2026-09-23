@@ -44,7 +44,7 @@ champ *Partage de connexion* vide, le téléchargement utilise la connexion actu
 Elle remplace l'application (`/opt/aurion/aurion`), pas le programme système `aurion-helper` qui tourne en root.
 Laisser le Pi réécrire son propre programme root avec un fichier téléchargé ouvrirait une faille. Quand le helper
 change (nouvelle commande système), *Diagnostics* l'indique ; il faut alors installer une fois l'image carte SD ou
-le paquet `.deb` de la version. Version actuelle du helper : 2 (commandes `power-profile`, `rtc-wake`, `version`).
+le paquet `.deb` de la version. Version actuelle du helper : 3 (commandes `power-profile`, `rtc-wake`, `usb-format`, `version`).
 
 ## 2. La boucle avec un ordinateur (la plus rapide)
 

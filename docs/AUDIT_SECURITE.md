@@ -65,6 +65,11 @@ Surfaces analysées : API HTTP (42 routes, dont 9 de portail captif), pages web,
 | `aurion-helper power-profile` | 3 valeurs fixes ; en simulation, jamais le vrai `/sys` ; Ethernet laissé actif si un câble est branché | `helper_test.sh` (8 cas) |
 | Retour arrière | échange de deux fichiers du compte du service, refusé pendant une nuit | `rollback_swaps_current_and_previous` |
 
+Préparer la clé (`aurion-helper usb-format`, 1.10.0) : commande destructrice, donc la plus encadrée. Nom `sdX` exact
+(pas de partition, pas d'autre type de disque), chemin sysfs passant par un contrôleur USB (jamais `mmcblk`, NVMe,
+SATA), refus si le disque porte la racine du système, refus si plusieurs clés sont branchées. Côté API : confirmation
+`EFFACER`, phase ARM uniquement, anti-CSRF. Tests : `helper_test.sh` (7 cas), `prepare_usb_key_is_guarded`.
+
 Copie des réglages sur la clé (`aurion-reglages.json`, 1.9.0) : elle contient le mot de passe du Wi-Fi Aurion, pas
 celui du partage de connexion du téléphone. Qui possède la clé a déjà l'accès physique (réinitialisation du mot de
 passe par fichier, photos) : risque jugé faible. La copie n'est reprise que sur une carte SD sans réglages

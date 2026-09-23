@@ -1,5 +1,26 @@
 # Journal des versions
 
+## 1.10.0
+
+Objectif : une mise en route du soir la plus courte possible, dans le froid, et une clé neuve qui marche du premier
+coup.
+
+### Allumage rapide (hors première installation)
+- Le Wi-Fi Aurion démarre **en premier** : la clé USB est montée ensuite, en parallèle (avant, une clé absente ou non
+  reconnue retardait le Wi-Fi d'environ 20 s). Sur une carte SD neuve seulement, la clé passe d'abord pour reprendre
+  les réglages.
+- Services inutiles coupés à l'installation : attente du réseau au démarrage, fichier d'échange sur la carte SD,
+  mises à jour `apt` automatiques ; pas d'écran de démarrage.
+- Détection de la caméra lancée en arrière-plan au démarrage : la première page s'affiche tout de suite.
+- Temps réel mesuré : *Diagnostics*, « Wi-Fi prêt après l'allumage » (et journal).
+
+### Préparer la clé
+- Bouton **Préparer la clé** : sur l'accueil quand une clé est branchée mais illisible (non formatée, ext4…), et
+  dans *Stockage* (mode expert). Efface la clé et la formate en exFAT (nom AURION) après confirmation avec son
+  modèle et sa taille, puis la monte et y copie les réglages.
+- `aurion-helper usb-format` : clés USB uniquement (jamais la carte SD, un disque NVMe ou SATA, ni le disque du
+  système), une seule clé branchée ; version du helper 3.
+
 ## 1.9.0
 
 Objectif : tout-en-un. Un fichier à graver (système + application), la caméra prête en quelques minutes, et une

@@ -185,6 +185,14 @@
                 li.dataset.check = c.id;
                 li.innerHTML = `<span class="dot"></span><span><b>${aurionEscape(c.title)}</b>` +
                     (c.detail ? `<small>${aurionEscape(c.detail)}</small>` : '') + '</span>';
+                if (c.action === 'format_usb') {
+                    const b = document.createElement('button');
+                    b.className = 'btn btn-primary btn-sm check-action';
+                    b.id = 'prepareKeyBtn';
+                    b.textContent = 'Préparer la clé';
+                    b.onclick = () => aurionPrepareUsbKey(loadPreflight);
+                    li.lastChild.appendChild(b);
+                }
                 ul.appendChild(li);
             }
             const badge = document.getElementById('readyBadge');

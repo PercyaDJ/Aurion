@@ -44,7 +44,7 @@ RUN_DIR=/run/aurion
 [[ "$DRYRUN" == "1" ]] && RUN_DIR="${AURION_RUN_DIR:-${TMPDIR:-/tmp}/aurion-helper-dryrun.$$}"
 AP_CON=aurion-ap
 # Bumped when commands change: the application checks it (Diagnostics).
-HELPER_VERSION=2
+HELPER_VERSION=3
 RTC_DIR=/sys/class/rtc/rtc0
 # Dry-run (tests): a fake RTC folder, never the real /sys
 [[ "$DRYRUN" == "1" ]] && RTC_DIR="${AURION_FAKE_RTC:-/nonexistent/aurion-rtc}"
@@ -398,6 +398,44 @@ cmd_umount_usb() {
   if have systemd-umount; then run systemd-umount "$MOUNT_POINT"; else run umount "$MOUNT_POINT"; fi
 }
 
+# ─── Prepare a new USB key (erase + exFAT) ───────────────────
+SYS_BLOCK=/sys/block
+[[ "$DRYRUN" == "1" ]] && SYS_BLOCK="${AURION_FAKE_SYSBLOCK:-/nonexistent/aurion-sysblock}"
+
+# Whole USB disks only (sysfs path through a USB controller): never the SD
+# card (mmcblk), an NVMe drive or a SATA disk.
+usb_disks() {
+  local d
+  for d in "$SYS_BLOCK"/sd?; do
+    [[ -e "$d" ]] || continue
+    readlink -f "$d" | grep -q '/usb' && echo "${d##*/}"
+  done
+}
+
+cmd_usb_format() {
+  local dev="${1:-}" count root_src
+  [[ "$dev" =~ ^sd[a-z]$ ]] || die "périphérique invalide"
+  usb_disks | grep -qx "$dev" || die "$dev n'est pas une clé USB"
+  count=$(usb_disks | wc -l)
+  (( count == 1 )) || die "branchez une seule clé USB pendant la préparation"
+  if [[ "$DRYRUN" == "1" ]]; then root_src="${AURION_FAKE_ROOTDEV:-/dev/mmcblk0p2}"; else root_src=$(findmnt -n -o SOURCE /); fi
+  [[ "$root_src" == "/dev/$dev"* ]] && die "$dev porte le système : refusé"
+  # Release the key (Aurion mount point and any other mount of its partitions)
+  cmd_umount_usb >/dev/null 2>&1 || true
+  if [[ "$DRYRUN" != "1" ]]; then
+    local p
+    for p in /dev/"$dev"?*; do [[ -e "$p" ]] && umount "$p" 2>/dev/null || true; done
+  fi
+  run wipefs -a -q "/dev/$dev"
+  # One partition over the whole key, type 07 (exFAT)
+  if [[ "$DRYRUN" == "1" ]]; then echo "DRY: sfdisk /dev/$dev (label: dos, type 7)" >&2
+  else printf 'label: dos\n,,7\n' | sfdisk --quiet "/dev/$dev"; fi
+  run udevadm settle --timeout=10 || true
+  run mkfs.exfat -L AURION "/dev/${dev}1"
+  echo "clé préparée"
+  AURION_FAKE_FSTYPE=exfat cmd_usb_add "${dev}1"
+}
+
 # ─── Dispatch ────────────────────────────────────────────────
 
 [[ $EUID -eq 0 || "$DRYRUN" == "1" ]] || die "doit être lancé en root (sudo)"
@@ -417,5 +455,6 @@ case "$cmd" in
   usb-add)       cmd_usb_add "$@" ;;
   mount-usb)     cmd_mount_usb ;;
   umount-usb)    cmd_umount_usb ;;
+  usb-format)    cmd_usb_format "$@" ;;
   *) die "commande inconnue: ${cmd:-<vide>}" ;;
 esac

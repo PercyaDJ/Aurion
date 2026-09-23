@@ -663,6 +663,12 @@ pub fn mark_user_settings(config_file: &Path) {
     }
 }
 
+/// Settings were saved on this SD card (normal boots): the hotspot can start
+/// before the USB key is ready, nothing needs to be restored from it.
+pub fn has_user_settings(config_file: &Path) -> bool {
+    config_file.parent().map(|d| d.join(USER_SETTINGS_MARKER).exists()).unwrap_or(false)
+}
+
 /// Settings to restore from the key on a freshly flashed SD card: only when
 /// nothing was ever saved on this card and the key holds a valid copy.
 /// The local mount point is kept.

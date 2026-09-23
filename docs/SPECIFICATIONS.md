@@ -1,6 +1,6 @@
 # Spécifications fonctionnelles
 
-Version couverte : **1.9.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
+Version couverte : **1.10.0**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
 
 ## 1. Utilisateurs
 
@@ -58,6 +58,8 @@ Version couverte : **1.9.0**. Ce document décrit **ce que fait** Aurion (le com
 | F33 | Retour arrière | un geste rétablit la version précédente (et inversement) | `rollback_swaps_current_and_previous` |
 | F34 | Tout-en-un | une image (système + application) sous un nom fixe, lien permanent vers la dernière version ; caméra prête 3 à 5 min après le premier allumage, sans internet | `image_test.sh` |
 | F35 | Réglages sur la clé | chaque enregistrement copie les réglages sur la clé ; une carte SD neuve les reprend au premier démarrage ; le mot de passe du partage de connexion n'est jamais copié | `settings_survive_a_new_sd_card`, `saved_settings_are_copied_on_the_usb_key` |
+| F36 | Allumage rapide | hors première installation : le Wi-Fi Aurion démarre avant la clé et les vérifications ; temps mesuré et affiché | `install_test.sh` (démarrage rapide), revue |
+| F37 | Préparer la clé | une clé illisible est signalée avec un bouton ; effacement et formatage exFAT après confirmation (modèle, taille) ; jamais la carte SD ni le disque système | `prepare_usb_key_is_guarded`, `only_usb_disks_are_listed`, `helper_test.sh` |
 | F29 | Autonomie en nuits | l'accueil affiche le nombre de nuits que la clé peut contenir (mode expédition) | `preflight_in_expedition_mode_*` |
 
 ## 4. Règles de gestion

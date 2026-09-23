@@ -375,6 +375,9 @@ $POWER_BEGIN
 # Bluetooth et audio inutiles sur le terrain
 dtoverlay=disable-bt
 dtparam=audio=off
+# Démarrage plus rapide (pas d'écran de démarrage, pas d'attente)
+disable_splash=1
+boot_delay=0
 # LED éteintes : moins de consommation, aucune lumière parasite près de l'objectif
 dtparam=act_led_trigger=none
 dtparam=act_led_activelow=off
@@ -387,6 +390,12 @@ CFG
   fi
   local svc
   for svc in bluetooth.service hciuart.service ModemManager.service triggerhappy.service triggerhappy.socket; do
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+  done
+  # Faster boot, fewer SD writes: nothing here needs internet at boot, no
+  # swap file on the SD card, no automatic apt runs on a field camera.
+  for svc in NetworkManager-wait-online.service systemd-networkd-wait-online.service dphys-swapfile.service \
+             apt-daily.timer apt-daily-upgrade.timer man-db.timer; do
     systemctl disable --now "$svc" >/dev/null 2>&1 || true
   done
 }

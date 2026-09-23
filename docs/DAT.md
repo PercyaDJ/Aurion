@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.9.0**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.10.0**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -92,6 +92,7 @@ stateDiagram-v2
 
 | Phase | Ce qui se passe | Code |
 |---|---|---|
+| (démarrage) | carte avec réglages : Wi-Fi Aurion d'abord, puis montage de la clé ; carte neuve : clé d'abord (réglages à reprendre), puis Wi-Fi ; détection caméra en arrière-plan ; temps « Wi-Fi prêt » mesuré (`/proc/uptime`) | `main.rs` |
 | ARM | hotspot actif, interface disponible, réglages modifiables, heure synchronisée depuis le téléphone (ou lue sur l'horloge matérielle au démarrage) ; en expédition, départ automatique 5 min après la dernière requête `/api/` si l'heure est fiable et la clé présente | `main.rs`, `web/`, `orchestrator::wait_for_start` |
 | (reprise) | si `night.json` existe et que la nuit n'est pas finie : hotspot 5 min avec compte à rebours, puis reprise | `orchestrator::resume_window`, `core/night.rs` |
 | DISCONNECT | 15 s pour que la réponse arrive au téléphone, puis arrêt du hotspot | `orchestrator::run` |
@@ -242,6 +243,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET/POST /api/darks` | série de darks |
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
 | `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour par fichier |
+| `GET /api/storage/usb`, `POST /api/storage/format` | clés USB branchées ; préparation d'une clé (effacement, exFAT), confirmation `EFFACER` exigée, jamais pendant une nuit |
 | `POST /api/system/update/online`, `GET /api/system/update/status`, `POST /api/system/rollback` | mise à jour depuis GitHub (stable ou `edge`), résultat et version du helper, retour à la version précédente |
 | `GET /api/wifi/scan`, `/api/wifi/status`, `POST /api/wifi/connect`, `/api/wifi/hotspot` | mode maintenance (Wi-Fi de la maison) |
 | `GET /api/gallery[?session=<nuit>&limit=N]` | images (1000 plus récentes par défaut, `truncated` si plus) |
