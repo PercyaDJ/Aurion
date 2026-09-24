@@ -70,7 +70,8 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/v1.20.0/install.sh \
             | sudo sh -s -- -b /usr/local/bin v1.20.0
-          syft scan dir:. --exclude ./target --exclude ./dist -o cyclonedx-json=dist/aurion-sbom.cdx.json
+          syft scan dir:. --exclude ./target --exclude ./dist \
+            --source-name aurion --source-version "${{ steps.version.outputs.version }}" -o cyclonedx-json=dist/aurion-sbom.cdx.json
 
       - uses: softprops/action-gh-release@v2
         if: steps.version.outputs.skip == 'false'

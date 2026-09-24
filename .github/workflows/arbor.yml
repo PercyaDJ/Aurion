@@ -45,8 +45,14 @@ jobs:
           pipx install "semgrep==${SEMGREP_VERSION}"
           syft version && trivy --version && semgrep --version
 
+      - name: Nom et version de l'inventaire
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "SYFT_ARGS=--source-name aurion --source-version $v" >> "$GITHUB_ENV"
+
       - name: SBOM CycloneDX (artefact)
-        run: syft scan dir:. -o cyclonedx-json=aurion-sbom.cdx.json
+        # SYFT_ARGS left unquoted on purpose: it holds several arguments.
+        run: syft scan dir:. $SYFT_ARGS -o cyclonedx-json=aurion-sbom.cdx.json
 
       - uses: actions/upload-artifact@v4
         with:
