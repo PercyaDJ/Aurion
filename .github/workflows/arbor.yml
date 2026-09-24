@@ -8,7 +8,8 @@ name: ARBOR
 # Chaque envoi remplace l'inventaire du projet : ARBOR ne signale que les nouveautés.
 # Le passage hebdomadaire détecte les failles publiées après le dernier push.
 # Envoi direct par l'API (scripts/arbor-upload.sh) : aucun script distant exécuté.
-# Sans le secret ARBOR_API_KEY, les SBOM sont produits (artefacts) mais rien n'est envoyé.
+# Une clé par projet : ARBOR_API_KEY (application), ARBOR_IMAGE_API_KEY (image).
+# Sans clé, les SBOM sont produits (artefacts) mais rien n'est envoyé.
 on:
   push:
     branches: [main]
@@ -119,12 +120,13 @@ jobs:
           name: aurion-image-sbom
           path: aurion-image-sbom.cdx.json
 
+      # Own key for the image project: each key only reaches its project.
       - name: Envoyer à ARBOR (projet de l'image)
         env:
-          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
+          ARBOR_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
         run: |
           if [ -z "$ARBOR_API_KEY" ] || [ -z "$ARBOR_PROJECT" ]; then
-            echo "::warning::Secret ARBOR_API_KEY ou variable ARBOR_IMAGE_PROJECT absent : SBOM de l'image produit, non envoyé."
+            echo "::warning::Secret ARBOR_IMAGE_API_KEY ou variable ARBOR_IMAGE_PROJECT absent : SBOM de l'image produit, non envoyé."
             exit 0
           fi
           bash scripts/arbor-upload.sh sboms aurion-image-sbom.cdx.json

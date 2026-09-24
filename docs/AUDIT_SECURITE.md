@@ -109,7 +109,7 @@ remplace l'inventaire du projet :
 | Projet ARBOR | Quand | Contenu |
 |---|---|---|
 | Application (`15991eb6-98e7-4685-8ace-8ed0c0b791f3`) | chaque push sur `main`, chaque lundi | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
-| Image carte SD (variable de dépôt `ARBOR_IMAGE_PROJECT`) | après chaque release, chaque lundi | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
+| Image carte SD (variable `ARBOR_IMAGE_PROJECT`, secret `ARBOR_IMAGE_API_KEY`) | après chaque release, chaque lundi | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
 
 Pourquoi l'image compte autant que l'application : sur le terrain, le Wi-Fi du Pi est joignable par toute personne à
 portée. Le point d'accès, le serveur DHCP et DNS et le noyau font partie de la surface d'attaque au même titre que
@@ -121,7 +121,8 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - SBOM de l'image (`scripts/image-sbom.sh`) : partition système montée en lecture seule, empreinte de l'image
   vérifiée avant, liste des fichiers exclue (sinon 18 Mo pour 2 Mo utiles, limite ARBOR 25 Mo).
 - Outils en versions figées (Syft 1.20.0, Trivy 0.70.0, Semgrep 1.177.0), scripts d'installation pris sur le tag.
-- La clé `ARBOR_API_KEY` est un secret du dépôt. Sans elle, les SBOM sont produits en artefacts et rien n'est envoyé.
+- Une clé API par projet, en secrets du dépôt : `ARBOR_API_KEY` (application) et `ARBOR_IMAGE_API_KEY` (image).
+  Une clé divulguée n'expose qu'un projet. Sans clé, les SBOM sont produits en artefacts et rien n'est envoyé.
 - Chaque release porte `aurion-sbom.cdx.json` et `aurion-image-sbom.cdx.json`.
 - Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
   pas rouge sur une faille ; l'alerte vient d'ARBOR.
