@@ -118,8 +118,16 @@ if [[ $APT -eq 1 ]]; then
       linux-headers-rpi-2712 linux-headers-rpi-v8 firmware-atheros firmware-mediatek firmware-realtek \
       firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion 2>/dev/null \
       | awk "\$2 == \"installed\" {print \$1}")
+    # Versioned kernel headers are protected from autoremove (APT::NeverAutoRemove):
+    # name them, and the compiler they pull, explicitly.
+    unused="$unused $(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" "linux-headers-*" "linux-kbuild-*" \
+      gcc-14-for-host cpp-14-for-host gcc-14-aarch64-linux-gnu cpp-14-aarch64-linux-gnu 2>/dev/null \
+      | awk "\$2 == \"installed\" {print \$1}")"
     # shellcheck disable=SC2086
-    [ -z "$unused" ] || apt-get purge -y --auto-remove $unused
+    [ -z "${unused// /}" ] || apt-get purge -y --auto-remove $unused
+    if dpkg-query -W -f="\${Package} \${db:Status-Status}\n" "linux-headers-*" gcc-14-for-host 2>/dev/null | grep -q " installed$"; then
+      echo "En-têtes du noyau ou compilateur encore présents"; exit 1
+    fi
     # What boots the Pi and its Wi-Fi must still be there
     for p in raspi-firmware firmware-brcm80211 linux-image-rpi-2712 linux-image-rpi-v8 network-manager rpi-eeprom \
              netplan.io xz-utils; do

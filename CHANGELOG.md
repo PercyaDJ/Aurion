@@ -1,6 +1,10 @@
 # Journal des versions
 
-## 1.10.2
+## 1.10.3
+
+- En-têtes du noyau et compilateur réellement retirés de l'image : Debian les protège du nettoyage automatique, ils
+  sont maintenant nommés un par un, et la fabrication échoue s'ils restent. Image 1.10.2 : 387 Mo (748 Mo en 1.10.1).
+
 
 Objectif : une image plus légère à télécharger et encore moins exposée, sans rien changer à l'application.
 
