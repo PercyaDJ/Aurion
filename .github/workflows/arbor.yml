@@ -35,7 +35,7 @@ env:
 
 jobs:
   app:
-    name: Application (SBOM, Semgrep, Trivy)
+    name: Aurion_Application (SBOM, Semgrep, Trivy)
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     env:
@@ -73,7 +73,7 @@ jobs:
             semgrep.sarif
             trivy.sarif
 
-      - name: Envoyer à ARBOR
+      - name: Envoyer à ARBOR (projet Aurion_Application)
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
         run: |
@@ -86,7 +86,7 @@ jobs:
           bash scripts/arbor-upload.sh sarif trivy.sarif
 
   image:
-    name: Image carte SD (paquets Debian)
+    name: Aurion_Image (paquets Debian de la carte SD)
     # The image only changes with a release: weekly, manual, or right after a release.
     if: >-
       github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
@@ -121,7 +121,7 @@ jobs:
           path: aurion-image-sbom.cdx.json
 
       # Own key for the image project: each key only reaches its project.
-      - name: Envoyer à ARBOR (projet de l'image)
+      - name: Envoyer à ARBOR (projet Aurion_Image)
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
         run: |
