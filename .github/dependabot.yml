@@ -1,0 +1,11 @@
+# Keeps the actions pinned by commit SHA up to date: one pull request per
+# new version, with the SHA and the version comment updated together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -41,8 +41,7 @@ jobs:
     env:
       ARBOR_PROJECT: 46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1 # Aurion_Application
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Install scripts taken from the release tag, not from main: a later change
       # upstream cannot alter what runs here.
       - name: Installer Syft, Trivy et Semgrep (versions figées)
@@ -65,7 +64,7 @@ jobs:
       - name: Trivy (secrets et configuration)
         run: trivy fs --scanners secret,misconfig --format sarif -o trivy.sarif .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aurion-sbom
           path: |
@@ -95,8 +94,7 @@ jobs:
     env:
       ARBOR_PROJECT: 7d095ce7-6d86-4c48-92ef-b9df2fbd3327 # Aurion_Image
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Installer Syft (version figée)
         run: |
           curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
@@ -115,7 +113,7 @@ jobs:
       - name: SBOM des paquets de l'image
         run: sudo bash scripts/image-sbom.sh aurion-raspios-arm64.img.xz aurion-image-sbom.cdx.json "${{ steps.rel.outputs.version }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aurion-image-sbom
           path: aurion-image-sbom.cdx.json

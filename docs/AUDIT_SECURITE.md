@@ -157,6 +157,10 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 
 Réévaluation : à chaque relevé ARBOR hebdomadaire ; tout correctif Debian publié entre dans l'image suivante
 (mise à jour de sécurité à la fabrication).
+- Actions GitHub figées par empreinte de commit (40 caractères) et non par étiquette (`@v4`), qu'un propriétaire
+  peut déplacer vers un autre code (cas trivy-action). Dependabot (`.github/dependabot.yml`) propose chaque semaine
+  une pull request qui met à jour empreinte et version ensemble. Réponse aux 20 alertes Semgrep
+  `github-actions-mutable-action-tag` (CWE-1357).
 - Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
   pas rouge sur une faille ; l'alerte vient d'ARBOR.
 
