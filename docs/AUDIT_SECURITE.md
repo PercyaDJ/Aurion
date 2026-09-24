@@ -134,6 +134,29 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   pygments 2.18.0 (CVE-2026-4539) traité par retrait du paquet, la mise à jour par pip ne s'appliquant pas à un
   paquet Debian. Composants restants sans correctif : outils locaux (binutils, rsync, curl en client, perl…),
   non joignables depuis le Wi-Fi, à classer en risque accepté.
+- Relevé ARBOR du 24/09/2026 (image 1.10.3) : 88 vulnérabilités ouvertes (230 en 1.10.0), aucune mise à jour
+  disponible, 22 paquets sans correctif. Registre des décisions ci-dessous.
+
+#### Registre des risques acceptés (image carte SD)
+
+Exposition mesurée sur l'image : sur le Wi-Fi Aurion, seuls l'interface Aurion, dnsmasq (DHCP et DNS, lancé par
+NetworkManager), NetworkManager avec wpa_supplicant (point d'accès) et avahi (mDNS) reçoivent des données du
+réseau. SSH est coupé. Les autres paquets ne traitent que des données locales ou venant d'Aurion.
+
+| Paquet | Rôle dans l'image | Joignable depuis le Wi-Fi | Décision |
+|---|---|---|---|
+| network-manager | gère le point d'accès Wi-Fi | oui, indirectement | **à vérifier** : lire le vecteur CVSS de CVE-2026-10805 et CVE-2025-9615 ; accepté seulement si l'attaque est locale (AV:L) |
+| sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | **à vérifier** : vecteur de CVE-2026-82474 ; la règle sudo n'autorise que `aurion-helper` |
+| libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
+| systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
+| busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |
+| python3.13 | netplan (configuration réseau de NetworkManager), outils apt | non | accepté |
+| perl, ack | scripts de paquets, gestion de la mémoire d'échange (rpi-swap) | non | accepté |
+| libgcrypt20 | cryptographie locale (journal systemd) | non | accepté |
+| nano, net-tools, unzip | maintenance au clavier | non | accepté ; retirables si besoin (gain faible) |
+
+Réévaluation : à chaque relevé ARBOR hebdomadaire ; tout correctif Debian publié entre dans l'image suivante
+(mise à jour de sécurité à la fabrication).
 - Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
   pas rouge sur une faille ; l'alerte vient d'ARBOR.
 
