@@ -1,0 +1,94 @@
+name: ARBOR
+
+# Suivi des vulnérabilités avec ARBOR (https://arbor.norkenix.com) :
+# - SBOM CycloneDX du dépôt (Syft : Cargo.lock, tests/e2e/package-lock.json),
+#   confronté à OSV par ARBOR, onglet « Vulnérabilités » ;
+# - Semgrep (failles dans le code) et Trivy (secrets, configuration),
+#   onglet « Code et configuration ».
+# Chaque envoi remplace l'inventaire du projet : ARBOR ne signale que les nouveautés.
+# Le passage hebdomadaire détecte les failles publiées après le dernier push.
+# Sans le secret ARBOR_API_KEY, le SBOM est quand même produit (artefact) mais rien n'est envoyé.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1" # lundi 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arbor
+  cancel-in-progress: false
+
+env:
+  SYFT_VERSION: v1.20.0
+  TRIVY_VERSION: v0.70.0
+  SEMGREP_VERSION: "1.177.0"
+
+jobs:
+  arbor:
+    name: SBOM et analyse de sécurité (ARBOR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install scripts taken from the release tag, not from main: a later change
+      # upstream cannot alter what runs here.
+      - name: Installer Syft, Trivy et Semgrep (versions figées)
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
+            | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
+          curl -sSfL "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" \
+            | sudo sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
+          pipx install "semgrep==${SEMGREP_VERSION}"
+          syft version && trivy --version && semgrep --version
+
+      - name: SBOM CycloneDX (artefact)
+        run: syft scan dir:. -o cyclonedx-json=aurion-sbom.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurion-sbom
+          path: aurion-sbom.cdx.json
+
+      - name: Clé ARBOR présente ?
+        id: key
+        env:
+          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
+        run: |
+          if [ -n "$ARBOR_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé à ARBOR."
+          fi
+
+      # The agent is downloaded to a file (never piped into a shell) and its
+      # SHA-256 printed. Set the repository variable ARBOR_SCAN_SHA256 to pin
+      # a reviewed version: any change of the script then stops the job.
+      - name: Installer l'agent arbor-scan
+        if: steps.key.outputs.present == 'true'
+        env:
+          EXPECTED_SHA256: ${{ vars.ARBOR_SCAN_SHA256 }}
+        run: |
+          curl -sSfL -o arbor-scan https://arbor.norkenix.com/agent/arbor-scan.sh
+          actual=$(sha256sum arbor-scan | cut -d' ' -f1)
+          echo "arbor-scan.sh SHA-256 : $actual"
+          if [ -n "$EXPECTED_SHA256" ] && [ "$actual" != "$EXPECTED_SHA256" ]; then
+            echo "::error::arbor-scan.sh a changé (attendu $EXPECTED_SHA256). Relire le script puis mettre à jour la variable ARBOR_SCAN_SHA256."
+            exit 1
+          fi
+          sudo install -m 0755 arbor-scan /usr/local/bin/arbor-scan
+          rm arbor-scan
+
+      # Exit code 2 when open findings of level "high" or more remain. A decision
+      # taken in ARBOR (false positive, accepted risk) unblocks it without a commit.
+      - name: Scanner et envoyer à ARBOR
+        if: steps.key.outputs.present == 'true'
+        env:
+          ARBOR_URL: https://arbor.norkenix.com
+          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
+          ARBOR_PROJECT: 15991eb6-98e7-4685-8ace-8ed0c0b791f3
+        run: arbor-scan --all --fail-on high .

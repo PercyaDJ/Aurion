@@ -101,6 +101,30 @@ n'écrit plus rien dans `/run`.
 
 Aucune vulnérabilité (« vulnerability ») connue ; aucun avis ne concerne le binaire livré sur le Pi.
 
+### Suivi continu avec ARBOR (workflow `.github/workflows/arbor.yml`)
+
+Le contrôle ci-dessus est une photo à une date. Le suivi continu passe par ARBOR (projet
+`15991eb6-98e7-4685-8ace-8ed0c0b791f3`), à chaque push sur `main` et chaque lundi (les failles publiées sans
+nouveau commit sont vues dans la semaine) :
+
+| Étape | Outil | Ce qui est analysé |
+|---|---|---|
+| SBOM CycloneDX | Syft 1.20.0 | `Cargo.lock` (233 crates), actions GitHub utilisées, dépendances du test navigateur ; confronté à OSV par ARBOR |
+| Code | Semgrep 1.177.0 | injections, crypto faible, secrets codés en dur |
+| Configuration | Trivy 0.70.0 | secrets commis, fichiers de configuration |
+
+- Le job échoue (code 2) dès qu'un résultat de niveau **élevé** ou **critique** reste ouvert ; une décision prise
+  dans ARBOR (faux positif, risque accepté) le débloque sans commit. Il ne bloque ni les tests ni la publication.
+- Chaîne d'approvisionnement : scripts d'installation pris sur le tag de la version (jamais `main`), versions
+  figées ; l'agent `arbor-scan.sh` est téléchargé dans un fichier, jamais passé directement au shell, et son
+  empreinte SHA-256 est affichée. La variable de dépôt `ARBOR_SCAN_SHA256` fige une version relue : tout
+  changement du script arrête alors le job.
+- La clé `ARBOR_API_KEY` est un secret du dépôt, jamais écrit dans le code ni dans les journaux. Sans elle, le SBOM
+  est produit (artefact `aurion-sbom`) et rien n'est envoyé.
+- Chaque release porte aussi son inventaire `aurion-sbom.cdx.json`.
+- Limite : les paquets Debian de l'image carte SD ne sont pas dans ce SBOM. Comme chaque envoi remplace
+  l'inventaire du projet ARBOR, les suivre demande un second projet ARBOR dédié à l'image.
+
 ## 6. Risques résiduels
 
 | Risque | Niveau | Pourquoi il reste | Piste |

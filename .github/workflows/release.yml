@@ -65,6 +65,13 @@ jobs:
           # Same name for every version: permanent link .../releases/latest/download/aurion-raspios-arm64.img.xz
           sudo bash scripts/build-image.sh "dist/aurion-$v-rpi-arm64" "dist/aurion-raspios-arm64.img.xz"
 
+      - name: SBOM CycloneDX de la version (suivi des vulnérabilités)
+        if: steps.version.outputs.skip == 'false'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/v1.20.0/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v1.20.0
+          syft scan dir:. --exclude ./target --exclude ./dist -o cyclonedx-json=dist/aurion-sbom.cdx.json
+
       - uses: softprops/action-gh-release@v2
         if: steps.version.outputs.skip == 'false'
         with:
@@ -89,10 +96,12 @@ jobs:
 
             Autres fichiers : paquet `.deb` (`sudo apt install ./aurion_*.deb`) et archive `.tar.gz`
             pour une installation sur un Raspberry Pi OS existant. `aurion-arm64` : utilisé par la mise à jour
-            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*).
+            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*). `aurion-sbom.cdx.json` : inventaire
+            CycloneDX des dépendances de cette version (suivi des vulnérabilités).
           files: |
             dist/*.img.xz
             dist/*.tar.gz
             dist/*.deb
             dist/*.sha256
             dist/aurion-arm64
+            dist/aurion-sbom.cdx.json

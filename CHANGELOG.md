@@ -1,5 +1,12 @@
 # Journal des versions
 
+## Non publié
+
+### Suivi des vulnérabilités (CI)
+- Nouveau workflow **ARBOR** : SBOM CycloneDX (Syft), analyse du code (Semgrep) et de la configuration (Trivy)
+  envoyés à ARBOR à chaque push sur `main` et chaque lundi ; échec dès un résultat élevé ou critique ouvert.
+- Chaque release publie son inventaire `aurion-sbom.cdx.json`.
+
 ## 1.10.0
 
 Objectif : une mise en route du soir la plus courte possible, dans le froid, et une clé neuve qui marche du premier
