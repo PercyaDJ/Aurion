@@ -39,7 +39,7 @@ jobs:
     if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     env:
-      ARBOR_PROJECT: 15991eb6-98e7-4685-8ace-8ed0c0b791f3
+      ARBOR_PROJECT: 46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1 # Aurion_Application
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +93,7 @@ jobs:
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     env:
-      ARBOR_PROJECT: ${{ vars.ARBOR_IMAGE_PROJECT }}
+      ARBOR_PROJECT: 7d095ce7-6d86-4c48-92ef-b9df2fbd3327 # Aurion_Image
     steps:
       - uses: actions/checkout@v4
 
@@ -125,8 +125,8 @@ jobs:
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
         run: |
-          if [ -z "$ARBOR_API_KEY" ] || [ -z "$ARBOR_PROJECT" ]; then
-            echo "::warning::Secret ARBOR_IMAGE_API_KEY ou variable ARBOR_IMAGE_PROJECT absent : SBOM de l'image produit, non envoyé."
+          if [ -z "$ARBOR_API_KEY" ]; then
+            echo "::warning::Secret ARBOR_IMAGE_API_KEY absent : SBOM de l'image produit, non envoyé."
             exit 0
           fi
           bash scripts/arbor-upload.sh sboms aurion-image-sbom.cdx.json

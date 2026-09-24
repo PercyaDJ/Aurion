@@ -108,8 +108,8 @@ remplace l'inventaire du projet :
 
 | Projet ARBOR | Quand | Contenu |
 |---|---|---|
-| Application (`15991eb6-98e7-4685-8ace-8ed0c0b791f3`) | chaque push sur `main`, chaque lundi | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
-| Image carte SD (variable `ARBOR_IMAGE_PROJECT`, secret `ARBOR_IMAGE_API_KEY`) | après chaque release, chaque lundi | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
+| Aurion_Application (`46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1`, secret `ARBOR_API_KEY`) | chaque push sur `main`, chaque lundi | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
+| Aurion_Image (`7d095ce7-6d86-4c48-92ef-b9df2fbd3327`, secret `ARBOR_IMAGE_API_KEY`) | après chaque release, chaque lundi | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
 
 Pourquoi l'image compte autant que l'application : sur le terrain, le Wi-Fi du Pi est joignable par toute personne à
 portée. Le point d'accès, le serveur DHCP et DNS et le noyau font partie de la surface d'attaque au même titre que
