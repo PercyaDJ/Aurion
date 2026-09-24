@@ -105,7 +105,8 @@ preflight() {
 install_packages() {
   info "Installation des paquets système"
   # dosfstools / exfatprogs: repair of the USB key after a power cut
-  local pkgs=(rpicam-apps iw nftables rfkill dosfstools exfatprogs curl)
+  # util-linux-extra: hwclock, to write the phone time into the RTC module
+  local pkgs=(rpicam-apps iw nftables rfkill dosfstools exfatprogs curl util-linux-extra)
   if systemctl is-active --quiet NetworkManager 2>/dev/null; then
     pkgs+=(dnsmasq-base)
   else

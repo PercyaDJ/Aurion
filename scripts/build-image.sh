@@ -102,8 +102,23 @@ if [[ $APT -eq 1 ]]; then
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base curl
+    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base curl util-linux-extra
     command -v rpicam-still >/dev/null || apt-get install -y --no-install-recommends rpicam-apps-lite || apt-get install -y --no-install-recommends rpicam-apps
+    # Security fixes published since the Raspberry Pi OS image
+    apt-get -y -o Dpkg::Options::=--force-confold full-upgrade
+    # Smaller attack surface: nothing an offline camera uses. Remote access
+    # (rpi-connect), cloud-init (Imager seed, unused: userconf.txt is read by
+    # userconfig.service), compilers, debugger, Bluetooth (disabled), SMB, archivers.
+    unused=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" rpi-connect-lite cloud-init mkvtoolnix gdb \
+      cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id 2>/dev/null \
+      | awk "\$2 == \"installed\" {print \$1}")
+    # shellcheck disable=SC2086
+    [ -z "$unused" ] || apt-get purge -y --auto-remove $unused
+    # Everything Aurion calls must still be there
+    for c in nmcli iw nft rfkill mkfs.exfat wipefs sfdisk blkid findmnt hwclock timedatectl udevadm \
+             ip curl sudo rpicam-still vcgencmd dnsmasq; do
+      command -v "$c" >/dev/null || { echo "Outil manquant après nettoyage : $c"; exit 1; }
+    done
     apt-get clean
     rm -rf /var/lib/apt/lists/*
   '

@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.10.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.10.1**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité

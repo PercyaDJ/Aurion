@@ -124,6 +124,11 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - Une clé API par projet, en secrets du dépôt : `ARBOR_API_KEY` (application) et `ARBOR_IMAGE_API_KEY` (image).
   Une clé divulguée n'expose qu'un projet. Sans clé, les SBOM sont produits en artefacts et rien n'est envoyé.
 - Chaque release porte `aurion-sbom.cdx.json` et `aurion-image-sbom.cdx.json`.
+- Réduction de la surface d'attaque (1.10.1) : mises à jour de sécurité Debian à la fabrication, puis retrait de
+  92 paquets inutiles (rpi-connect, cloud-init, compilateurs, gdb, Bluetooth, SMB, archiveurs et leurs dépendances
+  Python et Go). Premier relevé ARBOR sur l'image 1.10.0 : 9 mises à jour possibles, 37 composants sans correctif ;
+  une partie disparaît avec ces paquets. Les autres (binutils, rsync, curl…) sont des outils locaux, non joignables
+  depuis le Wi-Fi : à trier dans ARBOR en « risque accepté » avec cette justification.
 - Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
   pas rouge sur une faille ; l'alerte vient d'ARBOR.
 

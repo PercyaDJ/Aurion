@@ -1,6 +1,17 @@
 # Journal des versions
 
-## Non publié
+## 1.10.1
+
+Objectif : une image plus sûre, suivie en continu par ARBOR.
+
+### Image carte SD allégée et à jour
+- Mises à jour de sécurité Debian appliquées à la fabrication de l'image.
+- 92 paquets inutiles pour une caméra hors ligne retirés : accès à distance (rpi-connect), cloud-init, compilateurs,
+  débogueur, Bluetooth (déjà désactivé), partage SMB, archiveurs, bibliothèques Python et Go associées. La
+  fabrication s'arrête si un outil utilisé par Aurion disparaît.
+- `hwclock` ajouté (paquet util-linux-extra) : l'heure donnée par le téléphone est de nouveau écrite dans le module
+  horloge. Il manquait dans l'image 1.10.0, où cette écriture était ignorée sans erreur.
+- Bibliothèque de test `rand` 0.8.6 (RUSTSEC-2026-0097). Elle n'est pas dans le binaire du Pi.
 
 ### Suivi des vulnérabilités (CI)
 - Nouveau workflow **ARBOR**, deux projets : l'application (SBOM Syft, Semgrep, Trivy) à chaque push sur `main`,
