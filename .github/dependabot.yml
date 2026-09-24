@@ -6,6 +6,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Wait 7 days after a version is published: a hijacked release is usually
+    # spotted and withdrawn within that time.
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
