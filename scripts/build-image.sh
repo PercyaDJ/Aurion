@@ -159,6 +159,9 @@ boot_write "$WORK/AURION-LISEZMOI.txt" AURION-LISEZMOI.txt
 
 # ─── 5. Finish ───────────────────────────────────────────────
 sync
+# Blocks freed by the package purge still hold old data, which xz cannot
+# compress: discard them so they read as zeros and the image stays small.
+fstrim "$ROOT" 2>/dev/null || true
 umount "$ROOT"
 e2fsck -fy "$P2" >/dev/null || true
 detach_all
