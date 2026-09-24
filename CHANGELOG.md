@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 1.10.4
+
+Aucun changement de l'application ni de l'image. Version de contrôle de la chaîne de publication :
+- actions GitHub figées par empreinte de commit, passées en versions récentes (checkout 7, upload-artifact 7,
+  setup-node 7, action-gh-release 3) ; Dependabot avec 7 jours d'attente ;
+- registre des risques acceptés de l'image (AUDIT_SECURITE.md).
+
 ## 1.10.3
 
 - En-têtes du noyau et compilateur réellement retirés de l'image : Debian les protège du nettoyage automatique, ils

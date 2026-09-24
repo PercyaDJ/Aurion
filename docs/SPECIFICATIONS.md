@@ -1,6 +1,6 @@
 # Spécifications fonctionnelles
 
-Version couverte : **1.10.3**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
+Version couverte : **1.10.4**. Ce document décrit **ce que fait** Aurion (le comment est dans [DAT.md](DAT.md)).
 
 ## 1. Utilisateurs
 

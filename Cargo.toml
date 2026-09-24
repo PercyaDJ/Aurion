@@ -1,6 +1,6 @@
 [package]
 name = "aurion"
-version = "1.10.3"
+version = "1.10.4"
 edition = "2021"
 description = "Aurion — Autonomous aurora camera for Raspberry Pi"
 authors = ["Aurion"]
