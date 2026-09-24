@@ -1,6 +1,17 @@
 # Journal des versions
 
-## 1.10.1
+## 1.10.2
+
+Objectif : une image plus légère à télécharger et encore moins exposée, sans rien changer à l'application.
+
+- 47 paquets de plus retirés (environ 455 Mo installés) : en-têtes du noyau et leur compilateur, micrologiciels de
+  puces Wi-Fi absentes du Raspberry Pi (Atheros, MediaTek, Realtek, Libertas ; le Wi-Fi du Pi, Broadcom, reste),
+  PPP, rpi-update, pastebinit, wget, rich et pygments (seul correctif proposé par ARBOR sur l'image).
+- Documentation, pages de manuel et traductions du système retirées (environ 190 Mo) ; les licences restent.
+- Zones libérées effacées avant compression.
+- La fabrication s'arrête si un paquet indispensable disparaît (démarrage, noyaux Pi 4 et Pi 5, Wi-Fi, EEPROM,
+  réseau) ou si un outil appelé par Aurion manque.
+
 
 Objectif : une image plus sûre, suivie en continu par ARBOR.
 

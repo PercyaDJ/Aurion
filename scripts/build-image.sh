@@ -102,18 +102,44 @@ if [[ $APT -eq 1 ]]; then
     set -e
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base curl util-linux-extra
+    apt-get install -y --no-install-recommends iw nftables rfkill dosfstools exfatprogs dnsmasq-base curl util-linux-extra \
+      xz-utils
     command -v rpicam-still >/dev/null || apt-get install -y --no-install-recommends rpicam-apps-lite || apt-get install -y --no-install-recommends rpicam-apps
     # Security fixes published since the Raspberry Pi OS image
     apt-get -y -o Dpkg::Options::=--force-confold full-upgrade
     # Smaller attack surface: nothing an offline camera uses. Remote access
     # (rpi-connect), cloud-init (Imager seed, unused: userconf.txt is read by
     # userconfig.service), compilers, debugger, Bluetooth (disabled), SMB, archivers.
+    # Also: kernel headers and their compiler (no module is ever built here),
+    # firmware of Wi-Fi chips a Pi does not have (the Pi uses brcm80211), PPP,
+    # rpi-update (untested firmware), pastebinit (uploads text), rich/pygments.
     unused=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" rpi-connect-lite cloud-init mkvtoolnix gdb \
-      cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id 2>/dev/null \
+      cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id \
+      linux-headers-rpi-2712 linux-headers-rpi-v8 firmware-atheros firmware-mediatek firmware-realtek \
+      firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion 2>/dev/null \
       | awk "\$2 == \"installed\" {print \$1}")
     # shellcheck disable=SC2086
     [ -z "$unused" ] || apt-get purge -y --auto-remove $unused
+    # What boots the Pi and its Wi-Fi must still be there
+    for p in raspi-firmware firmware-brcm80211 linux-image-rpi-2712 linux-image-rpi-v8 network-manager rpi-eeprom \
+             netplan.io xz-utils; do
+      dpkg-query -W -f="\${db:Status-Status}" "$p" 2>/dev/null | grep -qx installed \
+        || { echo "Paquet indispensable retiré : $p"; exit 1; }
+    done
+    # Documentation, manuals and translations: never read on a camera.
+    # Licences (copyright files) stay. dpkg skips these paths for later updates too.
+    cat >/etc/dpkg/dpkg.cfg.d/aurion-minimal <<CFG
+path-exclude=/usr/share/doc/*
+path-include=/usr/share/doc/*/copyright
+path-exclude=/usr/share/man/*
+path-exclude=/usr/share/info/*
+path-exclude=/usr/share/locale/*
+path-include=/usr/share/locale/locale.alias
+CFG
+    find /usr/share/doc -mindepth 1 ! -name copyright ! -type d -delete
+    find /usr/share/doc -mindepth 1 -type d -empty -delete
+    rm -rf /usr/share/man/* /usr/share/info/*
+    find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name locale.alias -exec rm -rf {} +
     # Everything Aurion calls must still be there
     for c in nmcli iw nft rfkill mkfs.exfat wipefs sfdisk blkid findmnt hwclock timedatectl udevadm \
              ip curl sudo rpicam-still vcgencmd dnsmasq; do

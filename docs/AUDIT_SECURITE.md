@@ -129,6 +129,11 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   Python et Go). Premier relevé ARBOR sur l'image 1.10.0 : 9 mises à jour possibles, 37 composants sans correctif ;
   une partie disparaît avec ces paquets. Les autres (binutils, rsync, curl…) sont des outils locaux, non joignables
   depuis le Wi-Fi : à trier dans ARBOR en « risque accepté » avec cette justification.
+- 1.10.2 : 47 paquets de plus retirés (en-têtes et compilateur, micrologiciels Wi-Fi inutiles, PPP, rpi-update,
+  pastebinit, wget, rich et pygments), documentation et traductions retirées. Plan ARBOR du 24/09/2026 :
+  pygments 2.18.0 (CVE-2026-4539) traité par retrait du paquet, la mise à jour par pip ne s'appliquant pas à un
+  paquet Debian. Composants restants sans correctif : outils locaux (binutils, rsync, curl en client, perl…),
+  non joignables depuis le Wi-Fi, à classer en risque accepté.
 - Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
   pas rouge sur une faille ; l'alerte vient d'ARBOR.
 
