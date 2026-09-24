@@ -1,16 +1,20 @@
 name: ARBOR
 
-# Suivi des vulnérabilités avec ARBOR (https://arbor.norkenix.com) :
-# - SBOM CycloneDX du dépôt (Syft : Cargo.lock, tests/e2e/package-lock.json),
-#   confronté à OSV par ARBOR, onglet « Vulnérabilités » ;
-# - Semgrep (failles dans le code) et Trivy (secrets, configuration),
-#   onglet « Code et configuration ».
+# Suivi des vulnérabilités avec ARBOR (https://arbor.norkenix.com), deux projets :
+# - application : SBOM du dépôt (Syft : Cargo.lock, actions, tests/e2e), Semgrep
+#   (failles dans le code) et Trivy (secrets, configuration) ;
+# - image carte SD : SBOM des paquets du système livré (Raspberry Pi OS + Aurion),
+#   pris dans l'image de la dernière release, celle que l'on flashe.
 # Chaque envoi remplace l'inventaire du projet : ARBOR ne signale que les nouveautés.
 # Le passage hebdomadaire détecte les failles publiées après le dernier push.
-# Sans le secret ARBOR_API_KEY, le SBOM est quand même produit (artefact) mais rien n'est envoyé.
+# Envoi direct par l'API (scripts/arbor-upload.sh) : aucun script distant exécuté.
+# Sans le secret ARBOR_API_KEY, les SBOM sont produits (artefacts) mais rien n'est envoyé.
 on:
   push:
     branches: [main]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   schedule:
     - cron: "17 5 * * 1" # lundi 05:17 UTC
   workflow_dispatch:
@@ -19,18 +23,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: arbor
+  group: arbor-${{ github.event_name }}
   cancel-in-progress: false
 
 env:
   SYFT_VERSION: v1.20.0
   TRIVY_VERSION: v0.70.0
   SEMGREP_VERSION: "1.177.0"
+  ARBOR_URL: https://arbor.norkenix.com
 
 jobs:
-  arbor:
-    name: SBOM et analyse de sécurité (ARBOR)
+  app:
+    name: Application (SBOM, Semgrep, Trivy)
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
+    env:
+      ARBOR_PROJECT: 15991eb6-98e7-4685-8ace-8ed0c0b791f3
     steps:
       - uses: actions/checkout@v4
 
@@ -45,56 +53,78 @@ jobs:
           pipx install "semgrep==${SEMGREP_VERSION}"
           syft version && trivy --version && semgrep --version
 
-      - name: Nom et version de l'inventaire
+      - name: SBOM CycloneDX
         run: |
           v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          echo "SYFT_ARGS=--source-name aurion --source-version $v" >> "$GITHUB_ENV"
+          syft scan dir:. --source-name aurion --source-version "$v" -o cyclonedx-json=aurion-sbom.cdx.json
 
-      - name: SBOM CycloneDX (artefact)
-        # SYFT_ARGS left unquoted on purpose: it holds several arguments.
-        run: syft scan dir:. $SYFT_ARGS -o cyclonedx-json=aurion-sbom.cdx.json
+      - name: Semgrep (code)
+        run: semgrep scan --config p/default --metrics=off --sarif -o semgrep.sarif .
+
+      - name: Trivy (secrets et configuration)
+        run: trivy fs --scanners secret,misconfig --format sarif -o trivy.sarif .
 
       - uses: actions/upload-artifact@v4
         with:
           name: aurion-sbom
-          path: aurion-sbom.cdx.json
+          path: |
+            aurion-sbom.cdx.json
+            semgrep.sarif
+            trivy.sarif
 
-      - name: Clé ARBOR présente ?
-        id: key
+      - name: Envoyer à ARBOR
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
         run: |
-          if [ -n "$ARBOR_API_KEY" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé à ARBOR."
+          if [ -z "$ARBOR_API_KEY" ]; then
+            echo "::warning::Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé."
+            exit 0
           fi
+          bash scripts/arbor-upload.sh sboms aurion-sbom.cdx.json
+          bash scripts/arbor-upload.sh sarif semgrep.sarif
+          bash scripts/arbor-upload.sh sarif trivy.sarif
 
-      # The agent is downloaded to a file (never piped into a shell) and its
-      # SHA-256 printed. Set the repository variable ARBOR_SCAN_SHA256 to pin
-      # a reviewed version: any change of the script then stops the job.
-      - name: Installer l'agent arbor-scan
-        if: steps.key.outputs.present == 'true'
-        env:
-          EXPECTED_SHA256: ${{ vars.ARBOR_SCAN_SHA256 }}
+  image:
+    name: Image carte SD (paquets Debian)
+    # The image only changes with a release: weekly, manual, or right after a release.
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    env:
+      ARBOR_PROJECT: ${{ vars.ARBOR_IMAGE_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Syft (version figée)
         run: |
-          curl -sSfL -o arbor-scan https://arbor.norkenix.com/agent/arbor-scan.sh
-          actual=$(sha256sum arbor-scan | cut -d' ' -f1)
-          echo "arbor-scan.sh SHA-256 : $actual"
-          if [ -n "$EXPECTED_SHA256" ] && [ "$actual" != "$EXPECTED_SHA256" ]; then
-            echo "::error::arbor-scan.sh a changé (attendu $EXPECTED_SHA256). Relire le script puis mettre à jour la variable ARBOR_SCAN_SHA256."
-            exit 1
-          fi
-          sudo install -m 0755 arbor-scan /usr/local/bin/arbor-scan
-          rm arbor-scan
+          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
+            | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
 
-      # Exit code 2 when open findings of level "high" or more remain. A decision
-      # taken in ARBOR (false positive, accepted risk) unblocks it without a commit.
-      - name: Scanner et envoyer à ARBOR
-        if: steps.key.outputs.present == 'true'
+      - name: Télécharger l'image de la dernière release
+        id: rel
         env:
-          ARBOR_URL: https://arbor.norkenix.com
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p 'aurion-raspios-arm64.img.xz*'
+          sha256sum -c aurion-raspios-arm64.img.xz.sha256
+
+      - name: SBOM des paquets de l'image
+        run: sudo bash scripts/image-sbom.sh aurion-raspios-arm64.img.xz aurion-image-sbom.cdx.json "${{ steps.rel.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurion-image-sbom
+          path: aurion-image-sbom.cdx.json
+
+      - name: Envoyer à ARBOR (projet de l'image)
+        env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
-          ARBOR_PROJECT: 15991eb6-98e7-4685-8ace-8ed0c0b791f3
-        run: arbor-scan --all --fail-on high .
+        run: |
+          if [ -z "$ARBOR_API_KEY" ] || [ -z "$ARBOR_PROJECT" ]; then
+            echo "::warning::Secret ARBOR_API_KEY ou variable ARBOR_IMAGE_PROJECT absent : SBOM de l'image produit, non envoyé."
+            exit 0
+          fi
+          bash scripts/arbor-upload.sh sboms aurion-image-sbom.cdx.json

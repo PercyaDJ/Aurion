@@ -40,7 +40,8 @@ cargo audit                                         # dépendances (cargo instal
 La CI GitHub Actions (`.github/workflows/ci.yml`) exécute tout cela à chaque push, puis construit l'archive et le
 paquet Raspberry Pi.
 
-Le workflow `.github/workflows/arbor.yml` produit le SBOM et envoie SBOM, Semgrep et Trivy à ARBOR (voir
+Le workflow `.github/workflows/arbor.yml` produit les SBOM de l'application et de l'image carte SD et les envoie à ARBOR avec
+Semgrep et Trivy (voir
 AUDIT_SECURITE.md, section 5).
 
 ## Principes

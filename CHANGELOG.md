@@ -3,9 +3,10 @@
 ## Non publié
 
 ### Suivi des vulnérabilités (CI)
-- Nouveau workflow **ARBOR** : SBOM CycloneDX (Syft), analyse du code (Semgrep) et de la configuration (Trivy)
-  envoyés à ARBOR à chaque push sur `main` et chaque lundi ; échec dès un résultat élevé ou critique ouvert.
-- Chaque release publie son inventaire `aurion-sbom.cdx.json`.
+- Nouveau workflow **ARBOR**, deux projets : l'application (SBOM Syft, Semgrep, Trivy) à chaque push sur `main`,
+  et le système de l'image carte SD (633 paquets Debian) après chaque release ; les deux chaque lundi.
+- Envoi direct par l'API d'ARBOR (`scripts/arbor-upload.sh`), SBOM de l'image par `scripts/image-sbom.sh`.
+- Chaque release publie `aurion-sbom.cdx.json` et `aurion-image-sbom.cdx.json`.
 
 ## 1.10.0
 

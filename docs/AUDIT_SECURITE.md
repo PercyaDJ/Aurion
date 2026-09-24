@@ -103,27 +103,28 @@ Aucune vulnérabilité (« vulnerability ») connue ; aucun avis ne concerne le 
 
 ### Suivi continu avec ARBOR (workflow `.github/workflows/arbor.yml`)
 
-Le contrôle ci-dessus est une photo à une date. Le suivi continu passe par ARBOR (projet
-`15991eb6-98e7-4685-8ace-8ed0c0b791f3`), à chaque push sur `main` et chaque lundi (les failles publiées sans
-nouveau commit sont vues dans la semaine) :
+Le contrôle ci-dessus est une photo à une date. Le suivi continu passe par ARBOR, sur deux projets, car chaque envoi
+remplace l'inventaire du projet :
 
-| Étape | Outil | Ce qui est analysé |
+| Projet ARBOR | Quand | Contenu |
 |---|---|---|
-| SBOM CycloneDX | Syft 1.20.0 | `Cargo.lock` (233 crates), actions GitHub utilisées, dépendances du test navigateur ; confronté à OSV par ARBOR |
-| Code | Semgrep 1.177.0 | injections, crypto faible, secrets codés en dur |
-| Configuration | Trivy 0.70.0 | secrets commis, fichiers de configuration |
+| Application (`15991eb6-98e7-4685-8ace-8ed0c0b791f3`) | chaque push sur `main`, chaque lundi | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
+| Image carte SD (variable de dépôt `ARBOR_IMAGE_PROJECT`) | après chaque release, chaque lundi | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
 
-- Le job échoue (code 2) dès qu'un résultat de niveau **élevé** ou **critique** reste ouvert ; une décision prise
-  dans ARBOR (faux positif, risque accepté) le débloque sans commit. Il ne bloque ni les tests ni la publication.
-- Chaîne d'approvisionnement : scripts d'installation pris sur le tag de la version (jamais `main`), versions
-  figées ; l'agent `arbor-scan.sh` est téléchargé dans un fichier, jamais passé directement au shell, et son
-  empreinte SHA-256 est affichée. La variable de dépôt `ARBOR_SCAN_SHA256` fige une version relue : tout
-  changement du script arrête alors le job.
-- La clé `ARBOR_API_KEY` est un secret du dépôt, jamais écrit dans le code ni dans les journaux. Sans elle, le SBOM
-  est produit (artefact `aurion-sbom`) et rien n'est envoyé.
-- Chaque release porte aussi son inventaire `aurion-sbom.cdx.json`.
-- Limite : les paquets Debian de l'image carte SD ne sont pas dans ce SBOM. Comme chaque envoi remplace
-  l'inventaire du projet ARBOR, les suivre demande un second projet ARBOR dédié à l'image.
+Pourquoi l'image compte autant que l'application : sur le terrain, le Wi-Fi du Pi est joignable par toute personne à
+portée. Le point d'accès, le serveur DHCP et DNS et le noyau font partie de la surface d'attaque au même titre que
+l'interface web. Et c'est l'image entière qui est distribuée.
+
+- Envoi direct par l'API documentée (`scripts/arbor-upload.sh`) : aucun script distant n'est exécuté dans la CI.
+  La clé passe par l'entrée standard de curl, jamais par la ligne de commande ; en cas de refus, le code HTTP et
+  l'en-tête `Server` sont affichés (jamais la clé) pour distinguer ARBOR d'un pare-feu placé devant.
+- SBOM de l'image (`scripts/image-sbom.sh`) : partition système montée en lecture seule, empreinte de l'image
+  vérifiée avant, liste des fichiers exclue (sinon 18 Mo pour 2 Mo utiles, limite ARBOR 25 Mo).
+- Outils en versions figées (Syft 1.20.0, Trivy 0.70.0, Semgrep 1.177.0), scripts d'installation pris sur le tag.
+- La clé `ARBOR_API_KEY` est un secret du dépôt. Sans elle, les SBOM sont produits en artefacts et rien n'est envoyé.
+- Chaque release porte `aurion-sbom.cdx.json` et `aurion-image-sbom.cdx.json`.
+- Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
+  pas rouge sur une faille ; l'alerte vient d'ARBOR.
 
 ## 6. Risques résiduels
 
