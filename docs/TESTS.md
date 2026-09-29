@@ -43,7 +43,7 @@ PR touche l'empaquetage (`Cargo.toml`, `Cargo.lock`, `scripts/`, `deploy/`, `con
 relance `cargo test` avant de publier.
 
 Les SBOM de l'application et de l'image carte SD partent vers ARBOR avec Semgrep et Trivy à chaque release
-(`release.yml`) et chaque lundi (`arbor.yml`) (voir
+(`release.yml`), ou à la demande (`arbor.yml`) (voir
 AUDIT_SECURITE.md, section 5).
 
 ## Principes

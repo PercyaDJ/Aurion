@@ -9,8 +9,9 @@ Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'
 - Envoi du SBOM de l'image à ARBOR dans le job de la release, juste après la publication. Avant, un second
   workflow déclenché par la fin de la release retéléchargeait et remontait l'image de 400 Mo, et affichait
   « Aurion_Image : skipped » sur chaque push, ce qui laissait croire que l'envoi n'avait pas lieu.
-- Passage hebdomadaire ARBOR en un seul job : SBOM de l'image repris de la dernière release (quelques Mo) au lieu de
-  l'image entière ; plus de passage ARBOR à chaque push (seulement release, lundi, ou à la demande).
+- Envoi à ARBOR à chaque release seulement : plus de passage à chaque push ni chaque lundi. Renvoi manuel possible
+  (workflow ARBOR, un job), qui reprend le SBOM de l'image publié avec la dernière release (quelques Mo) au lieu de
+  retélécharger l'image entière.
 - CI sur les pull requests seulement (la même modification était testée deux fois, au push puis à la PR), en un
   seul job, annulée par un nouveau push. Chrome et Node du runner réutilisés (plus de téléchargement du navigateur).
   Compilation arm64 et test de l'image seulement si l'empaquetage change.

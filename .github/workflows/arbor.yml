@@ -1,15 +1,13 @@
 name: ARBOR
 
-# Passage hebdomadaire ARBOR (https://arbor.norkenix.com) : renvoie les inventaires pour
-# détecter les failles publiées depuis le dernier envoi. Chaque envoi remplace l'inventaire du projet.
+# Renvoi manuel à ARBOR (https://arbor.norkenix.com), sans nouvelle release : onglet Actions,
+# "ARBOR", "Run workflow". Chaque envoi remplace l'inventaire du projet.
 # - Aurion_Application : SBOM Syft du dépôt, Semgrep (code), Trivy (secrets, configuration) ;
 # - Aurion_Image : SBOM de l'image de la dernière release, publié avec elle (aurion-image-sbom.cdx.json).
 #   L'image ne change qu'à une release : le SBOM publié suffit, sans télécharger ni monter 400 Mo.
-# Après chaque release, les deux envois sont faits par le workflow Release lui-même.
+# L'envoi normal a lieu à chaque release, dans le workflow Release lui-même : pas de passage planifié.
 # Une clé par projet : ARBOR_API_KEY (application), ARBOR_IMAGE_API_KEY (image).
 on:
-  schedule:
-    - cron: "17 5 * * 1" # lundi 05:17 UTC
   workflow_dispatch:
 
 permissions:
