@@ -1,6 +1,9 @@
 # Journal des versions
 
-## Prochaine version
+## 1.10.6
+
+Objectif : rappel des darks en fin de nuit, derniers points de sécurité fermés, et consommer le moins de minutes GitHub Actions possible
+sans perdre l'envoi à ARBOR.
 
 ### Rappel « faites vos darks » (PLAN_ACTION Q2)
 
@@ -15,10 +18,17 @@
 - Tests : calcul des moyennes et fusion après reprise, persistance, disparition du rappel (série complète avec un
   faux `rpicam-still`), nuit simulée de bout en bout, et un cas dans le test navigateur.
 
-### Chaîne de publication (sans changement de l'application ni de l'image)
+### Sécurité
+- Mot de passe du Wi-Fi Aurion écrit dans un fichier de connexion NetworkManager réservé à root (0600), et non plus
+  passé en argument de `nmcli`, où tout processus du Pi pouvait le lire un court instant. Format vérifié avec le
+  lecteur de NetworkManager 1.46 (nom du réseau et mot de passe relus à l'identique, espaces et caractères spéciaux
+  compris). Si NetworkManager refuse le fichier, l'ancienne méthode prend le relais : le Wi-Fi démarre toujours.
+- Registre des risques de l'image : network-manager (CVE-2026-10805, CVE-2025-9615) et sudo (CVE-2026-82474)
+  acceptés après lecture des vecteurs CVSS, tous en attaque locale (détail dans AUDIT_SECURITE.md).
+- rsync gardé : `raspi-firmware`, indispensable au démarrage du Pi, en dépend. La version corrigée reste imposée à
+  la fabrication.
 
-Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'envoi à ARBOR.
-
+### Chaîne de publication
 - Un seul job par push sur `main` (workflow Release) : binaire edge, et pour une nouvelle version, image, release et
   envoi à ARBOR. Le workflow Edge est fusionné dedans ; une release compile une seule fois (son binaire sert d'edge).
 - Envoi du SBOM de l'image à ARBOR dans le job de la release, juste après la publication. Avant, un second
