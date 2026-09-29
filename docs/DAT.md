@@ -95,14 +95,24 @@ stateDiagram-v2
 | (démarrage) | carte avec réglages : Wi-Fi Aurion d'abord, puis montage de la clé ; carte neuve : clé d'abord (réglages à reprendre), puis Wi-Fi ; détection caméra en arrière-plan ; temps « Wi-Fi prêt » mesuré (`/proc/uptime`) | `main.rs` |
 | ARM | hotspot actif, interface disponible, réglages modifiables, heure synchronisée depuis le téléphone (ou lue sur l'horloge matérielle au démarrage) ; en expédition, départ automatique 5 min après la dernière requête `/api/` si l'heure est fiable et la clé présente | `main.rs`, `web/`, `orchestrator::wait_for_start` |
 | (reprise) | si `night.json` existe et que la nuit n'est pas finie : hotspot 5 min avec compte à rebours, puis reprise | `orchestrator::resume_window`, `core/night.rs` |
-| DISCONNECT | 15 s pour que la réponse arrive au téléphone, puis arrêt du hotspot | `orchestrator::run` |
-| CALIBRATION | 3 poses d'essai pour caler ISO et temps de pose | `exposure.rs` |
-| WATCH | une pose JPEG toutes les `watch_interval_secs` (60 s), jamais de RAW, rien n'est enregistré ; profil d'énergie « watch » | `detection.rs`, `orchestrator` |
-| RUN | poses à la suite (pause `capture_interval_secs`, 0 par défaut ; plancher de sécurité de 1 s par cycle), profil « capture », enregistrement JPEG et/ou DNG, marquage `_AURORA` ; en FILTER, une fois l'aurore confirmée la capture continue jusqu'à la fin (pas de retour en WATCH) | `orchestrator::save_frame` |
-| SHUTDOWN | réglages moyens de la nuit écrits dans `dark_reminder.json` (rappel des darks), journal vidé, `sync`, suppression de `night.json`, extinction ; déclenché aussi quand la clé passe sous le seuil critique (5 % ou 50 Mo libres) | `orchestrator::run` |
+| DISCONNECT | 15 s pour que la réponse arrive au téléphone, puis arrêt du hotspot | `orchestrator::disconnect` |
+| CALIBRATION | 3 poses d'essai pour caler ISO et temps de pose | `orchestrator::calibrate`, `exposure.rs` |
+| WATCH | une pose JPEG toutes les `watch_interval_secs` (60 s), jamais de RAW, rien n'est enregistré ; profil d'énergie « watch » | `orchestrator::watch_step`, `AuroraConfirmation`, `detection.rs` |
+| RUN | poses à la suite (pause `capture_interval_secs`, 0 par défaut ; plancher de sécurité de 1 s par cycle), profil « capture », enregistrement JPEG et/ou DNG, marquage `_AURORA` ; en FILTER, une fois l'aurore confirmée la capture continue jusqu'à la fin (pas de retour en WATCH) | `orchestrator::run_step`, `run_pause`, `keeps_raw`, `save_frame`, `NightStats` |
+| SHUTDOWN | réglages moyens de la nuit écrits dans `dark_reminder.json` (rappel des darks), journal vidé, `sync`, suppression de `night.json`, extinction ; déclenché aussi quand la clé passe sous le seuil critique (5 % ou 50 Mo libres) | `orchestrator::finish_night`, `storage_verdict` |
 
 Attente : en mode plage horaire, si la nuit est lancée avant l'heure de début, l'orchestrateur attend (contrôle
-toutes les 60 s). En mode minuteur, la durée part du lancement.
+toutes les 60 s, `orchestrator::wait_for_night`, décision `before_night`). En mode minuteur, la durée part du
+lancement (`NightWindow`).
+
+Découpage de `orchestrator::run` (1.10.6) : `run` n'enchaîne plus que des étapes, chacune dans sa méthode
+(`disconnect`, `mark_night`, `wait_for_night`, `check_key_writable`, `open_night_files`, `calibrate`,
+`enter_first_phase`, `capture_loop`, `finish_night`). Les décisions de la boucle sont des fonctions pures testées
+seules : fenêtre de la nuit (`NightWindow`), attente ou extinction avant la nuit (`before_night`), arrêt sur clé
+pleine (`storage_verdict`), confirmation d'aurore (`AuroraConfirmation`), pause après 5 échecs caméra
+(`CameraFailures`), RAW gardé ou non (`keeps_raw`), rythme de capture (`run_pause`), ligne de `event.jsonl`
+(`night_event`). L'état d'une image à la suivante est regroupé dans `NightLoop`, les journaux et le dossier de la
+nuit dans `NightFiles`.
 
 ## 5. Chaîne de traitement d'une image
 

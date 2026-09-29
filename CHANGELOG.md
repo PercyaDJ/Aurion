@@ -28,6 +28,13 @@ sans perdre l'envoi à ARBOR.
 - rsync gardé : `raspi-firmware`, indispensable au démarrage du Pi, en dépend. La version corrigée reste imposée à
   la fabrication.
 
+### Code
+- Boucle de la nuit découpée en étapes (`orchestrator::run` passe de 620 lignes à une suite d'appels), décisions
+  testées une à une : fenêtre de la nuit, extinction avant la nuit (Pi 5), arrêt sur clé pleine, confirmation
+  d'aurore, pause après 5 échecs caméra, RAW gardé pendant une aurore, rythme de capture, journal des images
+  (15 tests de plus). Aucun changement de comportement : les 21 nuits simulées produisent exactement les mêmes
+  journaux, fichiers, extinctions et réveils qu'avant. Prépare l'intervalle adaptatif et les rafales (Q4, Q5).
+
 ### Chaîne de publication
 - Un seul job par push sur `main` (workflow Release) : binaire edge, et pour une nouvelle version, image, release et
   envoi à ARBOR. Le workflow Edge est fusionné dedans ; une release compile une seule fois (son binaire sert d'edge).

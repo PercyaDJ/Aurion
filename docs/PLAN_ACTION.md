@@ -66,7 +66,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 
 | ID | Action | Effort |
 |---|---|---|
-| C1 | Découper `orchestrator::run` en étapes testables séparément | M |
+| C1 | ~~Découper `orchestrator::run` en étapes testables séparément~~ : fait en 1.10.6 (même comportement, vérifié sur les 21 nuits simulées) | M |
 | C2 | ~~Un dossier par nuit sur la clé~~ : fait en 1.7.0 (les anciennes captures restent lisibles à la racine, sans migration) | - |
 | C3 | Factoriser le CSS et le JavaScript des pages (menu et rafraîchissement factorisés en 1.6.0 ; reste : styles en ligne de la galerie et des réglages) | M |
 | C4 | Tests sur banc matériel : un Pi dédié en CI (runner auto-hébergé) qui lance V1 automatiquement | L |
