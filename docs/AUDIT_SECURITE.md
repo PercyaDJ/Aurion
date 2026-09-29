@@ -136,6 +136,9 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   non joignables depuis le Wi-Fi, à classer en risque accepté.
 - Relevé ARBOR du 24/09/2026 (image 1.10.3) : 88 vulnérabilités ouvertes (230 en 1.10.0), aucune mise à jour
   disponible, 22 paquets sans correctif. Registre des décisions ci-dessous.
+- Plan ARBOR du 29/09/2026 (image 1.10.4) : 33 vulnérabilités ouvertes, toutes sur rsync 3.4.1+ds1-5+deb13u4,
+  corrigées par Debian en 3.5.0+ds1-0+deb13u1 (trixie-security). Image 1.10.5 : correctif installé par la mise à jour
+  de sécurité à la fabrication, qui échoue désormais si rsync reste sous cette version.
 
 #### Registre des risques acceptés (image carte SD)
 
