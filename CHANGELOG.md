@@ -1,5 +1,22 @@
 # Journal des versions
 
+## Prochaine version (chaîne de publication, sans changement de l'application ni de l'image)
+
+Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'envoi à ARBOR.
+
+- Un seul job par push sur `main` (workflow Release) : binaire edge, et pour une nouvelle version, image, release et
+  envoi à ARBOR. Le workflow Edge est fusionné dedans ; une release compile une seule fois (son binaire sert d'edge).
+- Envoi du SBOM de l'image à ARBOR dans le job de la release, juste après la publication. Avant, un second
+  workflow déclenché par la fin de la release retéléchargeait et remontait l'image de 400 Mo, et affichait
+  « Aurion_Image : skipped » sur chaque push, ce qui laissait croire que l'envoi n'avait pas lieu.
+- Passage hebdomadaire ARBOR en un seul job : SBOM de l'image repris de la dernière release (quelques Mo) au lieu de
+  l'image entière ; plus de passage ARBOR à chaque push (seulement release, lundi, ou à la demande).
+- CI sur les pull requests seulement (la même modification était testée deux fois, au push puis à la PR), en un
+  seul job, annulée par un nouveau push. Chrome et Node du runner réutilisés (plus de téléchargement du navigateur).
+  Compilation arm64 et test de l'image seulement si l'empaquetage change.
+- Documentation seule (`docs/`, `*.md`) : aucun workflow lancé. Plus d'artefacts stockés (les SBOM sont dans les
+  releases). Dependabot passe en mensuel.
+
 ## 1.10.5
 
 Objectif : fermer les 33 vulnérabilités ouvertes sur l'image carte SD (plan ARBOR du 29/09/2026). Aucun changement

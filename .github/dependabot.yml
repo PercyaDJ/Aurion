@@ -5,7 +5,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     # Wait 7 days after a version is published: a hijacked release is usually
     # spotted and withdrawn within that time.
     cooldown:
