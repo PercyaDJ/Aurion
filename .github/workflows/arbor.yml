@@ -1,130 +1,38 @@
 name: ARBOR
 
-# Suivi des vulnérabilités avec ARBOR (https://arbor.norkenix.com), deux projets :
-# - application : SBOM du dépôt (Syft : Cargo.lock, actions, tests/e2e), Semgrep
-#   (failles dans le code) et Trivy (secrets, configuration) ;
-# - image carte SD : SBOM des paquets du système livré (Raspberry Pi OS + Aurion),
-#   pris dans l'image de la dernière release, celle que l'on flashe.
-# Chaque envoi remplace l'inventaire du projet : ARBOR ne signale que les nouveautés.
-# Le passage hebdomadaire détecte les failles publiées après le dernier push.
-# Envoi direct par l'API (scripts/arbor-upload.sh) : aucun script distant exécuté.
+# Renvoi manuel à ARBOR (https://arbor.norkenix.com), sans nouvelle release : onglet Actions,
+# "ARBOR", "Run workflow". Chaque envoi remplace l'inventaire du projet.
+# - Aurion_Application : SBOM Syft du dépôt, Semgrep (code), Trivy (secrets, configuration) ;
+# - Aurion_Image : SBOM de l'image de la dernière release, publié avec elle (aurion-image-sbom.cdx.json).
+#   L'image ne change qu'à une release : le SBOM publié suffit, sans télécharger ni monter 400 Mo.
+# L'envoi normal a lieu à chaque release, dans le workflow Release lui-même : pas de passage planifié.
 # Une clé par projet : ARBOR_API_KEY (application), ARBOR_IMAGE_API_KEY (image).
-# Sans clé, les SBOM sont produits (artefacts) mais rien n'est envoyé.
 on:
-  push:
-    branches: [main]
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
-  schedule:
-    - cron: "17 5 * * 1" # lundi 05:17 UTC
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: arbor-${{ github.event_name }}
+  group: arbor
   cancel-in-progress: false
 
-env:
-  SYFT_VERSION: v1.20.0
-  TRIVY_VERSION: v0.70.0
-  SEMGREP_VERSION: "1.177.0"
-  ARBOR_URL: https://arbor.norkenix.com
-
 jobs:
-  app:
-    name: Aurion_Application (SBOM, Semgrep, Trivy)
-    if: github.event_name != 'workflow_run'
+  arbor:
+    name: Aurion_Application et Aurion_Image
     runs-on: ubuntu-latest
-    env:
-      ARBOR_PROJECT: 46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1 # Aurion_Application
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Install scripts taken from the release tag, not from main: a later change
-      # upstream cannot alter what runs here.
-      - name: Installer Syft, Trivy et Semgrep (versions figées)
-        run: |
-          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
-          curl -sSfL "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
-          pipx install "semgrep==${SEMGREP_VERSION}"
-          syft version && trivy --version && semgrep --version
 
-      - name: SBOM CycloneDX
-        run: |
-          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          syft scan dir:. --source-name aurion --source-version "$v" -o cyclonedx-json=aurion-sbom.cdx.json
-
-      - name: Semgrep (code)
-        run: semgrep scan --config p/default --metrics=off --sarif -o semgrep.sarif .
-
-      - name: Trivy (secrets et configuration)
-        run: trivy fs --scanners secret,misconfig --format sarif -o trivy.sarif .
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aurion-sbom
-          path: |
-            aurion-sbom.cdx.json
-            semgrep.sarif
-            trivy.sarif
-
-      - name: Envoyer à ARBOR (projet Aurion_Application)
-        env:
-          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
-        run: |
-          if [ -z "$ARBOR_API_KEY" ]; then
-            echo "::warning::Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé."
-            exit 0
-          fi
-          bash scripts/arbor-upload.sh sboms aurion-sbom.cdx.json
-          bash scripts/arbor-upload.sh sarif semgrep.sarif
-          bash scripts/arbor-upload.sh sarif trivy.sarif
-
-  image:
-    name: Aurion_Image (paquets Debian de la carte SD)
-    # The image only changes with a release: weekly, manual, or right after a release.
-    if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
-    env:
-      ARBOR_PROJECT: 7d095ce7-6d86-4c48-92ef-b9df2fbd3327 # Aurion_Image
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Installer Syft (version figée)
-        run: |
-          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
-
-      - name: Télécharger l'image de la dernière release
-        id: rel
+      - name: Aurion_Image (SBOM de la dernière release)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARBOR_IMAGE_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
         run: |
-          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p 'aurion-raspios-arm64.img.xz*'
-          sha256sum -c aurion-raspios-arm64.img.xz.sha256
+          gh release download --repo "$GITHUB_REPOSITORY" -p aurion-image-sbom.cdx.json -D "$RUNNER_TEMP"
+          bash scripts/arbor-scan.sh image "$RUNNER_TEMP/aurion-image-sbom.cdx.json"
 
-      - name: SBOM des paquets de l'image
-        run: sudo bash scripts/image-sbom.sh aurion-raspios-arm64.img.xz aurion-image-sbom.cdx.json "${{ steps.rel.outputs.version }}"
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aurion-image-sbom
-          path: aurion-image-sbom.cdx.json
-
-      # Own key for the image project: each key only reaches its project.
-      - name: Envoyer à ARBOR (projet Aurion_Image)
+      - name: Aurion_Application (SBOM, Semgrep, Trivy)
         env:
-          ARBOR_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
-        run: |
-          if [ -z "$ARBOR_API_KEY" ]; then
-            echo "::warning::Secret ARBOR_IMAGE_API_KEY absent : SBOM de l'image produit, non envoyé."
-            exit 0
-          fi
-          bash scripts/arbor-upload.sh sboms aurion-image-sbom.cdx.json
+          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
+        run: bash scripts/arbor-scan.sh app

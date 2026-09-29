@@ -223,7 +223,7 @@ flowchart LR
 | binaire `aurion` seul | idem | mise à jour depuis l'interface (Diagnostics) |
 
 Publier une version : changer `version` dans `Cargo.toml` et pousser sur `main`. Chaque push sur `main` publie
-aussi la pré-release **edge** (workflow `edge.yml`, binaire `aurion-arm64` seul, version `X.Y.Z-edge.<commit>`),
+aussi la pré-release **edge** (même workflow `release.yml`, un seul job, binaire `aurion-arm64` seul, version `X.Y.Z-edge.<commit>`),
 installable depuis le téléphone (voir GUIDE_DEVELOPPEMENT.md).
 
 ## 11. Interfaces (API HTTP)

@@ -1,22 +1,36 @@
 name: CI
 
+# Tests d'une pull request, en un seul job (une machine, un cache, une mise en route).
+# Pas de passage sur push : la même modification serait testée deux fois (push puis PR).
+# Un nouveau push sur la PR annule le passage en cours. Documentation seule : pas de CI.
 on:
-  push:
   pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   test:
-    name: Tests (unitaires, API, sécurité, simulation, non-régression)
+    name: Tests (unitaires, API, sécurité, simulation, non-régression, navigateur, image)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy
+          targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: aurion
       - name: Clippy (PC)
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Clippy (Raspberry Pi)
@@ -31,40 +45,35 @@ jobs:
       - name: Simulation de l'installeur
         run: cargo build --locked && sudo -E bash tests/install_test.sh target/debug/aurion
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
+      # Node and Google Chrome are preinstalled on the runner: no download
       - name: Tests navigateur de l'interface
         working-directory: tests/e2e
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
         run: |
-          npm install --no-audit --no-fund
-          npx playwright-core install --with-deps chromium
+          npm ci --no-audit --no-fund
           node ui_test.mjs
 
-  package:
-    name: Archive Raspberry Pi (arm64)
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          targets: aarch64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Cross-compilation
+      # Cross-compilation and SD image test only when packaging can have changed
+      - name: Fichiers d'empaquetage modifiés ?
+        id: pkg
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          if [ -z "$BASE" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git fetch -q --depth=1 origin "$BASE"
+          if git diff --name-only "$BASE" HEAD | grep -qE \
+            '^(Cargo\.(toml|lock)|scripts/|deploy/|config/|tests/image_test\.sh|\.github/workflows/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Archive et paquet Raspberry Pi (arm64)
+        if: steps.pkg.outputs.run == 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu parted mtools dosfstools
           bash scripts/package.sh
-      - name: Contrôle du paquet .deb
-        run: dpkg-deb -I dist/aurion_*_arm64.deb && dpkg-deb -c dist/aurion_*_arm64.deb
+          dpkg-deb -I dist/aurion_*_arm64.deb && dpkg-deb -c dist/aurion_*_arm64.deb
       - name: Test de fabrication de l'image carte SD
-        run: |
-          sudo apt-get install -y parted mtools dosfstools
-          sudo bash tests/image_test.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: aurion-rpi-arm64
-          path: |
-            dist/*.tar.gz
-            dist/*.deb
-            dist/*.sha256
+        if: steps.pkg.outputs.run == 'true'
+        run: sudo bash tests/image_test.sh

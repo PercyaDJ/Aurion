@@ -11,7 +11,7 @@ nuits importantes, *Développement* pour les essais, et un bouton pour revenir e
 ```mermaid
 flowchart LR
     A[Modifier le code<br/>GitHub ou Claude Code<br/>sur le téléphone] --> B[push sur main]
-    B --> C[GitHub Actions<br/>workflow Edge :<br/>binaire arm64]
+    B --> C[GitHub Actions<br/>workflow Release :<br/>binaire arm64]
     C --> D[pré-release edge<br/>aurion-arm64]
     D --> E[Pi : Diagnostics<br/>Mettre à jour depuis GitHub<br/>canal Développement]
     E --> F[essai sur le terrain]
@@ -21,8 +21,8 @@ flowchart LR
 
 1. **Modifier** : sur le téléphone, dans l'application GitHub, sur github.com ou avec Claude Code, puis enregistrer
    sur `main`.
-2. **Construire** : le workflow **Edge** (`.github/workflows/edge.yml`) recompile le binaire Raspberry Pi à chaque
-   modification de `main` et le publie dans la pré-release **edge** (fichier `aurion-arm64`). Le suivi se fait dans
+2. **Construire** : le workflow **Release** (`.github/workflows/release.yml`) recompile le binaire Raspberry Pi à chaque
+   modification de `main` (hors documentation seule) et le publie dans la pré-release **edge** (fichier `aurion-arm64`). Le suivi se fait dans
    l'onglet *Actions* du dépôt. Le canal stable n'est pas touché.
 3. **Installer** : sur le téléphone connecté au Wi-Fi Aurion, *Diagnostics*, **Mettre à jour depuis GitHub** :
    - Version : **Développement** ;

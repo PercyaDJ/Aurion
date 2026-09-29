@@ -37,11 +37,13 @@ cargo llvm-cov --summary-only                       # couverture (cargo install 
 cargo audit                                         # dépendances (cargo install cargo-audit)
 ```
 
-La CI GitHub Actions (`.github/workflows/ci.yml`) exécute tout cela à chaque push, puis construit l'archive et le
-paquet Raspberry Pi.
+La CI GitHub Actions (`.github/workflows/ci.yml`) exécute tout cela à chaque pull request, en un seul job (hors
+documentation seule). L'archive, le paquet Raspberry Pi et le test de fabrication de l'image ne tournent que si la
+PR touche l'empaquetage (`Cargo.toml`, `Cargo.lock`, `scripts/`, `deploy/`, `config/`, workflows). Une release
+relance `cargo test` avant de publier.
 
-Le workflow `.github/workflows/arbor.yml` produit les SBOM de l'application et de l'image carte SD et les envoie à ARBOR avec
-Semgrep et Trivy (voir
+Les SBOM de l'application et de l'image carte SD partent vers ARBOR avec Semgrep et Trivy à chaque release
+(`release.yml`), ou à la demande (`arbor.yml`) (voir
 AUDIT_SECURITE.md, section 5).
 
 ## Principes
