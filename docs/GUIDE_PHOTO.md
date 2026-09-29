@@ -30,6 +30,19 @@ réglages de la dernière preview** (même ISO, même temps de pose), dans `dark
 post-traitement, elles retirent pixels chauds et bruit thermique des DNG. À faire juste avant ou juste après la nuit,
 caméra à la même température.
 
+**Rappel automatique après la nuit.** En fin de nuit, Aurion calcule les réglages moyens des photos enregistrées
+(ISO, temps de pose et température du processeur, voisine de celle du capteur, quand elle est disponible) et les
+écrit dans `session.log`. Au prochain allumage, l'accueil affiche l'encadré **Faites vos darks** avec ces valeurs :
+bouchon sur l'objectif, le bouton *Lancer 10 darks* les enregistre dans `darks/` à ces réglages exacts. L'encadré
+disparaît dès que la série est terminée, ou avec *Ignorer*. Une série faite depuis la page *Cadrage* à d'autres
+réglages ne l'efface pas. Si l'exposition a varié pendant la nuit (exposition non verrouillée), l'encadré le signale
+avec l'écart minimum et maximum : les darks à la moyenne restent utiles, mais une exposition verrouillée donne des
+darks exactement adaptés. Une nuit sans photo enregistrée (mode *Aurores seulement* sans aurore) ne demande pas de
+darks.
+
+Idéal : faire les darks dès l'allumage du matin, dehors, avant que la caméra ne se réchauffe. La température affichée
+sert de repère ; elle n'est pas disponible sur un PC ou en simulation.
+
 Logiciels qui les utilisent : Sequator (Windows), Siril (Windows, macOS, Linux), PixInsight, Starry Landscape Stacker (macOS).
 
 ### Levier 4 : empilement au post-traitement

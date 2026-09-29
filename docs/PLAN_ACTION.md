@@ -37,7 +37,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
 | Q1 | P1 | Enregistrer la température du capteur et les réglages réellement appliqués par image (`rpicam-still --metadata`, si disponible sur votre version) dans `event.jsonl` | S |
-| Q2 | P1 | Rappel automatique « faites vos darks » à la fin de la nuit (notification au prochain allumage), aux réglages moyens de la nuit | S |
+| Q2 | P1 | ~~Rappel automatique « faites vos darks » à la fin de la nuit~~ : fait dans la prochaine version (encadré sur l'accueil au prochain allumage, ISO, pose et température moyens de la nuit, bouton qui lance les darks) ; reste à vérifier sur le terrain que la température du processeur suit bien celle du capteur | S |
 | Q3 | P1 | Rampe d'exposition douce au crépuscule (« holy grail ») : variation limitée par image, puis verrou une fois la nuit noire | M |
 | Q4 | P2 | Intervalle adaptatif : plus rapide quand le score d'aurore monte, plus lent sinon (place disque et batterie) | M |
 | Q5 | P2 | Rafale automatique en RAW sur les pics d'aurore (score au-dessus d'un seuil) pour l'empilement au post-traitement | M |

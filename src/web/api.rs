@@ -10,6 +10,7 @@ use axum::{
 use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
+use crate::core::dark_reminder::DarkReminder;
 use crate::core::config::{AppConfig, Preset, DEFAULT_WIFI_PASSWORD, PASSWORD_MASK};
 use crate::core::models::{check_star_trail_rule, Phase};
 use crate::core::validate;
@@ -382,9 +383,9 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
             checks.push(check("power", "ok", "Alimentation correcte", ""));
         }
     }
-    if let Some(t) = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").ok().and_then(|s| s.trim().parse::<f64>().ok()) {
-        if t / 1000.0 > 75.0 {
-            checks.push(check("temperature", "warn", format!("Processeur chaud ({:.0} °C)", t / 1000.0),
+    if let Some(t) = crate::sys::cpu_temperature() {
+        if t > 75.0 {
+            checks.push(check("temperature", "warn", format!("Processeur chaud ({:.0} °C)", t),
                 "Placez le boîtier à l'ombre et à l'air : la chaleur augmente le bruit des photos."));
         }
     }
@@ -807,6 +808,10 @@ pub async fn capture_darks(
             None => format!("Darks terminés ({} fichiers dans darks/)", count),
             Some(e) => format!("Darks interrompus : {}", e),
         };
+        // The darks of the last night are done: the reminder goes away
+        if error.is_none() && DarkReminder::clear_if_matching(&st.paths.dark_reminder, iso, shutter_us) {
+            st.add_log("Rappel des darks de la dernière nuit : fait".into()).await;
+        }
         if let Some(p) = st.darks.write().await.as_mut() {
             p.running = false;
             p.error = error;
@@ -819,6 +824,20 @@ pub async fn capture_darks(
 
 pub async fn get_darks(State(state): State<AppState>) -> Json<Option<crate::web::DarkProgress>> {
     Json(state.darks.read().await.clone())
+}
+
+/// Darks to take after the last night (home screen), or null.
+pub async fn get_dark_reminder(State(state): State<AppState>) -> Json<Option<DarkReminder>> {
+    Json(DarkReminder::load(&state.paths.dark_reminder))
+}
+
+/// The user does not want the darks of the last night.
+pub async fn dismiss_dark_reminder(State(state): State<AppState>) -> StatusCode {
+    if DarkReminder::load(&state.paths.dark_reminder).is_some() {
+        DarkReminder::remove(&state.paths.dark_reminder);
+        state.add_log("Rappel des darks ignoré".into()).await;
+    }
+    StatusCode::NO_CONTENT
 }
 
 // ─── Disconnect ────────────────────────────────────────────
@@ -932,10 +951,7 @@ pub async fn get_diagnostics(State(state): State<AppState>) -> Json<DiagnosticsR
         .map(|secs| format!("{}h {:02}min", secs as u64 / 3600, (secs as u64 % 3600) / 60))
         .unwrap_or_else(|| "--".into());
 
-    let cpu_temp = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")
-        .ok()
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .map(|t| round1(t / 1000.0));
+    let cpu_temp = crate::sys::cpu_temperature().map(round1);
 
     let memory_available_mb = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| {
         s.lines()

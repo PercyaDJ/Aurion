@@ -681,3 +681,35 @@ async fn night_power_profiles_follow_the_phase() {
     assert_eq!(p.first(), Some(&PowerProfile::Watch), "watching: CPU at minimum");
     assert!(p.contains(&PowerProfile::Capture), "aurora confirmed: normal CPU for the captures");
 }
+
+// ─── Darks reminder (Q2) ───────────────────────────────────
+
+#[tokio::test(start_paused = true)]
+async fn end_of_night_writes_the_darks_reminder_with_the_average_settings() {
+    let (mut night, _) = setup(|_| {});
+    night.system = SystemMock::new().with_temperature(41.3);
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock()).await;
+
+    let r = aurion::core::dark_reminder::DarkReminder::load(&night.state.paths.dark_reminder)
+        .expect("reminder written at the end of the night");
+    let events: Vec<_> = session_events(&night.capture).into_iter().filter(|e| e["phase"] == "Run").collect();
+    assert_eq!(r.frames as usize, events.len(), "one entry per saved frame");
+    let avg = |k: &str| events.iter().map(|e| e[k].as_u64().unwrap()).sum::<u64>() as f64 / events.len() as f64;
+    assert_eq!(r.iso, avg("iso").round() as u32);
+    assert!((r.shutter_us as f64 - avg("exposure_us")).abs() <= 500.0, "{} vs {}", r.shutter_us, avg("exposure_us"));
+    assert_eq!(r.temp_c, Some(41.3));
+    let name = std::fs::read_dir(night.capture.join("sessions")).unwrap().next().unwrap().unwrap().file_name();
+    assert_eq!(r.night.as_deref(), name.to_str());
+    // The settings are also in session.log, readable on a computer
+    let log = std::fs::read_to_string(night.capture.join("sessions").join(&name).join("session.log")).unwrap();
+    assert!(log.contains("Darks à faire : ISO"), "{}", log);
+}
+
+#[tokio::test(start_paused = true)]
+async fn night_without_saved_frame_asks_for_no_darks() {
+    let (night, _) = setup(|c| c.detection.detection_capture_enabled = true);
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock()).await;
+    assert!(!night.state.paths.dark_reminder.exists(), "no aurora → no RAW to calibrate");
+}

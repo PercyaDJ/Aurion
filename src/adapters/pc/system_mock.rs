@@ -14,6 +14,8 @@ pub struct SystemMock {
     wake: bool,
     wakes: Arc<std::sync::Mutex<Vec<chrono::DateTime<chrono::Utc>>>>,
     profiles: Arc<std::sync::Mutex<Vec<crate::ports::system::PowerProfile>>>,
+    /// Simulated processor temperature (°C).
+    temperature: Option<f64>,
 }
 
 impl SystemMock {
@@ -24,6 +26,12 @@ impl SystemMock {
     /// A board that can wake itself up (Raspberry Pi 5).
     pub fn with_wake() -> Self {
         Self { wake: true, ..Self::default() }
+    }
+
+    /// A board reporting this processor temperature.
+    pub fn with_temperature(mut self, celsius: f64) -> Self {
+        self.temperature = Some(celsius);
+        self
     }
 
     /// Wake-up times programmed so far.
@@ -57,6 +65,10 @@ impl SystemPort for SystemMock {
 
     fn can_wake(&self) -> bool {
         self.wake
+    }
+
+    fn temperature_c(&self) -> Option<f64> {
+        self.temperature
     }
 
     async fn schedule_wake(&self, at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {

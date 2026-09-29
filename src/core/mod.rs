@@ -10,3 +10,4 @@ pub mod denoise;
 pub mod jpeg;
 pub mod night;
 pub mod layout;
+pub mod dark_reminder;

@@ -41,6 +41,7 @@ Version couverte : **1.10.5**. Ce document décrit **ce que fait** Aurion (le co
 | F15 | Réglages photo | ISO, pose, intervalle, balance des blancs fixe, verrou d'exposition, pixels chauds, empilement, zone analysée, seuils | e2e réglages |
 | F16 | Presets | enregistrer, appliquer, supprimer ; le mot de passe Wi-Fi n'y figure jamais | e2e presets, sécurité |
 | F17 | Darks | série de darks aux réglages du dernier aperçu | e2e darks |
+| F36 | Rappel des darks | en fin de nuit : ISO, pose et température moyens des photos enregistrées, écrits dans `dark_reminder.json` et `session.log` ; au prochain allumage, encadré « Faites vos darks » sur l'accueil avec un bouton qui lance 10 darks à ces réglages ; disparaît quand une série à ces réglages réussit ou avec « Ignorer » ; aucune demande si aucune photo n'a été enregistrée | `core/dark_reminder.rs`, `dark_reminder_tests.rs`, simulation `end_of_night_writes_the_darks_reminder_*`, e2e « rappel des darks » |
 | F18 | Mot de passe Wi-Fi | proposé au premier démarrage, 10 à 63 caractères, appliqué aussitôt ; réinitialisable par un fichier `aurion-reset-wifi.txt` sur la clé | `test_usb_wifi_reset`, e2e |
 | F19 | Mode simple / expert | menu réduit par défaut ; « Mode expert » affiche réglages fins, presets, stockage ; mémorisé sur le téléphone | e2e « menu » |
 | F20 | Mise à jour | depuis l'interface, fichier binaire contrôlé, refusée pendant la nuit, retour arrière possible | sécurité OTA |

@@ -99,7 +99,7 @@ stateDiagram-v2
 | CALIBRATION | 3 poses d'essai pour caler ISO et temps de pose | `exposure.rs` |
 | WATCH | une pose JPEG toutes les `watch_interval_secs` (60 s), jamais de RAW, rien n'est enregistré ; profil d'énergie « watch » | `detection.rs`, `orchestrator` |
 | RUN | poses à la suite (pause `capture_interval_secs`, 0 par défaut ; plancher de sécurité de 1 s par cycle), profil « capture », enregistrement JPEG et/ou DNG, marquage `_AURORA` ; en FILTER, une fois l'aurore confirmée la capture continue jusqu'à la fin (pas de retour en WATCH) | `orchestrator::save_frame` |
-| SHUTDOWN | journal vidé, `sync`, suppression de `night.json`, extinction ; déclenché aussi quand la clé passe sous le seuil critique (5 % ou 50 Mo libres) | `orchestrator::run` |
+| SHUTDOWN | réglages moyens de la nuit écrits dans `dark_reminder.json` (rappel des darks), journal vidé, `sync`, suppression de `night.json`, extinction ; déclenché aussi quand la clé passe sous le seuil critique (5 % ou 50 Mo libres) | `orchestrator::run` |
 
 Attente : en mode plage horaire, si la nuit est lancée avant l'heure de début, l'orchestrateur attend (contrôle
 toutes les 60 s). En mode minuteur, la durée part du lancement.
@@ -155,6 +155,7 @@ Points clés :
 | `/opt/aurion/config/presets/` | presets utilisateur | 0700 |
 | `/opt/aurion/config/.reglages-utilisateur` | présent dès que des réglages ont été enregistrés sur cette carte : la copie de la clé n'est alors plus reprise | 0600 |
 | `/opt/aurion/config/night.json` | nuit en cours (reprise après coupure), supprimé en fin normale | 0600 |
+| `/opt/aurion/config/dark_reminder.json` | darks à faire après la dernière nuit (ISO, pose, température moyens), supprimé quand ils sont faits ou ignorés | 0600 |
 | `/usr/local/sbin/aurion-helper` | helper root | 0755 root |
 | `/etc/sudoers.d/aurion` | autorise uniquement le helper | 0440 |
 | `/etc/systemd/system/aurion.service` | service | 0644 |
@@ -241,6 +242,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET/POST /api/presets`, `POST /api/presets/:name/apply`, `DELETE /api/presets/:name` | presets |
 | `GET /api/preview`, `POST /api/preview/capture` | aperçu |
 | `GET/POST /api/darks` | série de darks |
+| `GET /api/darks/reminder`, `POST /api/darks/reminder/dismiss` | rappel des darks de la dernière nuit (ou `null`), l'ignorer |
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
 | `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour par fichier |
 | `GET /api/storage/usb`, `POST /api/storage/format` | clés USB branchées ; préparation d'une clé (effacement, exFAT), confirmation `EFFACER` exigée, jamais pendant une nuit |
