@@ -1,5 +1,16 @@
 # Journal des versions
 
+## 1.10.5
+
+Objectif : fermer les 33 vulnérabilités ouvertes sur l'image carte SD (plan ARBOR du 29/09/2026). Aucun changement
+de l'application.
+
+- rsync 3.4.1+ds1-5+deb13u4 remplacé par 3.5.0+ds1-0+deb13u1 (correctif Debian trixie-security) : 33 CVE fermées,
+  dont 5 critiques (CVE-2026-53790, CVE-2026-70460, CVE-2026-53791, CVE-2026-70452, CVE-2026-53793) et 19 élevées.
+  rsync est un outil local, non joignable depuis le Wi-Fi Aurion.
+- La fabrication de l'image échoue si rsync reste sous cette version (archive de sécurité Debian non atteinte) :
+  une image publiée porte forcément le correctif.
+
 ## 1.10.4
 
 Aucun changement de l'application ni de l'image. Version de contrôle de la chaîne de publication :
