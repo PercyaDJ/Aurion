@@ -41,6 +41,8 @@ pub struct Paths {
     pub tmp_dir: PathBuf,
     /// Marker of the night in progress (resume after a power cut).
     pub night_marker: PathBuf,
+    /// Darks to take after the last night (home screen reminder).
+    pub dark_reminder: PathBuf,
 }
 
 impl Paths {
@@ -52,6 +54,7 @@ impl Paths {
             thumb_cache_dir: std::env::temp_dir().join("aurion_thumbnails"),
             tmp_dir: std::env::temp_dir(),
             night_marker: config_dir.join("night.json"),
+            dark_reminder: config_dir.join("dark_reminder.json"),
         }
     }
 }
@@ -237,6 +240,8 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/presets/:name", delete(api::delete_preset))
         .route("/api/disconnect", post(api::disconnect))
         .route("/api/darks", get(api::get_darks).post(api::capture_darks))
+        .route("/api/darks/reminder", get(api::get_dark_reminder))
+        .route("/api/darks/reminder/dismiss", post(api::dismiss_dark_reminder))
         .route("/api/storage", get(api::get_storage))
         .route("/api/storage/usb", get(api::get_usb_devices))
         .route("/api/storage/format", post(api::format_usb))

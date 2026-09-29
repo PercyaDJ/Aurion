@@ -29,6 +29,10 @@ impl SystemPort for SystemRpi {
             .map_err(SystemError::ShutdownFailed)
     }
 
+    fn temperature_c(&self) -> Option<f64> {
+        crate::sys::cpu_temperature()
+    }
+
     async fn set_power_profile(&self, profile: crate::ports::system::PowerProfile) -> Result<(), SystemError> {
         crate::sys::helper(&["power-profile", profile.as_str()], None, Duration::from_secs(10))
             .await

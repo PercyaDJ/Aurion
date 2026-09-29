@@ -73,4 +73,3 @@ Deux niveaux d'usage coexistent :
 
 - Mesurer sur le terrain le temps entre l'allumage et le lancement de la nuit (objectif : moins de 2 minutes).
 - Aperçu en direct plein écran avec aide à la mise au point (zoom sur une étoile).
-- Notification « faites vos darks » à la fin d'une nuit (PLAN_ACTION.md, Q2).

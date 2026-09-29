@@ -1,6 +1,21 @@
 # Journal des versions
 
-## Prochaine version (chaîne de publication, sans changement de l'application ni de l'image)
+## Prochaine version
+
+### Rappel « faites vos darks » (PLAN_ACTION Q2)
+
+- En fin de nuit, Aurion calcule les réglages moyens des photos enregistrées : ISO, temps de pose (arrondi à la
+  milliseconde), écart minimum et maximum, et température moyenne du processeur quand elle est disponible. Ils sont
+  écrits dans `config/dark_reminder.json` et dans le `session.log` de la nuit. Une nuit reprise après une coupure
+  complète les moyennes au lieu de les remplacer ; une nuit sans photo enregistrée ne demande pas de darks.
+- Au prochain allumage, l'accueil affiche l'encadré **Faites vos darks** avec ces réglages et un bouton qui lance
+  10 darks exactement à ces valeurs. L'encadré disparaît quand la série réussit, ou avec *Ignorer*. Une série faite
+  depuis la page Cadrage à d'autres réglages le laisse en place.
+- API : `GET /api/darks/reminder`, `POST /api/darks/reminder/dismiss`.
+- Tests : calcul des moyennes et fusion après reprise, persistance, disparition du rappel (série complète avec un
+  faux `rpicam-still`), nuit simulée de bout en bout, et un cas dans le test navigateur.
+
+### Chaîne de publication (sans changement de l'application ni de l'image)
 
 Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'envoi à ARBOR.
 

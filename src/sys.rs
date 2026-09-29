@@ -66,6 +66,15 @@ async fn run_with_stdin(
     }
 }
 
+/// Processor temperature (°C) from the kernel thermal zone, None when the
+/// machine has none (PC, container).
+pub fn cpu_temperature() -> Option<f64> {
+    std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .map(|t| t / 1000.0)
+}
+
 /// State of the capture drive directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StorageHealth {

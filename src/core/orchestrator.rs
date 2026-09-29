@@ -9,6 +9,7 @@ use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
 use chrono::Datelike;
+use crate::core::dark_reminder::{DarkReminder, NightStats};
 use crate::core::layout::{self, NightLayout};
 use crate::core::night::{
     next_occurrence, NightMarker, ResumePlan, AUTO_START_IDLE_SECS, MAX_RESUMES, RESUME_DELAY_SECS,
@@ -356,6 +357,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let mut iterations = 0u64;
         // A resumed night continues the numbering (timelapse order kept)
         let mut frame_number = night_path.as_deref().and_then(layout::max_frame_number).map(|n| n + 1).unwrap_or(0);
+        // Settings of the saved frames: the darks are taken at their average
+        let mut night_stats = NightStats::new();
         let mut last_aurora_at: Option<chrono::DateTime<chrono::Local>> = None;
         let mut consecutive_io_errors = 0u32;
         let loop_start = self.now();
@@ -622,6 +625,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     let raw = raw_frame_opt.as_ref().filter(|_| keep_raw);
                     self.save_frame(&config, &night_layout, &analysis_frame, raw, frame_number, det_result.detected, &mut stacker).await;
                     frame_number += 1;
+                    night_stats.add(exposure.iso, exposure.shutter_us, self.system.temperature_c());
 
                     // In FILTER mode during Run, if detection drops we keep capturing
                     // (conservative: don't stop on momentary gaps)
@@ -650,6 +654,20 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         info!("Orchestrator: entering shutdown sequence");
         self.set_phase(Phase::Shutdown).await;
         self.log("Phase: SHUTDOWN").await;
+
+        // Darks reminder shown on the home screen at the next power-on
+        let dark_path = self.state.paths.dark_reminder.clone();
+        if let Some(reminder) = night_stats.reminder(night_name.clone(), self.now().timestamp_millis()) {
+            let reminder = reminder.merge(DarkReminder::load(&dark_path));
+            let summary = reminder.summary();
+            if let Err(e) = reminder.save(&dark_path) {
+                warn!("Orchestrator: cannot write the darks reminder: {}", e);
+            }
+            if let Some(ref mut sl) = session_logger {
+                sl.log_text(&summary);
+            }
+            self.log(&summary).await;
+        }
 
         if let Some(ref mut sl) = session_logger {
             sl.log_text("Fin de session");

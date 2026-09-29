@@ -35,6 +35,12 @@ const ev = (n, score) => JSON.stringify({
   consecutive_hits: 0, moon_mask_active: false, frame_number: n,
 });
 fs.writeFileSync(path.join(capture, 'sessions/2026-03-05_21-30/event.jsonl'), ev(0, 1.1) + '\n' + ev(1, 4.2) + '\n');
+// End of that night: darks reminder at its average settings
+const darkReminder = {
+  night: '2026-03-05_21-30', ended_epoch_ms: Date.UTC(2026, 2, 6, 5, 0), frames: 2, iso: 1600, shutter_us: 6000000,
+  iso_min: 800, iso_max: 1600, shutter_min_us: 4000000, shutter_max_us: 8000000, temp_c: 41.3,
+};
+fs.writeFileSync(path.join(configDir, 'dark_reminder.json'), JSON.stringify(darkReminder));
 
 // ─── Server ─────────────────────────────────────────────────
 const server = spawn(binary, ['--config-dir', configDir, 'serve', '--port', String(port)], {
@@ -113,6 +119,31 @@ try {
     assert(await page.locator('#checks [data-check=password].warn').count() === 1, 'default password warning');
     assert(!(await page.locator('#startNightBtn').isDisabled()), 'night can be started');
     assert((await page.textContent('#capacityLine')).includes('Place sur la clé'), 'capacity shown');
+  });
+
+  await step('accueil : rappel des darks aux réglages de la nuit, puis ignoré', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#darkReminder:not([hidden])');
+    const stats = await page.textContent('#darkStats');
+    assert(stats.includes('1600') && stats.includes('6,0 s') && stats.includes('41 °C'), stats);
+    assert((await page.textContent('#darkNight')).includes('05/03'), 'night date');
+    assert((await page.textContent('#darkNote')).includes('variables'), 'varying exposure explained');
+    // The button asks for darks at the settings of the night
+    const [req] = await Promise.all([
+      page.waitForRequest(r => r.url().endsWith('/api/darks') && r.method() === 'POST'),
+      page.click('#darkReminderBtn'),
+    ]);
+    const body = JSON.parse(req.postData());
+    assert(body.iso === 1600 && body.shutter_us === 6000000 && body.count === 10, req.postData());
+    // No camera on the test machine: the series stops with an error, the reminder stays
+    await page.waitForFunction(() => document.getElementById('darkReminderStatus').textContent.includes('interrompus'));
+    assert(fs.existsSync(path.join(configDir, 'dark_reminder.json')), 'reminder kept after a failed series');
+    await page.click('#darkDismissBtn');
+    await page.waitForSelector('#darkReminder[hidden]', { state: 'attached' });
+    assert(!fs.existsSync(path.join(configDir, 'dark_reminder.json')), 'reminder removed');
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    assert(await page.locator('#darkReminder').isHidden(), 'still hidden after reload');
   });
 
   await step('accueil : résumé de la dernière nuit et lien RAW', async () => {

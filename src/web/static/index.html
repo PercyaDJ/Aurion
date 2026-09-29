@@ -58,6 +58,20 @@
                 <p id="autoStartText"></p>
             </section>
 
+            <!-- Fin de nuit : rappel des darks aux réglages moyens de la nuit -->
+            <section id="darkReminder" class="card resume-card" hidden>
+                <h2>Faites vos darks</h2>
+                <p>La nuit <span id="darkNight"></span> est terminée. Pour retirer le bruit du capteur de ses RAW, prenez
+                    maintenant des poses noires aux mêmes réglages, <b>bouchon sur l'objectif</b>.</p>
+                <div class="stats" id="darkStats"></div>
+                <p class="muted small" id="darkNote"></p>
+                <div class="row-actions wrap">
+                    <button class="btn btn-primary" id="darkReminderBtn" onclick="startReminderDarks()">Lancer 10 darks</button>
+                    <button class="btn btn-outline" id="darkDismissBtn" onclick="dismissDarkReminder()">Ignorer</button>
+                </div>
+                <p class="form-hint" id="darkReminderStatus"></p>
+            </section>
+
             <!-- Premier démarrage : mot de passe personnel -->
             <section id="onboarding" class="card onboarding" hidden>
                 <h2>Protégez votre caméra</h2>
@@ -278,6 +292,89 @@
             } catch (_) { /* pas de clé : rien à montrer */ }
         }
 
+        // ─── Rappel des darks (fin de la dernière nuit) ───
+        let darkReminder = null;
+        let darksRunning = false;
+        const DARK_COUNT = 10;
+
+        function fmtNight(r) {
+            const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})$/.exec(r.night || '');
+            if (m) return `du ${m[3]}/${m[2]} (${m[4]}:${m[5]})`;
+            const d = new Date(r.ended_epoch_ms);
+            return isNaN(d) ? '' : 'finie le ' + d.toLocaleDateString('fr-FR');
+        }
+
+        async function loadDarkReminder() {
+            try {
+                darkReminder = await (await apiFetch('/api/darks/reminder')).json();
+            } catch (_) { return; }
+            const card = document.getElementById('darkReminder');
+            card.hidden = !darkReminder;
+            if (!darkReminder) return;
+            const r = darkReminder;
+            const secs = s => (s / 1e6).toFixed(1).replace('.', ',') + ' s';
+            const stat = (v, l) => `<div class="stat"><div class="stat-value">${aurionEscape(v)}</div><div class="stat-label">${l}</div></div>`;
+            document.getElementById('darkNight').textContent = fmtNight(r);
+            document.getElementById('darkStats').innerHTML = stat(r.iso, 'ISO') + stat(secs(r.shutter_us), 'pose')
+                + (r.temp_c != null ? stat(Math.round(r.temp_c) + ' °C', 'processeur') : '');
+            const notes = [`Moyenne de ${r.frames} photo${r.frames > 1 ? 's' : ''}.`];
+            if (r.shutter_min_us !== r.shutter_max_us || r.iso_min !== r.iso_max) {
+                notes.push(`Réglages variables cette nuit (ISO ${r.iso_min} à ${r.iso_max}, pose ${secs(r.shutter_min_us)} à ${secs(r.shutter_max_us)}).`);
+            }
+            notes.push(r.temp_c != null
+                ? 'Idéal : à faire tout de suite, tant que la caméra est à la température de la nuit.'
+                : 'Idéal : à faire tout de suite, dehors, à la température de la nuit.');
+            document.getElementById('darkNote').textContent = notes.join(' ');
+            document.getElementById('darkReminderBtn').textContent = `Lancer ${DARK_COUNT} darks`;
+            pollReminderDarks();
+        }
+
+        async function startReminderDarks() {
+            const r = darkReminder;
+            if (!r || !confirm("Le bouchon est-il sur l'objectif ?")) return;
+            try {
+                await apiFetch('/api/darks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count: DARK_COUNT, iso: r.iso, shutter_us: r.shutter_us }),
+                });
+                darksRunning = true;
+                pollReminderDarks();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function pollReminderDarks() {
+            const r = darkReminder;
+            if (!r) return;
+            let d = null;
+            try { d = await (await apiFetch('/api/darks')).json(); } catch (_) { return; }
+            // Une série à d'autres réglages (page Cadrage) ne concerne pas ce rappel
+            if (!d || d.iso !== r.iso || d.shutter_us !== r.shutter_us) return;
+            const el = document.getElementById('darkReminderStatus');
+            document.getElementById('darkReminderBtn').disabled = d.running;
+            const wasRunning = darksRunning;
+            darksRunning = d.running;
+            if (d.running) {
+                el.textContent = `Darks en cours : ${d.done}/${d.total}. Gardez le bouchon.`;
+                setTimeout(pollReminderDarks, 3000);
+            } else if (d.error) {
+                el.textContent = 'Darks interrompus : ' + d.error;
+            } else if (wasRunning) {
+                showToast(`${d.done} darks enregistrés dans darks/ sur la clé`, 'success');
+                loadDarkReminder();
+            }
+        }
+
+        async function dismissDarkReminder() {
+            try {
+                await apiFetch('/api/darks/reminder/dismiss', { method: 'POST' });
+                darkReminder = null;
+                document.getElementById('darkReminder').hidden = true;
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
         async function loadConfig() {
             try {
                 config = await (await apiFetch('/api/config')).json();
@@ -420,6 +517,7 @@
         loadConfig();
         loadPreflight();
         loadLastNight();
+        loadDarkReminder();
         aurionPoll(loadPreflight, 10000);
     </script>
     <script src="/js/toast.js"></script>

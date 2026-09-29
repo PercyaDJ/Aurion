@@ -17,6 +17,12 @@ pub trait SystemPort: Send + Sync {
         Ok(())
     }
 
+    /// Processor temperature (°C). The HQ camera sits next to the
+    /// processor: it follows the sensor temperature (darks reminder).
+    fn temperature_c(&self) -> Option<f64> {
+        None
+    }
+
     /// Program the power-on time used after the next shutdown.
     async fn schedule_wake(&self, _at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {
         Err(SystemError::WakeUnsupported)
