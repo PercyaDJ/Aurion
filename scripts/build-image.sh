@@ -134,6 +134,16 @@ if [[ $APT -eq 1 ]]; then
       dpkg-query -W -f="\${db:Status-Status}" "$p" 2>/dev/null | grep -qx installed \
         || { echo "Paquet indispensable retiré : $p"; exit 1; }
     done
+    # Lowest version carrying the security fixes (ARBOR plans): an older one means
+    # the Debian security archive was not reached during the upgrade.
+    for pv in "rsync 3.5.0+ds1-0+deb13u1"; do
+      p=${pv% *}; min=${pv#* }
+      v=$(dpkg-query -W -f="\${db:Status-Status} \${Version}" "$p" 2>/dev/null || true)
+      case "$v" in
+        "installed "*) dpkg --compare-versions "${v#installed }" ge "$min" \
+          || { echo "Correctif de sécurité absent : $p ${v#installed } (minimum $min)"; exit 1; } ;;
+      esac
+    done
     # Documentation, manuals and translations: never read on a camera.
     # Licences (copyright files) stay. dpkg skips these paths for later updates too.
     cat >/etc/dpkg/dpkg.cfg.d/aurion-minimal <<CFG
