@@ -75,8 +75,16 @@ celui du partage de connexion du téléphone. Qui possède la clé a déjà l'ac
 passe par fichier, photos) : risque jugé faible. La copie n'est reprise que sur une carte SD sans réglages
 enregistrés, et seulement si elle est valide.
 
-Risque accepté : les versions ne sont pas signées. Le téléchargement passe en HTTPS depuis le dépôt du projet ; qui
-peut modifier le dépôt peut donc livrer une version (plan A2 : signature Ed25519).
+Signature des versions (plan A2, fait) : le workflow Release signe `aurion-arm64` et l'archive `.tar.gz` en Ed25519
+avec le secret `AURION_SIGNING_KEY` ; la mise à jour depuis GitHub télécharge `aurion-arm64.sig` et vérifie la
+signature (`verify_strict`) avec la clé publique embarquée dans le binaire (`keys/aurion-release.pub`) avant tout
+contrôle du binaire. Signature absente, illisible, invalide ou d'une autre clé : refus, message sur la page
+Diagnostics, rien n'est installé. Aucune exception pour les versions publiées avant la signature (choix du
+propriétaire : elles sont plus anciennes, le retour arrière les remplace). `scripts/get.sh` fait la même
+vérification avec `openssl`. Qui peut modifier le dépôt ou les releases sans détenir la clé privée ne peut plus
+livrer une version. Tests : `signature_*`, `unsigned_release_is_refused`,
+`openssl_signature_from_the_release_workflow_is_accepted` (`update.rs`), `online_update_refuses_bad_or_missing_signatures`
+(`update_tests.rs`).
 
 ## 4. Le helper root (`scripts/aurion-helper`)
 
@@ -177,5 +185,6 @@ Réévaluation : à chaque relevé ARBOR (release ou renvoi manuel) ; tout corre
 | `nmcli` reçoit le mot de passe du hotspot en argument pendant une fraction de seconde | Faible | limitation de `nmcli` ; processus root, aucun autre utilisateur sur le Pi | fichier de connexion NetworkManager en 0600 |
 | Hotspot en WPA2-PSK (pas WPA3) | Faible | compatibilité avec tous les téléphones | option WPA3-SAE |
 | Interface en HTTP (pas HTTPS) | Faible | réseau fermé du Pi ; un certificat auto-signé effraie les navigateurs | aucune dans l'immédiat |
-| Mise à jour OTA non signée | Moyen | contrôles de format et d'exécution mais pas de signature | signature Ed25519 des releases (plan A2) |
+| Clé de signature des releases | Faible | depuis A2, la mise à jour depuis GitHub et `get.sh` refusent toute version non signée ; le risque se déplace sur la clé privée : qui obtient le secret `AURION_SIGNING_KEY` (compte GitHub du propriétaire, workflow modifié sur `main`) peut signer une version. Changer de clé impose une réinstallation par fichier, paquet ou image | protection de la branche `main` et double authentification du compte ; clé hors ligne (docs/DEX.md, section 5) |
+| Mise à jour par fichier et paquet `.deb` non signés | Faible | l'envoi d'un fichier depuis l'interface suppose l'accès au Wi-Fi Aurion (anti-CSRF, contrôles ELF et d'exécution) ; le `.deb` est installé à la main par un administrateur | vérifier aussi la signature sur l'envoi de fichier, avec un `.sig` joint |
 | Service sans durcissement systemd poussé (`ProtectSystem`, `NoNewPrivileges`) | Faible | incompatible avec l'appel à sudo | déléguer les actions root à un service séparé (plan A4) |

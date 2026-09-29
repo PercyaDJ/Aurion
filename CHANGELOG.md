@@ -1,6 +1,8 @@
 # Journal des versions
 
-## Prochaine version (chaîne de publication, sans changement de l'application ni de l'image)
+## Prochaine version
+
+### Chaîne de publication
 
 Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'envoi à ARBOR.
 
@@ -17,6 +19,19 @@ Objectif : consommer le moins de minutes GitHub Actions possible, sans perdre l'
   Compilation arm64 et test de l'image seulement si l'empaquetage change.
 - Documentation seule (`docs/`, `*.md`) : aucun workflow lancé. Plus d'artefacts stockés (les SBOM sont dans les
   releases). Dependabot passe en mensuel.
+
+### Signature des releases (plan A2)
+
+- Le workflow Release signe en Ed25519 `aurion-arm64` (edge et release) et l'archive `.tar.gz`, et publie les
+  fichiers `.sig`. Clé privée : secret GitHub `AURION_SIGNING_KEY` ; secret absent, avertissement et pas de
+  signature ; secret qui ne correspond pas à la clé publique du dépôt, échec de la publication.
+- *Mettre à jour depuis GitHub* vérifie la signature avec la clé publique embarquée (`keys/aurion-release.pub`)
+  avant d'installer. Signature absente ou invalide : mise à jour refusée, message clair sur la page Diagnostics.
+  Les versions publiées avant la signature (1.10.5 et antérieures) ne s'installent plus depuis GitHub : le canal
+  stable reste refusé jusqu'à la prochaine version, le canal Développement est signé dès cette modification.
+- `scripts/get.sh` vérifie la signature de l'archive avec `openssl` (déjà présent sur Raspberry Pi OS) et refuse une
+  archive non signée.
+- Génération de la paire de clés et changement de clé : docs/DEX.md, section 5.
 
 ## 1.10.5
 

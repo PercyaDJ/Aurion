@@ -8,8 +8,10 @@
 #   curl -fsSL -H "Authorization: Bearer $JETON" \
 #     https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh | sudo GITHUB_TOKEN=$JETON bash
 #
-# Télécharge la dernière release (archive précompilée), vérifie son
-# empreinte SHA-256 et lance l'installeur.
+# Télécharge la dernière release (archive précompilée), vérifie sa
+# signature Ed25519 (clé publique ci-dessous, identique à
+# keys/aurion-release.pub) et son empreinte SHA-256, puis lance l'installeur.
+# Une archive sans signature ou mal signée est refusée.
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 REPO="${AURION_REPO:-PercyaDJ/Aurion}"
@@ -17,8 +19,14 @@ API="https://api.github.com/repos/$REPO/releases/latest"
 AUTH=()
 [[ -n "${GITHUB_TOKEN:-}" ]] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
 
+# Clé publique des releases (la clé privée est le secret GitHub AURION_SIGNING_KEY)
+RELEASE_PUBLIC_KEY='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEADUW6xbdiNJ+QZZotLUPJt5aWy9uQTZaLWqL2iyFCLJw=
+-----END PUBLIC KEY-----'
+
 [[ $EUID -eq 0 ]] || { echo "Lancez avec sudo"; exit 1; }
 command -v curl >/dev/null || apt-get install -y curl
+command -v openssl >/dev/null || apt-get install -y openssl
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -35,9 +43,18 @@ NAME=$(grep -o '"name": *"aurion-[^"]*-rpi-arm64.tar.gz"' release.json | head -n
 [[ -n "$NAME" ]] || { echo "Aucune archive Raspberry Pi dans la dernière release"; exit 1; }
 URL=$(asset_url "$NAME")
 SUM_URL=$(asset_url "$NAME.sha256")
+SIG_URL=$(asset_url "$NAME.sig")
+[[ -n "$SIG_URL" ]] || { echo "✗ $NAME n'est pas signée ($NAME.sig absent) : installation refusée"; exit 1; }
 
 echo "▶ Téléchargement de $NAME"
 curl -fsSL "${AUTH[@]}" -H "Accept: application/octet-stream" "$URL" -o "$NAME"
+curl -fsSL "${AUTH[@]}" -H "Accept: application/octet-stream" "$SIG_URL" -o "$NAME.sig"
+printf '%s\n' "$RELEASE_PUBLIC_KEY" > release.pub
+if ! openssl pkeyutl -verify -pubin -inkey release.pub -rawin -in "$NAME" -sigfile "$NAME.sig" >/dev/null 2>&1; then
+  echo "✗ Signature invalide : $NAME n'a pas été publiée par le projet Aurion (ou a été modifiée). Installation refusée."
+  exit 1
+fi
+echo "✓ Signature vérifiée"
 if [[ -n "$SUM_URL" ]]; then
   curl -fsSL "${AUTH[@]}" -H "Accept: application/octet-stream" "$SUM_URL" -o "$NAME.sha256"
   sha256sum -c "$NAME.sha256"

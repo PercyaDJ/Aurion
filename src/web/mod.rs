@@ -74,6 +74,8 @@ pub struct UpdateSettings {
     pub github_api: String,
     /// Downloads must start with this prefix (the project's releases).
     pub download_prefix: String,
+    /// Public key (PEM) the downloaded binaries must be signed with.
+    pub release_public_key: String,
 }
 
 impl Default for UpdateSettings {
@@ -83,6 +85,7 @@ impl Default for UpdateSettings {
             restart: true,
             github_api: "https://api.github.com".into(),
             download_prefix: format!("https://github.com/{}/releases/download/", crate::web::update::REPO),
+            release_public_key: crate::web::update::RELEASE_PUBLIC_KEY.to_string(),
         }
     }
 }

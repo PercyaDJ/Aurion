@@ -23,3 +23,7 @@ Thumbs.db
 
 # E2E test dependencies
 /tests/e2e/node_modules/
+
+# Clé privée de signature des releases : jamais dans le dépôt (docs/DEX.md, section 5)
+*.pem
+aurion-signing*

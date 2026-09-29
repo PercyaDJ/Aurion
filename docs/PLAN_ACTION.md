@@ -49,7 +49,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
 | A1 | P1 | Écrire le mot de passe du hotspot dans un fichier de connexion NetworkManager (0600) plutôt qu'en argument de `nmcli` | S |
-| A2 | P1 | Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour OTA ou `get.sh` | M |
+| A2 | P1 | ~~Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour OTA ou `get.sh`~~ : fait dans la prochaine version (refus strict des versions non signées, clé publique `keys/aurion-release.pub`, procédure dans DEX section 5) | M |
 | A3 | P2 | Code PIN optionnel pour l'interface (utile en mode maintenance sur un réseau partagé) | M |
 | A4 | P2 | Séparer les actions root dans un petit service dédié (socket local) pour durcir `aurion.service` (`ProtectSystem`, `NoNewPrivileges`) | L |
 | A5 | P3 | Option WPA3-SAE pour le hotspot | S |

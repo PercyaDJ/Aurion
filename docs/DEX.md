@@ -117,6 +117,44 @@ sudo systemctl start aurion
 | Application seule (cas courant) | depuis le téléphone, *Mettre à jour depuis GitHub* |
 | Programme système `aurion-helper`, paquets, réglages du système (Diagnostics signale « programme système plus ancien ») | regraver l'image `aurion-raspios-arm64.img.xz` : les réglages reviennent de la clé USB |
 
+### Signature des releases (Ed25519)
+
+Chaque binaire `aurion-arm64` (edge et release) et chaque archive `.tar.gz` est publié avec un fichier `.sig` :
+signature Ed25519 faite par le workflow Release avec le secret GitHub `AURION_SIGNING_KEY`. La mise à jour depuis
+GitHub et `scripts/get.sh` vérifient cette signature avec la clé publique `keys/aurion-release.pub` (embarquée dans
+le binaire, recopiée dans `get.sh`) et refusent toute version sans signature ou mal signée, sans exception. Les
+versions publiées avant la signature ne s'installent donc plus depuis GitHub (retour arrière : bouton *Revenir à la
+version précédente*).
+
+Générer la paire, une seule fois, sur un ordinateur de confiance (OpenSSL 1.1.1 ou plus récent), à la racine du
+dépôt :
+
+```bash
+openssl genpkey -algorithm ed25519 -out aurion-signing.pem
+openssl pkey -in aurion-signing.pem -pubout -out keys/aurion-release.pub
+sed -n 2p keys/aurion-release.pub   # ligne à recopier dans scripts/get.sh (RELEASE_PUBLIC_KEY)
+```
+
+Puis :
+
+1. Clé privée dans le secret : *Settings*, *Secrets and variables*, *Actions*, *New repository secret*, nom
+   `AURION_SIGNING_KEY`, valeur : tout le contenu de `aurion-signing.pem` (lignes `BEGIN` et `END` comprises).
+   En ligne de commande : `gh secret set AURION_SIGNING_KEY < aurion-signing.pem`.
+2. Ranger `aurion-signing.pem` hors ligne (gestionnaire de mots de passe, clé USB chiffrée), puis l'effacer du
+   disque. Elle ne va jamais dans le dépôt (`*.pem` est ignoré par git).
+3. Remplacer dans `scripts/get.sh` la ligne de clé de `RELEASE_PUBLIC_KEY` par celle de `keys/aurion-release.pub`
+   (le test `embedded_release_key_is_valid_and_matches_get_sh` vérifie que les deux concordent).
+4. Commiter `keys/aurion-release.pub` et `scripts/get.sh`.
+
+Garde-fous du workflow : secret absent, avertissement et pas de signature (la version publiée sera refusée par les
+Aurion à jour) ; secret qui ne correspond pas à `keys/aurion-release.pub`, échec de la publication ; chaque
+signature est revérifiée avec la clé publique avant d'être publiée.
+
+Changer de clé (clé privée perdue ou exposée) : refaire les quatre étapes. Un Aurion déjà installé ne connaît que
+l'ancienne clé : il refusera les versions signées avec la nouvelle, il faut donc l'installer une fois par fichier
+(*Mise à jour par fichier*), par le paquet `.deb` ou en regravant l'image. Une clé exposée doit être changée sans
+attendre : celui qui la détient peut publier une version acceptée par tous les Aurion.
+
 ## 6. Sauvegarde et restauration
 
 | Donnée | Emplacement | Sauvegarde |

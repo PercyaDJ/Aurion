@@ -28,6 +28,7 @@ async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
 tokio-util = { version = "0.7.18", features = ["io", "compat"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
 libc = "0.2"
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "pkcs8", "pem"] }
 
 [dev-dependencies]
 axum-test = "15"

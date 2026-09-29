@@ -72,6 +72,31 @@ jobs:
           (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256)
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
+      # Ed25519 signature checked by the phone update and scripts/get.sh (docs/DEX.md, section 5).
+      # The private key stays in the secret: written to a private temporary file, deleted at once.
+      - name: Signature Ed25519 (aurion-arm64, archive)
+        env:
+          AURION_SIGNING_KEY: ${{ secrets.AURION_SIGNING_KEY }}
+        run: |
+          if [ -z "$AURION_SIGNING_KEY" ]; then
+            echo "::warning title=Release non signée::Secret AURION_SIGNING_KEY absent : aurion-arm64 n'est pas signé, les Aurion à jour refuseront cette version."
+            exit 0
+          fi
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          chmod 600 "$key"
+          printf '%s\n' "$AURION_SIGNING_KEY" > "$key"
+          # A secret that does not match keys/aurion-release.pub would publish releases every Aurion refuses
+          if ! diff <(openssl pkey -in "$key" -pubout) keys/aurion-release.pub >/dev/null; then
+            echo "::error title=Clé de signature::AURION_SIGNING_KEY ne correspond pas à keys/aurion-release.pub"
+            exit 1
+          fi
+          for f in dist/aurion-arm64 dist/aurion-*-rpi-arm64.tar.gz; do
+            [ -f "$f" ] || continue
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "$f" -out "$f.sig"
+            openssl pkeyutl -verify -pubin -inkey keys/aurion-release.pub -rawin -in "$f" -sigfile "$f.sig"
+          done
+
       - name: Déplacer le tag edge sur ce commit
         run: |
           git tag -f edge "$GITHUB_SHA"
@@ -90,6 +115,7 @@ jobs:
           files: |
             dist/aurion-arm64
             dist/aurion-arm64.sha256
+            dist/aurion-arm64.sig
 
       - name: Image carte SD (Raspberry Pi OS Lite 64 bits + Aurion)
         if: steps.version.outputs.skip == 'false'
@@ -132,13 +158,15 @@ jobs:
 
             Autres fichiers : paquet `.deb` (`sudo apt install ./aurion_*.deb`) et archive `.tar.gz`
             pour une installation sur un Raspberry Pi OS existant. `aurion-arm64` : utilisé par la mise à jour
-            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*). `aurion-sbom.cdx.json` et
+            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*). Fichiers `.sig` : signatures
+            Ed25519 vérifiées par la mise à jour et par `scripts/get.sh`. `aurion-sbom.cdx.json` et
             `aurion-image-sbom.cdx.json` : inventaires CycloneDX de l'application et du système de l'image.
           files: |
             dist/*.img.xz
             dist/*.tar.gz
             dist/*.deb
             dist/*.sha256
+            dist/*.sig
             dist/aurion-arm64
             dist/*.cdx.json
 
