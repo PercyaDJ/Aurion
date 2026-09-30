@@ -159,6 +159,48 @@ async fn online_update_rejects_bad_requests() {
     t.server.post("/api/system/update/online").json(&json!({"channel": "stable"})).await.assert_status(StatusCode::CONFLICT);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_version_runs_on_trial_until_confirmed() {
+    let bin = std::fs::read("/bin/bash").unwrap();
+    let sum = format!("{}  aurion-arm64\n", sha256_hex(&bin));
+    let sig = common::sign(&bin);
+    let (t, s) = online_update(fake_github_with(bin, Some(sum), Some(sig)).await).await;
+    assert_eq!(s["last"]["ok"], true, "{}", s);
+    let trial = t.dir.path().join("bin/aurion.trial");
+    assert!(trial.exists(), "installed on trial: the helper can put the previous version back");
+    // Next start: once it has run long enough, the version confirms itself
+    aurion::web::update::startup_checks(t.state.clone(), std::time::Duration::from_millis(10)).await;
+    assert!(!trial.exists(), "confirmed");
+}
+
+#[tokio::test]
+async fn an_automatic_rollback_is_reported_on_the_diagnostics_page() {
+    let t = common::env();
+    let bin = t.dir.path().join("bin/aurion");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, b"OLD").unwrap();
+    // Written by aurion-helper app-rollback after the trial version failed
+    std::fs::write(bin.with_extension("rolled-back"), "1.12.1\n").unwrap();
+    aurion::web::update::startup_checks(t.state.clone(), std::time::Duration::from_millis(10)).await;
+    let s: Value = t.server.get("/api/system/update/status").await.json();
+    assert_eq!(s["last"]["ok"], false, "{}", s);
+    let msg = s["last"]["message"].as_str().unwrap();
+    assert!(msg.contains("1.12.1") && msg.contains("retour automatique"), "{}", msg);
+    assert!(!bin.with_extension("rolled-back").exists(), "reported once");
+}
+
+#[tokio::test]
+async fn a_manual_rollback_ends_the_trial() {
+    let t = common::env();
+    let bin = t.dir.path().join("bin/aurion");
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::write(&bin, b"NEW").unwrap();
+    std::fs::write(bin.with_extension("prev"), b"OLD").unwrap();
+    std::fs::write(bin.with_extension("trial"), "1.12.1").unwrap();
+    t.server.post("/api/system/rollback").await.assert_status_ok();
+    assert!(!bin.with_extension("trial").exists(), "no automatic swap back to the version just left");
+}
+
 #[tokio::test]
 async fn rollback_swaps_current_and_previous() {
     let t = common::env();

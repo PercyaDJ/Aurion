@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.12.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.12.1**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -101,6 +101,13 @@ Les journaux système sont en RAM : pour garder le journal d'une nuit, se fier �
 | Par fichier | *Diagnostics*, *Mise à jour par fichier*, les deux fichiers `aurion-arm64` et `aurion-arm64.sig` de la release | idem (`/opt/aurion/aurion.prev`) |
 | Paquet | `sudo apt install ./aurion_X.Y.Z_arm64.deb` | réinstaller le paquet précédent |
 | Script | `sudo ./install.sh` depuis un clone à jour | idem |
+
+**Retour arrière automatique (1.12.1)** : une version installée démarre « à l'essai » (fichier
+`/opt/aurion/aurion.trial`). Si le service échoue 3 fois en 15 minutes, systemd lance `aurion-rollback.service`, qui
+remet la version précédente (`aurion.prev`, la version en échec est gardée en `aurion.failed`) et relance le service ;
+*Diagnostics* l'annonce au démarrage suivant. Après 3 minutes de fonctionnement, la version est confirmée et le
+fichier d'essai disparaît. Une version confirmée qui échoue (matériel, par exemple) n'est jamais remplacée : le
+service est simplement relancé.
 
 La mise à jour est refusée pendant une nuit. Depuis la 1.12.0, seul un binaire **signé par le projet** est installé,
 par GitHub comme par fichier (voir « Signature des versions » ci-dessous). Retour arrière manuel :

@@ -1405,6 +1405,8 @@ pub(crate) async fn install_binary(state: &AppState, data: &[u8], signature: &[u
         std::fs::copy(&target, &backup).map_err(|e| format!("Sauvegarde de l'ancien binaire impossible: {}", e))?;
     }
     std::fs::rename(&staged, &target).map_err(|e| format!("Remplacement impossible: {}", e))?;
+    // On trial until it has run a few minutes (automatic rollback otherwise)
+    let _ = std::fs::write(crate::web::update::trial_marker(&target), &version);
 
     tracing::info!("OTA: {} remplacé ({} octets, {}), ancienne version dans {:?}", target.display(), data.len(), version, backup);
     state.add_log(format!("Mise à jour installée : {} ({} Mo). Redémarrage…", version, data.len() / 1_048_576)).await;

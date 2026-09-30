@@ -1,5 +1,17 @@
 # Journal des versions
 
+## 1.12.1
+
+Objectif : une mise à jour ratée ne rend jamais la caméra inutilisable, boîtier fermé.
+
+- **Retour arrière automatique** : une nouvelle version démarre « à l'essai ». Si elle ne démarre pas (3 échecs du
+  service en 15 minutes), systemd remet seul la version précédente et relance la caméra ; la page *Diagnostics*
+  l'annonce. Après 3 minutes de fonctionnement, la version est confirmée.
+- Une version confirmée qui échoue (caméra débranchée, par exemple) est relancée sans limite, jamais abandonnée.
+- Retour arrière manuel : il met fin à l'essai (pas de retour automatique vers la version qu'on vient de quitter).
+- Programme système `aurion-helper` en version 4 (commande `app-rollback`) : pour en profiter, la carte SD doit
+  porter l'image 1.12.1 ou plus récente (les mises à jour du système depuis le téléphone arrivent avec l'image A/B).
+
 ## 1.12.0
 
 Objectif : n'installer que les versions publiées par le projet, première brique d'une caméra mise à jour boîtier

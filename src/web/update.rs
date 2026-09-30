@@ -29,7 +29,7 @@ pub const ASSET: &str = "aurion-arm64";
 /// `aurion-helper version` this application expects. An online update
 /// replaces the application only: a new helper (root) needs the SD image or
 /// the .deb once.
-pub const EXPECTED_HELPER_VERSION: &str = "3";
+pub const EXPECTED_HELPER_VERSION: &str = "4";
 /// Largest binary accepted, uploaded or downloaded (the real one is a few MB).
 pub const MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -77,6 +77,45 @@ async fn set_status(state: &AppState, channel: &str, running: bool, ok: Option<b
         channel: channel.to_string(),
         message,
     });
+}
+
+/// A freshly installed version runs "on trial" (marker `aurion.trial` next to
+/// the binary) until it has run this long: if it fails to start meanwhile,
+/// systemd's OnFailure puts the previous version back (aurion-helper
+/// app-rollback).
+pub const TRIAL_CONFIRM_SECS: u64 = 180;
+
+/// Marker of a version on trial (content: its version).
+pub fn trial_marker(target: &std::path::Path) -> std::path::PathBuf {
+    target.with_extension("trial")
+}
+
+/// Written by the helper after an automatic rollback (content: failed version).
+pub fn rollback_marker(target: &std::path::Path) -> std::path::PathBuf {
+    target.with_extension("rolled-back")
+}
+
+/// At startup: report an automatic rollback, then confirm the running
+/// version once it has run [`TRIAL_CONFIRM_SECS`].
+pub async fn startup_checks(state: AppState, confirm_after: Duration) {
+    let Ok(target) = crate::web::api::update_target(&state) else { return };
+    let rolled = rollback_marker(&target);
+    if let Ok(failed) = std::fs::read_to_string(&rolled) {
+        let _ = std::fs::remove_file(&rolled);
+        let msg = format!(
+            "la version {} ne démarrait pas : retour automatique à la version précédente",
+            failed.trim()
+        );
+        set_status(&state, "", false, Some(false), msg).await;
+    }
+    let trial = trial_marker(&target);
+    if !trial.exists() {
+        return;
+    }
+    tokio::time::sleep(confirm_after).await;
+    if std::fs::remove_file(&trial).is_ok() {
+        state.add_log(format!("Version {} confirmée : elle démarre et fonctionne", crate::VERSION)).await;
+    }
 }
 
 /// API address of the release for a channel.
@@ -380,6 +419,8 @@ pub async fn rollback(State(state): State<AppState>) -> Result<String, ApiError>
         return Err(io(e));
     }
     std::fs::rename(&swap, &previous).map_err(io)?;
+    // Chosen by hand: no automatic swap back to the version just left
+    let _ = std::fs::remove_file(trial_marker(&target));
     state.add_log("Retour à la version précédente, redémarrage…".into()).await;
     crate::web::api::schedule_restart(&state);
     Ok("Version précédente rétablie. Rechargez la page dans 15 secondes.".into())
