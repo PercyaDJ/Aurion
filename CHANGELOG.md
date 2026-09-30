@@ -1,5 +1,30 @@
 # Journal des versions
 
+## 1.13.0
+
+Objectif : chaque nouvelle fonctionnalité d'Aurion arrive par le téléphone, boîtier fermé, même quand elle touche au
+système de la caméra.
+
+- **Paquet de mise à jour complet** : la mise à jour depuis GitHub installe `aurion-update.tar.gz`, qui contient le
+  programme **et** ses fichiers système : `aurion-helper` (le seul programme lancé en root), les services systemd, la
+  règle de la clé USB, les clés de signature. Avant, seul le programme changeait et un nouveau helper demandait de
+  regraver la carte SD.
+- **Signature revérifiée en root** : le helper contrôle de nouveau la signature du paquet avec ses propres copies des
+  clés, avant d'installer quoi que ce soit.
+- **Retour arrière complet** : les fichiers remplacés sont sauvegardés avant l'installation. Une version qui ne démarre
+  pas, ou dont le **Wi-Fi Aurion ne démarre pas**, est retirée seule, programme et fichiers système ensemble, et
+  *Diagnostics* en donne la raison. Le retour est lancé par le helper sauvegardé : un helper cassé ne peut pas
+  l'empêcher. Le bouton *Revenir à la version précédente* remet aussi l'ensemble.
+- **Téléchargement qui reprend** : une coupure du partage de connexion de quelques minutes ne fait plus échouer la
+  mise à jour ; le téléchargement reprend là où il s'était arrêté.
+- Les réglages sont copiés sur la clé USB juste avant chaque mise à jour.
+- Une mise à jour ne réinitialise jamais les réglages ni le mot de passe Wi-Fi : une version qui refuserait la
+  configuration en place est annulée.
+- Décision de sécurité : les paquets du système (Raspberry Pi OS) ne sont plus mis à jour boîtier fermé, la caméra ne
+  rejoignant jamais Internet d'elle-même ; chaque nouvelle image les corrige (registre dans `AUDIT_SECURITE.md`).
+- **Passage à la 1.13.0** : une caméra en 1.12 (helper version 4) reçoit le programme seul ; il faut regraver une fois
+  la carte SD avec l'image 1.13.0 pour que les mises à jour suivantes installent le paquet complet.
+
 ## 1.12.1
 
 Objectif : une mise à jour ratée ne rend jamais la caméra inutilisable, boîtier fermé.

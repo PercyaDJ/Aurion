@@ -57,7 +57,10 @@ check "sudoers sans cp/mount/dnsmasq" '! grep -v "^#" "$R/etc/sudoers.d/aurion" 
 check "sudoers en 0440" '[[ $(stat -c %a "$R/etc/sudoers.d/aurion") == 440 ]]'
 check "unité systemd pour nobody" 'grep -q "^User=nobody$" "$R/etc/systemd/system/aurion.service" && ! grep -q "@AURION_USER@" "$R/etc/systemd/system/aurion.service"'
 check "service de type notify + watchdog" 'grep -q "^Type=notify" "$R/etc/systemd/system/aurion.service" && grep -q "^WatchdogSec=" "$R/etc/systemd/system/aurion.service"'
-check "retour automatique après échecs répétés" 'grep -q "^OnFailure=aurion-rollback.service" "$R/etc/systemd/system/aurion.service" && grep -q "aurion-helper app-rollback" "$R/etc/systemd/system/aurion-rollback.service"'
+check "retour automatique après échecs répétés" 'grep -q "^OnFailure=aurion-rollback.service" "$R/etc/systemd/system/aurion.service" && grep -q "app-rollback" "$R/etc/systemd/system/aurion-rollback.service" && grep -q "/usr/local/sbin/aurion-helper" "$R/etc/systemd/system/aurion-rollback.service"'
+check "retour arrière lancé par le helper sauvegardé s il existe" 'grep -q "/var/lib/aurion/prev/aurion-helper" "$R/etc/systemd/system/aurion-rollback.service"'
+check "clés publiques du projet installées (root, 0644)" 'cmp -s "$REPO/keys/aurion-signing.pub" "$R/usr/local/share/aurion/keys/aurion-signing.pub" && cmp -s "$REPO/keys/aurion-secours.pub" "$R/usr/local/share/aurion/keys/aurion-secours.pub" && [[ $(stat -c "%U %a" "$R/usr/local/share/aurion/keys/aurion-signing.pub") == "root 644" ]]'
+check "openssl installé (signature vérifiée par le helper)" 'grep -q "apt-get install.*openssl" "$WORK/calls.log"'
 check "service durci sans bloquer sudo" 'grep -q "^ProtectHome=read-only" "$R/etc/systemd/system/aurion.service" && grep -q "^RestrictNamespaces=yes" "$R/etc/systemd/system/aurion.service" && ! grep -qE "^(NoNewPrivileges|ProtectSystem)=" "$R/etc/systemd/system/aurion.service"'
 check "pas de dépendance dure à la clé USB" '! grep -q RequiresMountsFor "$R/etc/systemd/system/aurion.service"'
 check "règle udev de montage USB" 'grep -q "aurion-helper usb-add" "$R/etc/udev/rules.d/99-aurion-usb.rules"'
@@ -89,6 +92,22 @@ bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --no-packages >"$W
 check "aucun appel apt en mode paquet" '! grep -q "^apt-get" "$WORK/calls.log"'
 check "pas de doublon noatime" '! grep -q "noatime,noatime" "$R/etc/fstab"'
 
+echo "▶ mise à jour signée depuis le téléphone (--update, lancée par le helper)"
+: >"$WORK/calls.log"
+cp "$R/boot/firmware/config.txt" "$WORK/config.before"
+bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --update >"$WORK/out2c.log" 2>&1 || { cat "$WORK/out2c.log"; exit 1; }
+# shellcheck disable=SC2034
+PW3=$(grep -o '"password": *"[^"]*"' "$CFG" | sed 's/.*: *"//; s/"$//')
+check "mise à jour : mot de passe conservé" '[[ "$PW" == "$PW3" ]]'
+check "mise à jour : service ni arrêté ni redémarré (le helper tourne dedans)" '! grep -qE "systemctl (stop|restart)" "$WORK/calls.log" && ! grep -q "^systemd-run" "$WORK/calls.log"'
+check "mise à jour : ni apt ni config.txt" '! grep -q "^apt-get" "$WORK/calls.log" && cmp -s "$WORK/config.before" "$R/boot/firmware/config.txt"'
+check "mise à jour : unités rechargées" 'grep -q "systemctl daemon-reload" "$WORK/calls.log"'
+check "mise à jour : clés remises" '[[ -f "$R/usr/local/share/aurion/keys/aurion-signing.pub" ]]'
+cp "$CFG" "$WORK/cfg.before"
+echo '{"broken": true}' >"$CFG"
+check "mise à jour refusant la config en place : échec, réglages intacts" '! bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --update >"$WORK/out2d.log" 2>&1 && grep -q "broken" "$CFG" && [[ ! -f "$CFG.invalid" ]]'
+cp "$WORK/cfg.before" "$CFG"
+
 echo "▶ configuration invalide réparée"
 echo '{"broken": true}' >"$CFG"
 bash "$REPO/scripts/install.sh" --binary "$BIN" --user nobody --no-hardening >"$WORK/out3.log" 2>&1 || { cat "$WORK/out3.log"; exit 1; }
@@ -106,6 +125,7 @@ check "service de retour arrière supprimé" '[[ ! -f "$R/etc/systemd/system/aur
 check "service supprimé" '[[ ! -f "$R/etc/systemd/system/aurion.service" ]]'
 check "sudoers supprimé" '[[ ! -f "$R/etc/sudoers.d/aurion" ]]'
 check "helper supprimé" '[[ ! -f "$R/usr/local/sbin/aurion-helper" ]]'
+check "clés et sauvegardes de mise à jour supprimées" '[[ ! -d "$R/usr/local/share/aurion" && ! -d "$R/var/lib/aurion" ]]'
 check "configuration conservée" '[[ -f "$CFG" ]]'
 check "bloc énergie retiré de config.txt" '! grep -q "disable-bt" "$R/boot/firmware/config.txt" && grep -q "^arm_64bit=1" "$R/boot/firmware/config.txt"'
 

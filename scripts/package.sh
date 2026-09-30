@@ -25,12 +25,13 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
   cargo build --release --locked --features rpi --target "$TARGET"
 
 echo "▶ Assemblage de $NAME"
-rm -rf "$OUT" && mkdir -p "$OUT/deploy" "$OUT/config"
+rm -rf "$OUT" && mkdir -p "$OUT/deploy" "$OUT/config" "$OUT/keys"
 install -m 0755 "target/$TARGET/release/aurion" "$OUT/aurion"
 install -m 0755 scripts/install.sh "$OUT/install.sh"
 install -m 0755 scripts/aurion-helper "$OUT/aurion-helper"
 install -m 0644 deploy/aurion.service deploy/99-aurion-usb.rules "$OUT/deploy/"
 install -m 0644 config/default.json "$OUT/config/"
+install -m 0644 keys/*.pub "$OUT/keys/"
 cat >"$OUT/LISEZMOI.txt" <<TXT
 # Aurion $VERSION pour Raspberry Pi (64 bits)
 
@@ -50,6 +51,10 @@ TXT
 tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
 ( cd dist && sha256sum "$NAME.tar.gz" >"$NAME.tar.gz.sha256" )
 echo "✅ dist/$NAME.tar.gz"
+# Update package installed from the phone (aurion-helper app-update): same
+# content, files at the root, fixed name for every version and channel.
+tar -C "$OUT" --owner=0 --group=0 -czf dist/aurion-update.tar.gz --exclude=LISEZMOI.txt .
+echo "✅ dist/aurion-update.tar.gz"
 
 # ─── Debian package: sudo apt install ./aurion_<version>_arm64.deb ───
 if command -v dpkg-deb >/dev/null; then

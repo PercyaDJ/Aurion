@@ -15,6 +15,9 @@
 #   --default-wifi-password  garder le mot de passe Wi-Fi d'usine (image SD grand public)
 #   --no-start           ne pas démarrer le service à la fin
 #   --boot-config-only   n'écrire que config.txt (fabrication de l'image carte SD)
+#   --update             mise à jour signée lancée par aurion-helper app-update :
+#                        programme et fichiers système seulement, service ni
+#                        arrêté ni redémarré (l'application s'en charge)
 #
 # Réinstaller par-dessus une version existante conserve la configuration
 # et le mot de passe Wi-Fi. Aucune compilation n'est nécessaire.
@@ -27,6 +30,8 @@ R="${AURION_TEST_ROOT:-}"
 INSTALL_DIR="$R/opt/aurion"
 CONFIG_DIR="$INSTALL_DIR/config"
 HELPER="$R/usr/local/sbin/aurion-helper"
+# Keys the root helper checks update packages against
+KEYS_DIR="$R/usr/local/share/aurion/keys"
 MOUNT_POINT=/mnt/capture
 WEB_PORT=8080
 
@@ -41,6 +46,7 @@ RANDOM_PASSWORD=1
 START=1
 UNINSTALL=0
 BOOT_CONFIG_ONLY=0
+UPDATE=0
 
 info() { printf '\n\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\n\033[1;33m[!]\033[0m %s\n' "$*"; }
@@ -58,8 +64,9 @@ while [[ $# -gt 0 ]]; do
     --no-start) START=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --boot-config-only) BOOT_CONFIG_ONLY=1; shift ;;
+    --update) UPDATE=1; PACKAGES=0; START=0; shift ;;
     -y|--yes) shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) die "Option inconnue : $1" ;;
   esac
 done
@@ -101,6 +108,7 @@ preflight() {
   SERVICE_SRC=$(find_file "$HERE/deploy/aurion.service" "$HERE/../deploy/aurion.service") || die "aurion.service introuvable"
   UDEV_SRC=$(find_file "$HERE/deploy/99-aurion-usb.rules" "$HERE/../deploy/99-aurion-usb.rules") || die "règle udev introuvable"
   DEFAULT_CFG=$(find_file "$HERE/config/default.json" "$HERE/../config/default.json") || die "config/default.json introuvable"
+  KEYS_SRC=$(find_file "$HERE/keys" "$HERE/../keys") || die "clés publiques (keys/) introuvables"
 }
 
 # ─── Packages ────────────────────────────────────────────────
@@ -109,7 +117,8 @@ install_packages() {
   info "Installation des paquets système"
   # dosfstools / exfatprogs: repair of the USB key after a power cut
   # util-linux-extra: hwclock, to write the phone time into the RTC module
-  local pkgs=(rpicam-apps iw nftables rfkill dosfstools exfatprogs curl util-linux-extra)
+  # openssl: signature check of update packages by the root helper
+  local pkgs=(rpicam-apps iw nftables rfkill dosfstools exfatprogs curl util-linux-extra openssl)
   if systemctl is-active --quiet NetworkManager 2>/dev/null; then
     pkgs+=(dnsmasq-base)
   else
@@ -158,6 +167,10 @@ install_files() {
   mv -f "$INSTALL_DIR/aurion.new" "$INSTALL_DIR/aurion"
 
   install -D -o root -g root -m 0755 "$HELPER_SRC" "$HELPER"
+  # Project public keys: the helper only installs update packages they signed
+  rm -rf "$KEYS_DIR"
+  install -d -o root -g root -m 0755 "$KEYS_DIR"
+  install -o root -g root -m 0644 "$KEYS_SRC"/*.pub "$KEYS_DIR/"
   mkdir -p "$R/etc"
   cat >"$R/etc/aurion.env" <<EOF
 # Aurion — lu par /usr/local/sbin/aurion-helper (root). Ne pas rendre modifiable par l'utilisateur.
@@ -190,6 +203,9 @@ EOF
   chown -R "$SERVICE_USER:$group" "$CONFIG_DIR"
   chmod 0600 "$cfg"
   if ! sudo -u "$SERVICE_USER" "$INSTALL_DIR/aurion" --config-dir "$CONFIG_DIR" check-config >/dev/null 2>&1; then
+    # Never replace the settings (and the Wi-Fi password) during an update
+    # from the phone: the helper puts the previous version back instead
+    [[ $UPDATE -eq 1 ]] && die "La nouvelle version refuse la configuration en place : mise à jour annulée"
     warn "La configuration $cfg est invalide : sauvegarde en .invalid et remplacement par les valeurs par défaut"
     mv "$cfg" "$cfg.invalid"
     WIFI_PASSWORD=$(random_password)
@@ -257,13 +273,15 @@ install_service() {
   sed "s/@AURION_USER@/$SERVICE_USER/" "$SERVICE_SRC" >"$R/etc/systemd/system/aurion.service"
   chmod 0644 "$R/etc/systemd/system/aurion.service"
   # Started by systemd when aurion.service fails (OnFailure): previous
-  # version back if the running one is a trial, then start again
+  # version back if the running one is a trial, then start again. The helper
+  # saved before the last update runs it when present: a broken new helper
+  # cannot prevent its own rollback.
   cat >"$R/etc/systemd/system/aurion-rollback.service" <<'EOF'
 [Unit]
 Description=Aurion : retour automatique à la version précédente après un échec
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/aurion-helper app-rollback
+ExecStart=/bin/sh -c 'h=/var/lib/aurion/prev/aurion-helper; [ -x "$h" ] || h=/usr/local/sbin/aurion-helper; exec "$h" app-rollback'
 EOF
   chmod 0644 "$R/etc/systemd/system/aurion-rollback.service"
   systemctl daemon-reload
@@ -437,6 +455,7 @@ uninstall() {
   "$HELPER" ap-stop >/dev/null 2>&1 || true
   rm -f "$R"/etc/systemd/system/aurion.service "$R"/etc/systemd/system/aurion-rollback.service "$R"/etc/systemd/system/aurion-flush.* "$R"/etc/systemd/system/aurion-power-watch.*
   rm -f "$R/etc/sudoers.d/aurion" "$R/etc/udev/rules.d/99-aurion-usb.rules" "$R/etc/aurion.env" "$HELPER" "$R/usr/local/sbin/aurion-power-watch"
+  rm -rf "$R/usr/local/share/aurion" "$R/var/lib/aurion"
   local bc
   for bc in "$R/boot/firmware/config.txt" "$R/boot/config.txt"; do
     [[ -f "$bc" ]] && sed -i "/^$POWER_BEGIN/,/^$POWER_END/d" "$bc"
@@ -448,6 +467,22 @@ uninstall() {
   info "Supprimé. La configuration reste dans $CONFIG_DIR (rm -rf $INSTALL_DIR pour tout effacer)."
 }
 
+# ─── Signed update (aurion-helper app-update) ────────────────
+
+# Called by the root helper from the running service: never stop the service
+# here (the helper runs inside it). Packages, network, hardening and boot
+# configuration are left as they are; the application restarts itself.
+update_files() {
+  [[ -n "$SERVICE_USER" ]] || die "--user manquant"
+  preflight
+  info "Mise à jour : $("$BINARY" --version)"
+  install_files
+  install_sudoers
+  install_usb_automount
+  install_service
+  info "Fichiers de la nouvelle version en place"
+}
+
 # ─── Main ────────────────────────────────────────────────────
 
 main() {
@@ -457,6 +492,11 @@ main() {
   if [[ $BOOT_CONFIG_ONLY -eq 1 ]]; then
     [[ $HARDENING -eq 1 ]] && boot_watchdog
     [[ $POWER_SAVING -eq 1 ]] && boot_power_block
+    exit 0
+  fi
+
+  if [[ $UPDATE -eq 1 ]]; then
+    update_files
     exit 0
   fi
 

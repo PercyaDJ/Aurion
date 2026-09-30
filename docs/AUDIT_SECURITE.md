@@ -75,19 +75,28 @@ celui du partage de connexion du téléphone. Qui possède la clé a déjà l'ac
 passe par fichier, photos) : risque jugé faible. La copie n'est reprise que sur une carte SD sans réglages
 enregistrés, et seulement si elle est valide.
 
-Risque accepté : les versions ne sont pas signées. Le téléchargement passe en HTTPS depuis le dépôt du projet ; qui
-peut modifier le dépôt peut donc livrer une version (plan A2 : signature Ed25519).
+Risque accepté à l'époque : les versions n'étaient pas signées. Corrigé en 1.12.0 (signature Ed25519, clé principale
+et clé de secours) ; en 1.13.0, le paquet de mise à jour est revérifié par le helper root (section 4).
 
 ## 4. Le helper root (`scripts/aurion-helper`)
 
 Seul programme exécutable en root par le service. Principes :
-- une liste fermée de commandes (`ap-start`, `ap-stop`, `wifi-scan`, `wifi-connect`, `set-time`, `set-timezone`, `shutdown`, `mount-usb`, `umount-usb`, `usb-add`) ;
+- une liste fermée de commandes (`ap-start`, `ap-stop`, `wifi-scan`, `wifi-connect`, `set-time`, `set-timezone`, `shutdown`, `rtc-wake`, `power-profile`, `mount-usb`, `umount-usb`, `usb-add`, `usb-format`, `app-update`, `app-rollback`, `version`) ;
 - chaque argument validé par expression régulière avant usage ;
 - secrets lus sur l'entrée standard ;
 - `PATH` et `LC_ALL` fixés ; `umask 077` ;
 - les crochets de test (`AURION_HELPER_DRYRUN`, `AURION_ENV_FILE`) sont ignorés dès qu'il est appelé via sudo.
 
-42 cas testés en mode simulation (dont les injections). Incident pendant la revue : un test lancé en root a réellement réglé
+Depuis la 1.13.0, `app-update <paquet> <signature>` installe un paquet de mise à jour, fichiers système compris. C'est
+la seule commande qui écrit du code exécuté en root : elle copie d'abord paquet et signature dans son propre dossier
+(`/var/lib/aurion/update`, 0700) pour qu'ils ne puissent plus changer, puis vérifie la signature avec `openssl` et les
+clés de `/usr/local/share/aurion/keys` (root, 0644). Le service ne peut ni fournir ni modifier ces clés ; une
+interface compromise ne peut donc installer qu'un paquet publié par le projet. Taille limitée à 64 Mo, liens
+symboliques refusés, contenu attendu contrôlé, sauvegarde des fichiers remplacés avant installation.
+`app-rollback` remet cette sauvegarde (lancé par le helper sauvegardé lorsqu'il existe).
+
+107 cas testés en mode simulation (dont les injections et 25 pour les paquets de mise à jour : paquet altéré, autre
+clé, signature tronquée, lien symbolique, paquet incomplet, retour arrière complet). Incident pendant la revue : un test lancé en root a réellement réglé
 l'horloge du conteneur de développement ; le test a été remplacé par une commande sans effet réel et le mode simulation
 n'écrit plus rien dans `/run`.
 
@@ -158,6 +167,14 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 | perl, ack | scripts de paquets, gestion de la mémoire d'échange (rpi-swap) | non | accepté |
 | libgcrypt20 | cryptographie locale (journal systemd) | non | accepté |
 | nano, net-tools, unzip | maintenance au clavier | non | accepté ; retirables si besoin (gain faible) |
+
+**Décision du 30/09/2026 (1.13.0) : paquets du système non mis à jour boîtier fermé.** La caméra ne rejoint jamais
+Internet d'elle-même : elle émet son propre Wi-Fi, ou rejoint le partage de connexion du téléphone de son propriétaire
+le temps d'une mise à jour d'Aurion. Les failles des paquets Debian relevées par ARBOR après la gravure de la carte
+restent donc en risque accepté sur les caméras déployées : la mise à jour depuis le téléphone ne porte que sur
+l'application et ses fichiers système. Chaque nouvelle image les corrige (mise à jour de sécurité à la fabrication) :
+elle s'applique en regravant la carte. Une mise à jour complète du système boîtier fermé (deux systèmes A/B) est
+étudiée dans `docs/CONCEPTION_AB.md`, reportée.
 
 Réévaluation : à chaque relevé ARBOR (release ou renvoi manuel) ; tout correctif Debian publié entre dans l'image suivante
 (mise à jour de sécurité à la fabrication).

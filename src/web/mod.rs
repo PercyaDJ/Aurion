@@ -128,6 +128,9 @@ pub struct AppState {
     pub online_update_running: Arc<AtomicBool>,
     /// Seconds after power-on when the Aurion Wi-Fi was ready.
     pub hotspot_ready_at: Arc<std::sync::Mutex<Option<f64>>>,
+    /// Why the Aurion Wi-Fi did not start at boot (None: it did). A version on
+    /// trial is not confirmed then (update::startup_checks).
+    pub hotspot_error: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// Automatic start of the night (expedition mode), shown on the home screen.
@@ -178,6 +181,7 @@ impl AppState {
             auto_start: Arc::new(RwLock::new(AutoStart::Off)),
             online_update_running: Arc::new(AtomicBool::new(false)),
             hotspot_ready_at: Arc::new(std::sync::Mutex::new(None)),
+            hotspot_error: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 

@@ -175,7 +175,7 @@ CFG
     find /usr/share/locale -mindepth 1 -maxdepth 1 ! -name locale.alias -exec rm -rf {} +
     # Everything Aurion calls must still be there
     for c in nmcli iw nft rfkill mkfs.exfat wipefs sfdisk blkid findmnt hwclock timedatectl udevadm \
-             ip curl sudo rpicam-still vcgencmd dnsmasq; do
+             ip curl sudo rpicam-still vcgencmd dnsmasq openssl tar; do
       command -v "$c" >/dev/null || { echo "Outil manquant après nettoyage : $c"; exit 1; }
     done
     apt-get clean

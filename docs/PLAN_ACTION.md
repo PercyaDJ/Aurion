@@ -22,6 +22,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V14 | Préparer la clé : clé neuve non formatée, clé ext4, clé NTFS ; vérifier qu'elle est montée et utilisée juste après | S | point vert « Clé USB » sans débrancher |
 | V15 | Image 1.11.0 : hotspot Aurion démarré par fichier de connexion (journal sans « fichier de connexion refusé »), premier allumage, Wi-Fi Aurion, caméra, clé, mise à l'heure du module horloge (`hwclock -r` après une synchronisation par le téléphone) | S | tout fonctionne comme en 1.10.0 |
 | V16 | Retour arrière automatique : installer une version volontairement cassée (binaire qui quitte aussitôt, signé avec la clé de secours sur un Pi de test), vérifier que l'ancienne version revient seule en moins de 2 minutes et que *Diagnostics* l'annonce ; puis une version saine, confirmée après 3 minutes | S | la caméra n'est jamais laissée sur une version qui ne démarre pas |
+| V17 | Mise à jour par paquet (1.13.0) sur le Pi : depuis le partage de connexion d'un Android 12+ puis d'un iPhone, couper le partage 1 à 2 minutes pendant le téléchargement (la reprise doit se faire seule) ; vérifier `aurion-helper version` = 5 après coup. Puis un paquet de test dont le Wi-Fi Aurion ne démarre pas : retiré au bout de 3 minutes, raison affichée dans *Diagnostics* | S | les nouvelles fonctionnalités, y compris système, arrivent boîtier fermé sans risque de perdre la caméra |
 | V10 | ISO maximal utile pour le RAW : vérifier au-delà de quel ISO le gain devient numérique (sans effet sur le DNG) sur l'IMX477 | S | valeur mesurée ; `iso_max` par défaut ajusté si nécessaire |
 
 ## Énergie (P1)
@@ -50,7 +51,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
 | A1 | P1 | ~~Mots de passe Wi-Fi dans des fichiers de connexion NetworkManager (0600)~~ : hotspot fait en 1.11.0, Wi-Fi de maintenance en 1.11.3 (repli sur l'ancienne méthode si NetworkManager refuse le fichier) | S |
-| A2 | P1 | ~~Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour~~ : fait en 1.12.0 pour la mise à jour depuis GitHub et par fichier (clé principale + clé de secours) ; reste `get.sh` et l'image carte SD (avec la mise à jour A/B) | M |
+| A2 | P1 | ~~Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour~~ : fait en 1.12.0 pour la mise à jour depuis GitHub et par fichier (clé principale + clé de secours) ; en 1.13.0, le paquet de mise à jour (programme et fichiers système) est revérifié par le helper root ; reste `get.sh` et l'image carte SD | M |
 | A3 | P2 | Code PIN optionnel pour l'interface (utile en mode maintenance sur un réseau partagé) | M |
 | A4 | P2 | Séparer les actions root dans un petit service dédié (socket local) pour durcir `aurion.service` (`ProtectSystem`, `NoNewPrivileges`) | L |
 | A5 | P3 | Option WPA3-SAE pour le hotspot | S |
