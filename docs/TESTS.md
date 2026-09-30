@@ -40,8 +40,8 @@ cargo audit                                         # dépendances (cargo instal
 
 La CI GitHub Actions (`.github/workflows/ci.yml`) exécute tout cela à chaque pull request, en un seul job (hors
 documentation seule). L'archive, le paquet Raspberry Pi et le test de fabrication de l'image ne tournent que si la
-PR touche l'empaquetage (`Cargo.toml`, `Cargo.lock`, `scripts/`, `deploy/`, `config/`, workflows). Une release
-relance `cargo test` avant de publier.
+PR touche l'empaquetage (`Cargo.toml`, `Cargo.lock`, `scripts/`, `deploy/`, `config/`). Une release relance
+`cargo test`, les tests du helper et ShellCheck avant de publier.
 
 Les SBOM de l'application et de l'image carte SD partent vers ARBOR avec Semgrep et Trivy à chaque release
 (`release.yml`), ou à la demande (`arbor.yml`) (voir

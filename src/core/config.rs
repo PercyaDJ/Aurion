@@ -340,6 +340,23 @@ impl AppConfig {
     }
 
     /// Validate configuration bounds.
+    /// Checks for a config saved from the interface: [`Self::validate`]
+    /// plus the rules a config already on the card must not be refused for
+    /// at boot (a refused config falls back to the defaults, factory Wi-Fi
+    /// password included).
+    pub fn validate_for_save(&self) -> Result<(), ConfigError> {
+        self.validate()?;
+        // Same start and end: the range would last an instant and the night
+        // would never start (the hotspot being already off). Timer mode
+        // ignores the range.
+        if self.time_range.duration_hours.is_none() && self.time_range.start == self.time_range.end {
+            return Err(ConfigError::ValidationError(
+                "La plage horaire doit avoir un début et une fin différents".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         // ─── Exposure ────────────────────────────────────────
         if self.exposure.iso_min > self.exposure.iso_max {
@@ -819,6 +836,17 @@ mod tests {
         assert!(config.validate().is_err());
         config.time_range.duration_hours = Some(8.0);
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn empty_time_range_is_refused_unless_timer() {
+        let mut config = AppConfig::default();
+        config.time_range.duration_hours = None;
+        config.time_range.end = config.time_range.start;
+        assert!(config.validate_for_save().is_err(), "the night would never start");
+        assert!(config.validate().is_ok(), "still loaded at boot (no fallback to the defaults)");
+        config.time_range.duration_hours = Some(2.0);
+        assert!(config.validate_for_save().is_ok(), "timer mode ignores the range");
     }
 
     #[test]

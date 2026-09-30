@@ -952,8 +952,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 AutoStart::Blocked("heure à confirmer : ouvrez cette page une fois depuis le téléphone")
             } else if !key_ok {
                 AutoStart::Blocked("clé USB absente")
-            } else if self.state.online_update_running.load(std::sync::atomic::Ordering::SeqCst) {
-                AutoStart::Blocked("mise à jour du logiciel en cours")
+            } else if let Some(busy) = crate::web::api::night_blocker(&self.state).await {
+                AutoStart::Blocked(busy)
             } else {
                 let left = idle_needed.saturating_sub(self.state.idle_for());
                 if left.is_zero() {

@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No write token left in .git/config for the build and test steps
+          # (dependency build scripts, downloaded installers)
+          persist-credentials: false
       - name: Version à publier
         id: version
         env:
@@ -32,11 +36,16 @@ jobs:
         run: |
           v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # Only "not found" means a new release: an API failure must not
+          # rebuild and overwrite the files of an existing one
+          if out=$(gh release view "v$v" --repo "$GITHUB_REPOSITORY" --json tagName 2>&1); then
             echo "La release v$v existe déjà : binaire edge seulement."
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -qi "not found" <<<"$out"; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::API GitHub : $out"
+            exit 1
           fi
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -44,11 +53,15 @@ jobs:
           targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: aurion
+          shared-key: aurion-release
 
       - name: Tests
         if: steps.version.outputs.skip == 'false'
-        run: cargo test --locked
+        run: |
+          cargo test --locked
+          # The root helper and the installer ship in the release too
+          bash tests/helper_test.sh
+          shellcheck -S warning scripts/*.sh scripts/aurion-helper tests/*.sh install.sh deploy/*.sh
 
       - name: Binaire Raspberry Pi (arm64, statique)
         id: build
@@ -73,9 +86,12 @@ jobs:
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
       - name: Déplacer le tag edge sur ce commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git tag -f edge "$GITHUB_SHA"
-          git push -f origin refs/tags/edge
+          # Through the API: the token stays in this step only
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/edge" -f sha="$GITHUB_SHA" -F force=true >/dev/null \
+            || gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/edge -f sha="$GITHUB_SHA" >/dev/null
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: edge

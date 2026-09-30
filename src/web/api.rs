@@ -550,7 +550,7 @@ pub async fn update_config(
     if update.online_update.password == PASSWORD_MASK {
         update.online_update.password = config.online_update.password.clone();
     }
-    update.validate().map_err(|e| err(StatusCode::BAD_REQUEST, e.to_string()))?;
+    update.validate_for_save().map_err(|e| err(StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let network_changed = update.network.ssid != config.network.ssid
         || update.network.password != config.network.password
@@ -689,7 +689,7 @@ pub async fn apply_preset(
     let mut config = state.config.write().await;
     let merged = config.with_preset(&preset_config, &name);
     merged
-        .validate()
+        .validate_for_save()
         .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Preset invalide: {}", e)))?;
     merged
         .save(&state.paths.config_file)
@@ -844,10 +844,29 @@ pub async fn dismiss_dark_reminder(State(state): State<AppState>) -> StatusCode 
 
 /// Start the night: the orchestrator notices the DISCONNECT phase, waits
 /// 15 s, turns the hotspot off and begins the capture.
+/// What prevents the night from starting now (`None`: nothing). Checked by
+/// "Lancer la nuit" and by the automatic start of an expedition.
+pub(crate) async fn night_blocker(state: &AppState) -> Option<&'static str> {
+    if state.darks.read().await.as_ref().is_some_and(|d| d.running) {
+        return Some("série de darks en cours : attendez la fin");
+    }
+    if state.online_update_running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Some("mise à jour du logiciel en cours");
+    }
+    if state.camera_lock.try_lock().is_err() {
+        return Some("caméra occupée (aperçu en cours), réessayez dans quelques secondes");
+    }
+    None
+}
+
 pub async fn disconnect(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
     let mut phase = state.phase.write().await;
     if *phase != Phase::Arm {
         return Err(err(StatusCode::CONFLICT, format!("Impossible depuis la phase {}", *phase)));
+    }
+    // The night needs the camera, and must not be cut by a restart
+    if let Some(busy) = night_blocker(&state).await {
+        return Err(err(StatusCode::CONFLICT, busy));
     }
     *phase = Phase::Disconnect;
     drop(phase);
@@ -1328,11 +1347,22 @@ pub(crate) async fn install_binary(state: &AppState, data: &[u8]) -> Result<Stri
 
     // Refuse a binary that does not even start.
     let staged_str = staged.to_string_lossy().to_string();
-    let version = match crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
-        Ok(v) => v.trim().to_string(),
-        Err(e) => {
-            let _ = std::fs::remove_file(&staged);
-            return Err(format!("Le nouveau binaire ne démarre pas: {}", e));
+    let mut busy_retries = 0;
+    let version = loop {
+        match crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
+            Ok(v) => break v.trim().to_string(),
+            // A process started by another thread while the file was open for
+            // writing keeps a copy of that descriptor until its own exec: for
+            // that instant Linux refuses to run the file (ETXTBSY). The server
+            // starts processes all the time (helper, vcgencmd): wait and retry.
+            Err(e) if e.contains("os error 26") && busy_retries < 20 => {
+                busy_retries += 1;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&staged);
+                return Err(format!("Le nouveau binaire ne démarre pas: {}", e));
+            }
         }
     };
 

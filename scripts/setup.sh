@@ -1,47 +1,32 @@
 #!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# Aurion — compilation sur le Raspberry Pi, puis installation (secours).
+# Appelé par ./install.sh quand aucune archive précompilée n'est disponible ;
+# se lance aussi à la main depuis un « git clone », en utilisateur normal :
+#
+#   bash scripts/setup.sh [options de scripts/install.sh]
+#
+# 15 à 30 minutes sur un Pi 4. Le plus simple reste l'image carte SD ou
+# l'archive de release (scripts/get.sh).
+# ─────────────────────────────────────────────────────────────
 set -euo pipefail
-
 AURION_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-
-echo "==================================================="
-echo "  🌌 Aurion - Installation Tout-en-un (Safe Mode)  "
-echo "==================================================="
-echo ""
-echo "Ce script va configurer le système (bootstrap),"
-echo "installer les dépendances, compiler le projet et redémarrer."
-echo "Temps estimé : 15 à 30 minutes sur Raspberry Pi 4."
-echo ""
-echo "ATTENTION : Assurez-vous que votre clé USB est branchée !"
-echo "La compilation est effectuée localement sur ce Raspberry Pi."
-echo ""
-echo "Une demande de mot de passe sudo va apparaître pour débuter."
-echo "==================================================="
-echo ""
-
 cd "$AURION_DIR"
+[[ $EUID -ne 0 ]] || { echo "Lancez ce script en utilisateur normal (il demande sudo quand il le faut)"; exit 1; }
 
-# Demande des droits sudo dès le début
-sudo -v
+echo "▶ [1/3] Outils de compilation (gcc, Rust)"
+# The SD image removes the compilers: the linker is needed again here
+sudo apt-get install -y --no-install-recommends gcc libc6-dev curl ca-certificates
+if ! command -v cargo >/dev/null; then
+  [[ -x "$HOME/.cargo/bin/cargo" ]] || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal
+  # shellcheck source=/dev/null
+  source "$HOME/.cargo/env"
+fi
 
-# Maintient le ticket sudo actif en arrière-plan (évite le timeout pendant la compilation de 30 min)
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+echo "▶ [2/3] Compilation d'Aurion (15 à 30 min)"
+cargo build --release --locked --features rpi
 
-# 1. Bootstrap (nécessite sudo)
-echo ""
-echo "[1/3] Hardening du système (Bootstrap)..."
-sudo bash scripts/bootstrap.sh --yes
-
-# 2. Installation (exécuté en tant qu'utilisateur normal)
-echo ""
-echo "[2/3] Installation et compilation d'Aurion..."
-bash scripts/install.sh
-
-# 3. Reboot
-echo ""
-echo "==================================================="
-echo "  ✅ Installation terminée avec succès !"
-echo "  Le système va redémarrer dans 10 secondes."
-echo "  Au redémarrage, Aurion se lancera automatiquement."
-echo "==================================================="
-sleep 10
-sudo reboot
+echo "▶ [3/3] Installation"
+# scripts/install.sh finds target/release/aurion by itself
+sudo bash scripts/install.sh --binary "$AURION_DIR/target/release/aurion" "$@"

@@ -17,6 +17,12 @@ impl StorageRpi {
     pub fn new(mount_point: String) -> Self {
         Self { mount_point }
     }
+
+    /// The key is mounted. Without it the capture directory is a plain
+    /// folder of the SD card: writing there would fill the system.
+    fn key_mounted(&self) -> bool {
+        crate::sys::storage_health(std::path::Path::new(&self.mount_point)).is_mountpoint
+    }
 }
 
 #[async_trait]
@@ -45,12 +51,20 @@ impl StoragePort for StorageRpi {
     }
 
     fn info(&self) -> Result<StorageInfo, StorageError> {
+        // Not mounted: the free space measured would be the SD card's
+        if !self.key_mounted() {
+            return Err(StorageError::IoError(format!("aucune clé USB montée sur {}", self.mount_point)));
+        }
         let (total_bytes, free_bytes) = crate::sys::disk_usage(std::path::Path::new(&self.mount_point))
             .ok_or_else(|| StorageError::IoError(format!("{} inaccessible", self.mount_point)))?;
         Ok(StorageInfo { total_bytes, free_bytes, mount_point: self.mount_point.clone() })
     }
 
     async fn save_file(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
+        // Key missing or pulled out: never write the images to the SD card
+        if !self.key_mounted() {
+            return Err(StorageError::WriteFailed(format!("aucune clé USB montée sur {}", self.mount_point)));
+        }
         let full_path = std::path::Path::new(&self.mount_point).join(path);
         if let Some(parent) = full_path.parent() {
             std::fs::create_dir_all(parent)
@@ -96,5 +110,26 @@ impl StoragePort for StorageRpi {
     fn is_available(&self) -> bool {
         let h = crate::sys::storage_health(std::path::Path::new(&self.mount_point));
         h.is_mountpoint && h.writable
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn nothing_is_written_to_the_sd_card_without_a_key() {
+        // A plain folder (not a mount point) stands for /mnt/capture without key
+        let dir = tempfile::tempdir().unwrap();
+        let storage = StorageRpi::new(dir.path().to_string_lossy().to_string());
+        assert!(storage.save_file("sessions/n/JPG/a.jpg", b"jpeg").await.is_err());
+        assert!(!dir.path().join("sessions").exists(), "no folder created on the card");
+        assert!(storage.info().is_err(), "the SD card free space is not the key's");
+    }
+
+    #[test]
+    fn a_mounted_file_system_is_measured() {
+        let storage = StorageRpi::new("/".into());
+        assert!(storage.info().is_ok());
     }
 }

@@ -1,5 +1,52 @@
 # Journal des versions
 
+## 1.11.1
+
+Objectif : corriger les défauts trouvés à la relecture complète du dépôt (30/09/2026), chacun avec son test.
+
+### Photo
+- **Exposition sans scintillement** : la régulation reprenait à chaque image le pas de l'image précédente, et
+  l'exposition oscillait sans fin autour de la cible (environ ±20 % en capture, visible dans les timelapses). Le
+  premier pas partait aussi toujours à +15 %, même sur un ciel déjà bien exposé. Chaque image corrige maintenant une
+  fraction de l'écart, sans dépasser.
+- **Sans clé USB, rien n'est écrit sur la carte SD** : le dossier de capture n'était pas vérifié comme point de
+  montage, et une clé absente ou arrachée faisait remplir la carte SD (système compris). La nuit continue et
+  signale l'erreur à chaque image.
+
+### Lancement de la nuit
+- « Lancer la nuit » et le départ automatique d'expédition attendent la fin d'une série de darks, d'un aperçu ou
+  d'une mise à jour depuis GitHub. Avant : deux prises de vue en même temps (captures en échec, pause de 5 min), ou
+  redémarrage du programme en pleine nuit.
+- Une plage horaire dont le début égale la fin est refusée à l'enregistrement : la nuit n'aurait jamais démarré,
+  avec le Wi-Fi déjà coupé. Une configuration déjà enregistrée reste chargée au démarrage.
+
+### Mise à jour depuis le téléphone
+- Une mise à jour pouvait échouer au hasard (« le nouveau binaire ne démarre pas : Text file busy ») quand le
+  serveur lançait un autre programme au même instant, ce qu'il fait en permanence (helper, vcgencmd). L'essai du
+  nouveau binaire réessaie maintenant pendant 1 s. Reproduit en test (1 échec sur 65 à 150 passages chargés,
+  0 sur 400 après correction).
+
+### Clé USB (helper root)
+- Pi démarrant sur un SSD USB : sa partition de démarrage n'est plus montée comme clé photo, et « Préparer la clé »
+  ne le compte plus comme une seconde clé.
+- « Préparer la clé » refusait la vraie clé quand un disque SATA ou PCIe était listé après elle.
+
+### Installation
+- **Installation en une ligne (`get.sh`) réparée** : elle ne trouvait plus l'archive (réponse de l'API GitHub lue
+  ligne à ligne) et s'arrêtait sans message. L'empreinte SHA-256 est désormais obligatoire, et le jeton GitHub ne
+  passe plus en ligne de commande.
+- **Compilation sur le Pi réparée** (`./install.sh` sans archive, `scripts/setup.sh`) : le script appelait un
+  fichier inexistant.
+
+### Publication
+- Jeton GitHub en écriture limité à l'étape qui déplace le tag `edge` (il restait disponible pendant la compilation
+  et les tests).
+- Une erreur passagère de l'API GitHub ne refait plus une release existante (seul « introuvable » déclenche une
+  publication).
+- Une release lance aussi les tests du helper root et ShellCheck (quelques secondes).
+- Caches de compilation séparés pour la CI et la release (la CI récupérait le cache arm64 de la release et
+  recompilait tout) ; les PR Dependabot ne lancent plus la compilation arm64 ni le test d'image.
+
 ## 1.11.0
 
 Objectif : rappel des darks en fin de nuit, derniers points de sécurité fermés, et consommer le moins de minutes GitHub Actions possible

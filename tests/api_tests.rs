@@ -122,6 +122,31 @@ async fn disconnect_starts_the_night_only_once() {
 }
 
 #[tokio::test]
+async fn night_does_not_start_while_the_camera_or_an_update_is_busy() {
+    let t = common::env();
+    // A darks series is running
+    *t.state.darks.write().await = Some(aurion::web::DarkProgress {
+        done: 2, total: 10, iso: 800, shutter_us: 1_000_000, running: true, error: None,
+    });
+    t.server.post("/api/disconnect").await.assert_status(StatusCode::CONFLICT);
+    t.state.darks.write().await.as_mut().unwrap().running = false;
+
+    // An update from GitHub is downloading
+    t.state.online_update_running.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.server.post("/api/disconnect").await.assert_status(StatusCode::CONFLICT);
+    t.state.online_update_running.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    // A preview holds the camera
+    let preview = t.state.camera_lock.clone().try_lock_owned().unwrap();
+    t.server.post("/api/disconnect").await.assert_status(StatusCode::CONFLICT);
+    drop(preview);
+
+    let body: Value = t.server.get("/api/status").await.json();
+    assert_eq!(body["phase"], "ARM", "still waiting for the user");
+    t.server.post("/api/disconnect").await.assert_status_ok();
+}
+
+#[tokio::test]
 async fn presets_flow() {
     let t = common::env();
     let list: Value = t.server.get("/api/presets").await.json();
