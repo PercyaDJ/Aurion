@@ -452,12 +452,14 @@ async fn rpicam_still(
     awb: &str,
 ) -> Result<Vec<u8>, String> {
     let shutter = settings.shutter_us.to_string();
-    let gain = format!("{:.2}", settings.iso as f64 / 100.0);
+    let gain = crate::core::exposure::rpicam_gain(settings.iso);
     let out = output.to_string_lossy().to_string();
     let timeout = Duration::from_secs(settings.shutter_us.div_ceil(1_000_000) * 3 + 20);
     crate::sys::run(
         "rpicam-still",
-        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb],
+        // Small EXIF thumbnail: the auto-exposure meters it, not the 12 MP image
+        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb,
+          "--thumb", "320:240:70"],
         timeout,
     )
     .await?;
@@ -493,11 +495,18 @@ pub async fn capture_preview(State(state): State<AppState>) -> Response {
                 return err(StatusCode::INTERNAL_SERVER_ERROR, format!("Caméra indisponible: {}", e)).into_response();
             }
         };
-        let hist = image::load_from_memory(&data).ok().map(|img| {
-            let rgb = img.to_rgb8();
-            let roi = crate::core::orchestrator::crop_roi(rgb.as_raw(), rgb.width(), rgb.height(), config.detection.roi_top_percent);
-            crate::core::exposure::compute_histogram(roi)
-        });
+        // Up to 4 shots: decode the EXIF thumbnail (or a reduced image), never
+        // the full 12 MP picture, and off the async workers
+        let roi_top = config.detection.roi_top_percent;
+        let jpeg = data.clone();
+        let hist = tokio::task::spawn_blocking(move || {
+            crate::core::jpeg::decode_for_analysis(&jpeg, 640).map(|(rgb, w, h, _)| {
+                crate::core::exposure::compute_histogram(crate::core::orchestrator::crop_roi(&rgb, w, h, roi_top))
+            })
+        })
+        .await
+        .ok()
+        .flatten();
         last = Some((data, settings));
         let Some(hist) = hist else { break };
         let next = expo.jump(&hist);
@@ -779,7 +788,7 @@ pub async fn capture_darks(
         let mut error = None;
         for n in 0..count {
             let shutter = shutter_us.to_string();
-            let gain = format!("{:.2}", iso as f64 / 100.0);
+            let gain = crate::core::exposure::rpicam_gain(iso);
             let out = tmp.to_string_lossy().to_string();
             let _ = std::fs::remove_file(&tmp_dng);
             let timeout = Duration::from_secs(shutter_us.div_ceil(1_000_000) * 3 + 20);

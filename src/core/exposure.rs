@@ -198,6 +198,13 @@ impl ExposureController {
     }
 }
 
+/// `--gain` argument of rpicam-still for an ISO (ISO 100 = gain 1.0). One
+/// formatting for the night, the preview and the darks: darks must match
+/// the night frames exactly.
+pub fn rpicam_gain(iso: u32) -> String {
+    format!("{:.1}", iso as f64 / 100.0)
+}
+
 /// Compute a 256-bin histogram from RGB image data (using luminance).
 /// This takes **ROI-cropped** data — the caller must crop to roi_top_percent first.
 pub fn compute_histogram(rgb_data: &[u8]) -> [u32; 256] {
@@ -390,6 +397,12 @@ mod tests {
         for _ in 0..10 { ctrl.jump(&make_histogram_for_brightness(0)); }
         assert_eq!(ctrl.current().shutter_us, 30_000_000);
         assert_eq!(ctrl.current().iso, 3200);
+    }
+
+    #[test]
+    fn gain_is_the_same_for_night_preview_and_darks() {
+        assert_eq!(rpicam_gain(800), "8.0");
+        assert_eq!(rpicam_gain(1234), "12.3");
     }
 
     #[test]
