@@ -235,19 +235,22 @@ fn scopeguard_flag(state: &AppState) -> FlagGuard {
 async fn run_online_update(state: AppState, channel: String, wifi: Option<(String, String)>) {
     tokio::time::sleep(Duration::from_secs(3)).await; // let the answer reach the phone
     let result = download_and_install(&state, &channel, wifi.as_ref()).await;
+    // Final status written BEFORE the flag drops: in between, a status still
+    // "running" without the flag reads as "interrompue" (power cut) and the
+    // phone would stop following an update that actually worked.
+    match &result {
+        Ok(version) => set_status(&state, &channel, false, Some(true), format!("{} installée, redémarrage", version)).await,
+        Err(e) => set_status(&state, &channel, false, Some(false), e.clone()).await,
+    }
     state.online_update_running.store(false, Ordering::SeqCst);
     match result {
-        Ok(version) => {
-            set_status(&state, &channel, false, Some(true), format!("{} installée, redémarrage", version)).await;
+        Ok(_) => {
             // The restart (install_binary) brings the hotspot back.
             if !state.update.restart {
                 back_to_hotspot(&state, wifi.is_some()).await;
             }
         }
-        Err(e) => {
-            set_status(&state, &channel, false, Some(false), e).await;
-            back_to_hotspot(&state, wifi.is_some()).await;
-        }
+        Err(_) => back_to_hotspot(&state, wifi.is_some()).await,
     }
 }
 
