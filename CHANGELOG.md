@@ -1,5 +1,22 @@
 # Journal des versions
 
+## 1.11.3
+
+Objectif : fermer les risques de sécurité qui ne demandent pas le matériel.
+
+- **Mise à jour depuis GitHub vérifiée** : le binaire téléchargé est comparé à l'empreinte SHA-256 publiée avec lui
+  (`aurion-arm64.sha256`). Empreinte absente ou différente : rien n'est installé. Avant, un téléchargement tronqué ou
+  modifié en chemin pouvait être installé.
+- **Mot de passe du Wi-Fi de maintenance** (partage de connexion du téléphone) écrit dans un fichier NetworkManager
+  réservé à root, comme celui du hotspot depuis la 1.11.0 : il ne passe plus en ligne de commande. Un partage de
+  connexion en WPA3 seul reste possible (ancienne méthode en repli).
+- **Service durci** : options systemd compatibles avec le helper root (`ProtectHome`, `ProtectKernelLogs`,
+  `RestrictNamespaces`…), exposition mesurée par `systemd-analyze security` de 8,8 à 7,5.
+- **Image de base figée** : Raspberry Pi OS Lite du 15/09/2026, vérifiée par son empreinte SHA-256 à chaque
+  fabrication (avant : « la dernière », sans contrôle). Les mises à jour de sécurité Debian restent appliquées.
+- **10 paquets inutiles retirés de l'image** : outils Python d'installation, strace, htop, v4l-utils,
+  wireless-tools, traductions de NetworkManager, man-db, ntfs-3g (les clés NTFS passent par le pilote du noyau).
+
 ## 1.11.2
 
 Objectif : un Pi plus réactif et plus sobre, sans rien changer à ce que fait la nuit (les 23 nuits simulées donnent
