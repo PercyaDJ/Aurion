@@ -60,9 +60,18 @@ detach_all() {
 }
 
 # ─── 1. Base image ───────────────────────────────────────────
+# Pinned and checked: every build of a version starts from the same system,
+# and a corrupted or substituted download stops the build. Security updates
+# are still applied below (full-upgrade). Moving to a newer Raspberry Pi OS:
+# take the address raspios_lite_arm64_latest redirects to and the SHA-256 of
+# its .sha256 file, update both lines, then build and test the image.
+BASE_URL=https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-09-15/2026-09-15-raspios-trixie-arm64-lite.img.xz
+BASE_SHA256=cdf4f3bfac35ae947b46e4e767f935453810549779ac3290e05a6754aee627e5
 if [[ -z "$BASE" ]]; then
-  echo "▶ Téléchargement de Raspberry Pi OS Lite (64 bits)"
-  curl -fL --retry 3 -o "$WORK/base.img.xz" https://downloads.raspberrypi.com/raspios_lite_arm64_latest
+  echo "▶ Téléchargement de Raspberry Pi OS Lite (64 bits), version du ${BASE_URL##*/}"
+  curl -fL --retry 3 -o "$WORK/base.img.xz" "$BASE_URL"
+  echo "$BASE_SHA256  $WORK/base.img.xz" | sha256sum -c --quiet \
+    || { echo "Empreinte de l'image de base différente de celle attendue : fabrication arrêtée"; exit 1; }
   BASE="$WORK/base.img.xz"
 fi
 IMG="$WORK/aurion.img"
@@ -113,10 +122,16 @@ if [[ $APT -eq 1 ]]; then
     # Also: kernel headers and their compiler (no module is ever built here),
     # firmware of Wi-Fi chips a Pi does not have (the Pi uses brcm80211), PPP,
     # rpi-update (untested firmware), pastebinit (uploads text), rich/pygments.
+    # Also (1.11.3): Python package tools, debugging and diagnostic tools
+    # (strace, htop, v4l-utils, wireless-tools), NetworkManager translations,
+    # man-db (manuals are removed below) and ntfs-3g (NTFS keys go through the
+    # kernel ntfs3 driver). avahi stays: aurion.local is used for maintenance.
     unused=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" rpi-connect-lite cloud-init mkvtoolnix gdb \
       cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id \
       linux-headers-rpi-2712 linux-headers-rpi-v8 firmware-atheros firmware-mediatek firmware-realtek \
-      firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion 2>/dev/null \
+      firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion \
+      python3-venv python3-pip-whl python3-setuptools-whl strace htop v4l-utils wireless-tools \
+      network-manager-l10n man-db ntfs-3g 2>/dev/null \
       | awk "\$2 == \"installed\" {print \$1}")
     # Versioned kernel headers are protected from autoremove (APT::NeverAutoRemove):
     # name them, and the compiler they pull, explicitly.
