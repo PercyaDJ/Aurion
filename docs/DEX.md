@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.11.3**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.12.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -98,17 +98,41 @@ Les journaux système sont en RAM : pour garder le journal d'une nuit, se fier �
 | Méthode | Procédure | Retour arrière |
 |---|---|---|
 | Depuis GitHub (sans ordinateur) | *Diagnostics*, *Mettre à jour depuis GitHub* : canal stable ou développement, partage de connexion du téléphone | bouton *Revenir à la version précédente* |
-| Par fichier | *Diagnostics*, *Mise à jour par fichier*, fichier `aurion-arm64` de la release | idem (`/opt/aurion/aurion.prev`) |
+| Par fichier | *Diagnostics*, *Mise à jour par fichier*, les deux fichiers `aurion-arm64` et `aurion-arm64.sig` de la release | idem (`/opt/aurion/aurion.prev`) |
 | Paquet | `sudo apt install ./aurion_X.Y.Z_arm64.deb` | réinstaller le paquet précédent |
 | Script | `sudo ./install.sh` depuis un clone à jour | idem |
 
-La mise à jour est refusée pendant une nuit. Retour arrière manuel :
+La mise à jour est refusée pendant une nuit. Depuis la 1.12.0, seul un binaire **signé par le projet** est installé,
+par GitHub comme par fichier (voir « Signature des versions » ci-dessous). Retour arrière manuel :
 
 ```bash
 sudo systemctl stop aurion
 sudo mv /opt/aurion/aurion.prev /opt/aurion/aurion
 sudo systemctl start aurion
 ```
+
+### Signature des versions
+
+Chaque binaire `aurion-arm64` publié est accompagné de `aurion-arm64.sig`, sa signature Ed25519. Aurion contient
+deux clés publiques (`keys/`) et refuse tout binaire qui n'est pas signé par l'une d'elles : un tiers qui publierait
+une release (compte ou jeton GitHub compromis) ou enverrait un fichier depuis le Wi-Fi Aurion ne peut rien installer.
+
+| Clé | Où est la partie privée | Rôle |
+|---|---|---|
+| `aurion-signing` | secret `AURION_SIGNING_KEY` de l'environnement GitHub **release** (fichier PEM entier, lignes `BEGIN`/`END` comprises) | signe chaque version dans le workflow Release |
+| `aurion-secours` | hors ligne chez le propriétaire, jamais sur GitHub | remplacer la clé principale si elle est perdue ou volée |
+
+- L'environnement **release** (*Settings > Environments*) a le propriétaire comme validateur obligatoire : chaque
+  publication (edge comme stable) attend son clic *Approve*. Sans ce clic, rien n'est signé ni publié.
+- Le workflow vérifie que le secret correspond à `keys/aurion-signing.pub` avant de publier ; secret absent ou faux :
+  la publication s'arrête, aucun binaire non signé ne sort.
+- **Clé principale perdue ou compromise** : générer une nouvelle paire, remplacer `keys/aurion-signing.pub` et le
+  secret, puis signer **à la main avec la clé de secours** le binaire de cette version et l'envoyer par fichier (ou
+  publier sa signature à la place de celle du workflow). Les caméras l'acceptent, puis ne font plus confiance qu'aux
+  nouvelles clés : aucune n'a besoin d'être ouverte.
+  `openssl pkeyutl -sign -rawin -inkey aurion-secours.key -in aurion-arm64 -out aurion-arm64.sig`
+- Transition : une caméra en 1.11.x ou avant ne vérifie pas encore les signatures ; elle installe la 1.12.0
+  normalement, et n'accepte ensuite que des versions signées.
 
 ### Système ou application ?
 

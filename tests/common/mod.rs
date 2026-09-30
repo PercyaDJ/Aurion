@@ -54,6 +54,18 @@ pub fn env_with(config_fn: impl FnOnce(&mut AppConfig)) -> TestEnv {
 }
 
 /// Test environment with custom update settings (online update tests).
+/// Stands for the project's release key in tests (the real private key is
+/// only in the GitHub "release" environment).
+pub fn release_key() -> ed25519_compact::KeyPair {
+    ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([42; 32]))
+}
+
+/// Signature file of `data`, as the Release workflow writes it.
+#[allow(dead_code)]
+pub fn sign(data: &[u8]) -> Vec<u8> {
+    release_key().sk.sign(data, None).to_vec()
+}
+
 pub fn env_custom(config_fn: impl FnOnce(&mut AppConfig), update_fn: impl FnOnce(&mut UpdateSettings)) -> TestEnv {
     let dir = tempfile::tempdir().unwrap();
     let capture = dir.path().join("capture");
@@ -72,7 +84,12 @@ pub fn env_custom(config_fn: impl FnOnce(&mut AppConfig), update_fn: impl FnOnce
     let state = AppState::with_paths(config, paths)
         .with_system_actions(false)
         .with_update_settings({
-            let mut u = UpdateSettings { target: Some(dir.path().join("bin/aurion")), restart: false, ..Default::default() };
+            let mut u = UpdateSettings {
+                target: Some(dir.path().join("bin/aurion")),
+                restart: false,
+                trusted_keys: vec![release_key().pk],
+                ..Default::default()
+            };
             update_fn(&mut u);
             u
         });

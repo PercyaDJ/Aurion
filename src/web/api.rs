@@ -1341,6 +1341,7 @@ pub async fn system_update(
 
     // Kept as received (no second copy of up to 64 MB in the Pi's memory)
     let mut binary: Option<axum::body::Bytes> = None;
+    let mut signature: Option<axum::body::Bytes> = None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -1352,18 +1353,27 @@ pub async fn system_update(
                 .await
                 .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Lecture du fichier impossible: {}", e)))?;
             binary = Some(bytes);
+        } else if field.name() == Some("signature") {
+            let bytes = field
+                .bytes()
+                .await
+                .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Lecture de la signature impossible: {}", e)))?;
+            signature = Some(bytes);
         }
     }
     let data = binary.filter(|d| !d.is_empty()).ok_or_else(|| err(StatusCode::BAD_REQUEST, "Aucun binaire reçu"))?;
-    install_binary(&state, &data).await.map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
+    let signature = signature.unwrap_or_default();
+    install_binary(&state, &data, &signature).await.map_err(|e| err(StatusCode::BAD_REQUEST, e))?;
     Ok("Mise à jour appliquée. Rechargez la page dans 15 secondes.".to_string())
 }
 
 /// Check, stage, try and install a new binary (upload or online update).
 /// The previous binary is kept as `.prev` (rollback). Returns the version
 /// printed by the new binary; the service restarts 2 s later.
-pub(crate) async fn install_binary(state: &AppState, data: &[u8]) -> Result<String, String> {
+pub(crate) async fn install_binary(state: &AppState, data: &[u8], signature: &[u8]) -> Result<String, String> {
     validate_update_binary(data)?;
+    // Only the project's releases: signed with the release (or backup) key
+    crate::web::signing::verify(data, signature, &state.update.trusted_keys)?;
     let target = update_target(state)?;
     let staged = target.with_extension("new");
     let backup = target.with_extension("prev");

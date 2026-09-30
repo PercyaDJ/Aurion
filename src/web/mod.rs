@@ -18,6 +18,7 @@ pub mod captive;
 pub mod gallery;
 pub mod security;
 pub mod static_files;
+pub mod signing;
 pub mod update;
 
 /// Maximum size of a regular API request body.
@@ -77,6 +78,8 @@ pub struct UpdateSettings {
     pub github_api: String,
     /// Downloads must start with this prefix (the project's releases).
     pub download_prefix: String,
+    /// Keys whose signature is accepted (the built-in release keys; test keys in tests).
+    pub trusted_keys: Vec<ed25519_compact::PublicKey>,
 }
 
 impl Default for UpdateSettings {
@@ -86,6 +89,7 @@ impl Default for UpdateSettings {
             restart: true,
             github_api: "https://api.github.com".into(),
             download_prefix: format!("https://github.com/{}/releases/download/", crate::web::update::REPO),
+            trusted_keys: signing::release_keys(),
         }
     }
 }

@@ -23,6 +23,9 @@ jobs:
   release:
     name: Edge, et release si nouvelle version
     runs-on: ubuntu-latest
+    # The signing key is a secret of this environment: the job only starts
+    # once the owner approves it (Settings > Environments > release)
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,6 +88,24 @@ jobs:
           (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256)
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
+      # The Pi only installs a binary signed with keys/aurion-signing.pub (or
+      # the offline backup key): without the signature it would be refused.
+      - name: Signature du binaire
+        env:
+          AURION_SIGNING_KEY: ${{ secrets.AURION_SIGNING_KEY }}
+        run: |
+          if [ -z "$AURION_SIGNING_KEY" ]; then
+            echo "::error::Secret AURION_SIGNING_KEY absent de l'environnement release : les Pi refuseraient ce binaire."
+            exit 1
+          fi
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$AURION_SIGNING_KEY" >"$key"
+          openssl pkeyutl -sign -rawin -inkey "$key" -in dist/aurion-arm64 -out dist/aurion-arm64.sig
+          # The secret must be the private half of the key built into Aurion
+          openssl pkeyutl -verify -pubin -inkey keys/aurion-signing.pub -rawin \
+            -in dist/aurion-arm64 -sigfile dist/aurion-arm64.sig
+
       - name: Déplacer le tag edge sur ce commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,6 +127,7 @@ jobs:
           files: |
             dist/aurion-arm64
             dist/aurion-arm64.sha256
+            dist/aurion-arm64.sig
 
       - name: Image carte SD (Raspberry Pi OS Lite 64 bits + Aurion)
         if: steps.version.outputs.skip == 'false'
@@ -148,7 +170,8 @@ jobs:
 
             Autres fichiers : paquet `.deb` (`sudo apt install ./aurion_*.deb`) et archive `.tar.gz`
             pour une installation sur un Raspberry Pi OS existant. `aurion-arm64` : utilisé par la mise à jour
-            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*). `aurion-sbom.cdx.json` et
+            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*), avec sa signature `aurion-arm64.sig`
+            (envoi par fichier : choisir les deux). `aurion-sbom.cdx.json` et
             `aurion-image-sbom.cdx.json` : inventaires CycloneDX de l'application et du système de l'image.
           files: |
             dist/*.img.xz
@@ -156,6 +179,7 @@ jobs:
             dist/*.deb
             dist/*.sha256
             dist/aurion-arm64
+            dist/aurion-arm64.sig
             dist/*.cdx.json
 
       # Straight after the release: the image just published and the code it was built from

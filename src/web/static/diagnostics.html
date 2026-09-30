@@ -217,10 +217,11 @@
                 <span class="card-title">⬆️ Mise à jour par fichier</span>
             </div>
             <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
-                Choisissez le fichier <code>aurion-arm64</code> téléchargé depuis la page <i>Releases</i> du projet.
-                Il est vérifié avant installation ; l'ancienne version est conservée en secours.
+                Choisissez les deux fichiers téléchargés depuis la page <i>Releases</i> du projet :
+                <code>aurion-arm64</code> et sa signature <code>aurion-arm64.sig</code>. Seules les versions signées
+                par le projet sont installées ; l'ancienne version est conservée en secours.
             </span>
-            <input type="file" id="updateFile" class="form-input" style="margin-bottom: 0.5rem;">
+            <input type="file" id="updateFile" class="form-input" multiple style="margin-bottom: 0.5rem;">
             <button class="btn btn-primary btn-block" id="updateBtn" onclick="uploadUpdate()">Installer la mise à jour</button>
             <div id="updateStatus" style="display: none; margin-top: 0.75rem; text-align: center; font-size: 0.85rem;"></div>
         </div>
@@ -517,10 +518,17 @@
             const input = document.getElementById('updateFile');
             const statusEl = document.getElementById('updateStatus');
             const btn = document.getElementById('updateBtn');
-            if (!input.files.length) { showToast('Choisissez un fichier', 'info'); return; }
+            const files = Array.from(input.files);
+            const sig = files.find(f => f.name.endsWith('.sig'));
+            const bin = files.find(f => !f.name.endsWith('.sig'));
+            if (!bin || !sig) {
+                showToast('Choisissez les deux fichiers : aurion-arm64 et aurion-arm64.sig', 'info');
+                return;
+            }
             if (!confirm('Installer cette mise à jour ? La caméra va redémarrer.')) return;
             const form = new FormData();
-            form.append('binary', input.files[0]);
+            form.append('binary', bin);
+            form.append('signature', sig);
             btn.disabled = true;
             statusEl.style.display = 'block';
             statusEl.style.color = 'var(--text-muted)';

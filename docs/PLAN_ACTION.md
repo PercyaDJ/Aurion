@@ -49,7 +49,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
 | A1 | P1 | ~~Mots de passe Wi-Fi dans des fichiers de connexion NetworkManager (0600)~~ : hotspot fait en 1.11.0, Wi-Fi de maintenance en 1.11.3 (repli sur l'ancienne méthode si NetworkManager refuse le fichier) | S |
-| A2 | P1 | Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour OTA ou `get.sh` | M |
+| A2 | P1 | ~~Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour~~ : fait en 1.12.0 pour la mise à jour depuis GitHub et par fichier (clé principale + clé de secours) ; reste `get.sh` et l'image carte SD (avec la mise à jour A/B) | M |
 | A3 | P2 | Code PIN optionnel pour l'interface (utile en mode maintenance sur un réseau partagé) | M |
 | A4 | P2 | Séparer les actions root dans un petit service dédié (socket local) pour durcir `aurion.service` (`ProtectSystem`, `NoNewPrivileges`) | L |
 | A5 | P3 | Option WPA3-SAE pour le hotspot | S |
