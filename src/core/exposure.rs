@@ -17,9 +17,6 @@ pub struct ExposureController {
     // Current settings
     current: ExposureSettings,
 
-    // Log-space EMA accumulator
-    log_state: f64,
-
     // Per-phase control params
     detect_alpha: f64,
     detect_rate_up: f64,
@@ -53,7 +50,6 @@ impl ExposureController {
     ) -> Self {
         // Start at minimum exposure (conservative)
         let initial = ExposureSettings::new(iso_min, shutter_min_us);
-        let log_state = (initial.shutter_us as f64).ln();
 
         Self {
             iso_min,
@@ -61,7 +57,6 @@ impl ExposureController {
             shutter_min_us,
             shutter_max_us,
             current: initial,
-            log_state,
             detect_alpha,
             detect_rate_up,
             detect_rate_down,
@@ -118,27 +113,20 @@ impl ExposureController {
         // Error in log-space: positive = too dark, negative = too bright
         let err = (self.target_brightness / measured).ln();
 
-        // EMA smooth
-        self.log_state += alpha * err;
-
-        // Convert log_state to a multiplier relative to current exposure
-        let current_ev = (self.current.shutter_us as f64 * self.current.iso as f64 / 100.0).ln();
-        let target_ev = current_ev + self.log_state;
+        // Move a fraction `alpha` of the way to the target, in log space
+        // (exponential smoothing: no overshoot, no oscillation). The step
+        // only depends on this frame: carrying the previous step over (as
+        // before 1.11.1) made the exposure swing endlessly around the target.
+        let delta = alpha * err;
 
         // Limit the change per frame (rate limiter)
-        let delta = target_ev - current_ev;
         let clamped_delta = if delta > 0.0 {
             delta.min(rate_up.ln_1p()) // ln(1 + rate_up) ≈ rate_up for small values
         } else {
             delta.max(-(rate_down.ln_1p()))
         };
 
-        let mult = clamped_delta.exp();
-        self.apply_multiplier(mult);
-
-        // Reset log_state to avoid integral windup
-        self.log_state = clamped_delta;
-
+        self.apply_multiplier(clamped_delta.exp());
         self.current
     }
 
@@ -153,7 +141,6 @@ impl ExposureController {
             (self.target_brightness / measured).clamp(0.125, 8.0)
         };
         self.apply_multiplier(mult);
-        self.log_state = 0.0;
         self.current
     }
 
@@ -200,7 +187,6 @@ impl ExposureController {
     /// Reset exposure to minimum (start of session).
     pub fn reset(&mut self) {
         self.current = ExposureSettings::new(self.iso_min, self.shutter_min_us);
-        self.log_state = 0.0;
     }
 
     /// Set exposure directly (e.g., from config or preset).
@@ -209,7 +195,6 @@ impl ExposureController {
             settings.iso.clamp(self.iso_min, self.iso_max),
             settings.shutter_us.clamp(self.shutter_min_us, self.shutter_max_us),
         );
-        self.log_state = 0.0;
     }
 }
 
@@ -257,6 +242,53 @@ mod tests {
             0.03, 0.03, 0.05,     // capture alpha, rate up/down
             0.80, 60.0, 250.0,    // percentile, target, sat reject
         )
+    }
+
+    /// Sky whose brightness follows the exposure (linear sensor): the
+    /// target (60) is reached at ISO 800, 8 s.
+    fn sky_brightness(e: ExposureSettings) -> u8 {
+        let ev = e.shutter_us as f64 * e.iso as f64;
+        (60.0 * ev / (8_000_000.0 * 800.0)).round().clamp(0.0, 255.0) as u8
+    }
+
+    fn run_night(ctrl: &mut ExposureController, phase: Phase, frames: usize) -> Vec<f64> {
+        (0..frames)
+            .map(|_| {
+                let e = ctrl.update(&make_histogram_for_brightness(sky_brightness(ctrl.current())), phase);
+                e.shutter_us as f64 * e.iso as f64
+            })
+            .collect()
+    }
+
+    #[test]
+    fn exposure_settles_without_oscillating() {
+        for phase in [Phase::Run, Phase::Watch] {
+            let mut ctrl = default_controller();
+            ctrl.set(ExposureSettings::new(800, 3_000_000)); // under-exposed start
+            let evs = run_night(&mut ctrl, phase, 400);
+            // Once settled, the exposure stays put (a timelapse must not flicker)
+            let tail = &evs[300..];
+            let (lo, hi) = tail.iter().fold((f64::MAX, 0.0f64), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+            assert!(hi / lo < 1.03, "{:?}: exposure swings by {:.1} % once settled", phase, (hi / lo - 1.0) * 100.0);
+            // ... and close to the target (8 s at ISO 800)
+            let target = 8_000_000.0 * 800.0;
+            assert!((tail[tail.len() - 1] / target - 1.0).abs() < 0.05, "{:?}: settled {:.2}x off target", phase, tail[tail.len() - 1] / target);
+        }
+    }
+
+    #[test]
+    fn well_exposed_sky_does_not_move_the_exposure() {
+        let mut ctrl = default_controller();
+        ctrl.set(ExposureSettings::new(800, 8_000_000));
+        let before = ctrl.current();
+        ctrl.update(&make_histogram_for_brightness(60), Phase::Run);
+        assert_eq!(ctrl.current(), before, "first update on a correct frame must not jump");
+
+        // Straight from the config too (the first step used to be a +15 % jump)
+        let mut fresh = default_controller();
+        let start = fresh.current();
+        fresh.update(&make_histogram_for_brightness(60), Phase::Watch);
+        assert_eq!(fresh.current(), start);
     }
 
     #[test]
