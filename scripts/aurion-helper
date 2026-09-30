@@ -15,6 +15,7 @@
 #   aurion-helper shutdown
 #   aurion-helper mount-usb | umount-usb
 #   aurion-helper usb-add <kernel-name>         (called by the udev rule)
+#   aurion-helper app-rollback                  (called by aurion-rollback.service)
 #
 # Network: NetworkManager when it manages wlan0 (Raspberry Pi OS
 # Bookworm/Trixie), hostapd + dnsmasq otherwise.
@@ -47,7 +48,7 @@ CLIENT_CON=aurion-client
 NM_CON_DIR=/etc/NetworkManager/system-connections
 [[ "$DRYRUN" == "1" ]] && NM_CON_DIR="$RUN_DIR"
 # Bumped when commands change: the application checks it (Diagnostics).
-HELPER_VERSION=3
+HELPER_VERSION=4
 RTC_DIR=/sys/class/rtc/rtc0
 # Dry-run (tests): a fake RTC folder, never the real /sys
 [[ "$DRYRUN" == "1" ]] && RTC_DIR="${AURION_FAKE_RTC:-/nonexistent/aurion-rtc}"
@@ -534,6 +535,47 @@ cmd_usb_format() {
   AURION_FAKE_FSTYPE=exfat cmd_usb_add "${dev}1"
 }
 
+# ─── Automatic rollback of a failed update ───────────────────
+
+APP_DIR=/opt/aurion
+[[ "$DRYRUN" == "1" ]] && APP_DIR="${AURION_FAKE_APP_DIR:-/nonexistent/aurion-app}"
+
+# aurion.service failed to (re)start several times (OnFailure): if the
+# running version is a trial one (aurion.trial, written by the update and
+# removed once it has run for a few minutes), put the previous one back and
+# start again. A camera in a closed box never stays on a broken version.
+cmd_app_rollback() {
+  local bin="$APP_DIR/aurion" prev="$APP_DIR/aurion.prev" trial="$APP_DIR/aurion.trial"
+  if [[ ! -f "$trial" ]]; then
+    # Confirmed version failing (hardware?): never give up on the service
+    echo "aucune version à l'essai : pas de retour arrière, nouvel essai du service"
+    restart_app
+    return 0
+  fi
+  if [[ ! -f "$prev" ]]; then
+    rm -f "$trial"
+    echo "version à l'essai sans version précédente : rien à rétablir"
+    restart_app
+    return 0
+  fi
+  local failed
+  failed=$(head -c 200 "$trial" | tr -cd '[:print:]')
+  mv -f "$bin" "$APP_DIR/aurion.failed"
+  mv -f "$prev" "$bin"
+  rm -f "$trial"
+  # Read by Aurion at startup: shown on the Diagnostics page
+  printf '%s\n' "${failed:-inconnue}" >"$APP_DIR/aurion.rolled-back"
+  chmod 0644 "$APP_DIR/aurion.rolled-back"
+  echo "version $failed en échec : version précédente rétablie"
+  restart_app
+}
+
+# Leave the failed state (start limit) and start again
+restart_app() {
+  run systemctl reset-failed aurion.service || true
+  run systemctl start --no-block aurion.service
+}
+
 # ─── Dispatch ────────────────────────────────────────────────
 
 [[ $EUID -eq 0 || "$DRYRUN" == "1" ]] || die "doit être lancé en root (sudo)"
@@ -554,5 +596,6 @@ case "$cmd" in
   mount-usb)     cmd_mount_usb ;;
   umount-usb)    cmd_umount_usb ;;
   usb-format)    cmd_usb_format "$@" ;;
+  app-rollback)  cmd_app_rollback ;;
   *) die "commande inconnue: ${cmd:-<vide>}" ;;
 esac

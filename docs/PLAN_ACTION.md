@@ -21,6 +21,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V13 | Temps d'allumage : lire « Wi-Fi prêt après l'allumage » (Diagnostics) sur Pi 4 et Pi 5, avec et sans clé ; `systemd-analyze blame` pour repérer les services lents | S | Wi-Fi visible le plus vite possible ; chiffres consignés dans GUIDE_DEMARRAGE.md |
 | V14 | Préparer la clé : clé neuve non formatée, clé ext4, clé NTFS ; vérifier qu'elle est montée et utilisée juste après | S | point vert « Clé USB » sans débrancher |
 | V15 | Image 1.11.0 : hotspot Aurion démarré par fichier de connexion (journal sans « fichier de connexion refusé »), premier allumage, Wi-Fi Aurion, caméra, clé, mise à l'heure du module horloge (`hwclock -r` après une synchronisation par le téléphone) | S | tout fonctionne comme en 1.10.0 |
+| V16 | Retour arrière automatique : installer une version volontairement cassée (binaire qui quitte aussitôt, signé avec la clé de secours sur un Pi de test), vérifier que l'ancienne version revient seule en moins de 2 minutes et que *Diagnostics* l'annonce ; puis une version saine, confirmée après 3 minutes | S | la caméra n'est jamais laissée sur une version qui ne démarre pas |
 | V10 | ISO maximal utile pour le RAW : vérifier au-delà de quel ISO le gain devient numérique (sans effet sur le DNG) sur l'IMX477 | S | valeur mesurée ; `iso_max` par défaut ajusté si nécessaire |
 
 ## Énergie (P1)

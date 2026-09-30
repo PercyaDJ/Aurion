@@ -57,6 +57,7 @@ check "sudoers sans cp/mount/dnsmasq" '! grep -v "^#" "$R/etc/sudoers.d/aurion" 
 check "sudoers en 0440" '[[ $(stat -c %a "$R/etc/sudoers.d/aurion") == 440 ]]'
 check "unité systemd pour nobody" 'grep -q "^User=nobody$" "$R/etc/systemd/system/aurion.service" && ! grep -q "@AURION_USER@" "$R/etc/systemd/system/aurion.service"'
 check "service de type notify + watchdog" 'grep -q "^Type=notify" "$R/etc/systemd/system/aurion.service" && grep -q "^WatchdogSec=" "$R/etc/systemd/system/aurion.service"'
+check "retour automatique après échecs répétés" 'grep -q "^OnFailure=aurion-rollback.service" "$R/etc/systemd/system/aurion.service" && grep -q "aurion-helper app-rollback" "$R/etc/systemd/system/aurion-rollback.service"'
 check "service durci sans bloquer sudo" 'grep -q "^ProtectHome=read-only" "$R/etc/systemd/system/aurion.service" && grep -q "^RestrictNamespaces=yes" "$R/etc/systemd/system/aurion.service" && ! grep -qE "^(NoNewPrivileges|ProtectSystem)=" "$R/etc/systemd/system/aurion.service"'
 check "pas de dépendance dure à la clé USB" '! grep -q RequiresMountsFor "$R/etc/systemd/system/aurion.service"'
 check "règle udev de montage USB" 'grep -q "aurion-helper usb-add" "$R/etc/udev/rules.d/99-aurion-usb.rules"'
@@ -101,6 +102,7 @@ check "mot de passe d'usine en mode image" 'grep -q "\"password\": \"aurora2024\
 
 echo "▶ désinstallation"
 bash "$REPO/scripts/install.sh" --uninstall >"$WORK/out4.log" 2>&1 || { cat "$WORK/out4.log"; exit 1; }
+check "service de retour arrière supprimé" '[[ ! -f "$R/etc/systemd/system/aurion-rollback.service" ]]'
 check "service supprimé" '[[ ! -f "$R/etc/systemd/system/aurion.service" ]]'
 check "sudoers supprimé" '[[ ! -f "$R/etc/sudoers.d/aurion" ]]'
 check "helper supprimé" '[[ ! -f "$R/usr/local/sbin/aurion-helper" ]]'

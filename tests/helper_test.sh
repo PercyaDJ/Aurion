@@ -46,7 +46,22 @@ ko    "$HELPER" set-time 0
 ko    "$HELPER" set-time "1767225600; reboot"
 ko    "$HELPER" set-time 9999999999
 # version (checked by the application)
-has   "3" "$HELPER" version
+has   "4" "$HELPER" version
+
+# app-rollback: a trial version that keeps failing is replaced by the previous one
+APP=$(mktemp -d)
+printf 'NEW' >"$APP/aurion"; printf 'OLD' >"$APP/aurion.prev"; printf '1.12.1' >"$APP/aurion.trial"
+has   "version précédente rétablie" env AURION_FAKE_APP_DIR="$APP" "$HELPER" app-rollback
+ok    test "$(cat "$APP/aurion")" = OLD
+ok    test "$(cat "$APP/aurion.failed")" = NEW
+ok    test ! -e "$APP/aurion.trial"
+has   "1.12.1" cat "$APP/aurion.rolled-back"
+# A confirmed version (no trial marker) is never swapped: the failure is elsewhere
+printf 'NEW2' >"$APP/aurion"; printf 'OLD2' >"$APP/aurion.prev"
+has   "pas de retour arrière" env AURION_FAKE_APP_DIR="$APP" "$HELPER" app-rollback
+has   "systemctl start --no-block aurion.service" env AURION_FAKE_APP_DIR="$APP" "$HELPER" app-rollback
+ok    test "$(cat "$APP/aurion")" = NEW2
+rm -rf "$APP"
 
 # usb-format: USB disks only, never the SD card or the system disk
 SB=$(mktemp -d); mkdir -p "$SB/dev/usb1/1-1/host0/block/sda" "$SB/dev/mmc/block/mmcblk0" "$SB/block"

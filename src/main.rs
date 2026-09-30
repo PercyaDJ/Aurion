@@ -236,6 +236,12 @@ async fn main() -> anyhow::Result<()> {
 
             sd_notify("READY=1");
 
+            // Updates: report an automatic rollback, confirm a trial version
+            tokio::spawn(aurion::web::update::startup_checks(
+                state.clone(),
+                std::time::Duration::from_secs(aurion::web::update::TRIAL_CONFIRM_SECS),
+            ));
+
             // The night runs in its own task: its image processing and key
             // writes never hold up the web server nor the systemd watchdog
             // (all used to share one task).

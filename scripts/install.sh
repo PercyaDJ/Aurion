@@ -256,6 +256,16 @@ install_service() {
   mkdir -p "$R/etc/systemd/system"
   sed "s/@AURION_USER@/$SERVICE_USER/" "$SERVICE_SRC" >"$R/etc/systemd/system/aurion.service"
   chmod 0644 "$R/etc/systemd/system/aurion.service"
+  # Started by systemd when aurion.service fails (OnFailure): previous
+  # version back if the running one is a trial, then start again
+  cat >"$R/etc/systemd/system/aurion-rollback.service" <<'EOF'
+[Unit]
+Description=Aurion : retour automatique à la version précédente après un échec
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aurion-helper app-rollback
+EOF
+  chmod 0644 "$R/etc/systemd/system/aurion-rollback.service"
   systemctl daemon-reload
   systemctl enable aurion.service >/dev/null
 }
@@ -425,7 +435,7 @@ uninstall() {
   info "Désinstallation d'Aurion (les photos de la clé USB sont conservées)"
   systemctl disable --now aurion.service aurion-flush.timer aurion-power-watch.timer 2>/dev/null || true
   "$HELPER" ap-stop >/dev/null 2>&1 || true
-  rm -f "$R"/etc/systemd/system/aurion.service "$R"/etc/systemd/system/aurion-flush.* "$R"/etc/systemd/system/aurion-power-watch.*
+  rm -f "$R"/etc/systemd/system/aurion.service "$R"/etc/systemd/system/aurion-rollback.service "$R"/etc/systemd/system/aurion-flush.* "$R"/etc/systemd/system/aurion-power-watch.*
   rm -f "$R/etc/sudoers.d/aurion" "$R/etc/udev/rules.d/99-aurion-usb.rules" "$R/etc/aurion.env" "$HELPER" "$R/usr/local/sbin/aurion-power-watch"
   local bc
   for bc in "$R/boot/firmware/config.txt" "$R/boot/config.txt"; do

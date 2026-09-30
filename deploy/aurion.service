@@ -5,6 +5,12 @@ After=network.target NetworkManager.service systemd-udev-trigger.service
 Wants=network.target
 # No hard dependency on the USB key: the hotspot and the interface must
 # start even when the key is missing (the UI then shows a warning).
+# Failing to start 3 times within 15 min (a broken update): the root helper
+# puts the previous version back if the current one is still on trial, and
+# starts the service again in every case (aurion-rollback.service).
+StartLimitIntervalSec=900
+StartLimitBurst=3
+OnFailure=aurion-rollback.service
 
 [Service]
 Type=notify
