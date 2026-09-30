@@ -1293,6 +1293,9 @@ fn expected_elf_machine() -> Option<u16> {
 
 /// Check that `data` is an executable ELF for this machine.
 pub fn validate_update_binary(data: &[u8]) -> Result<(), String> {
+    if data.len() as u64 > crate::web::update::MAX_BINARY_BYTES {
+        return Err(format!("Fichier trop gros ({} Mo, 64 Mo au plus)", data.len() / 1_048_576));
+    }
     if data.len() < 64 || &data[..4] != b"\x7fELF" {
         return Err("Le fichier n'est pas un binaire Linux (ELF)".into());
     }
@@ -1336,7 +1339,8 @@ pub async fn system_update(
         return Err(err(StatusCode::CONFLICT, "Capture en cours : mise à jour impossible"));
     }
 
-    let mut binary: Option<Vec<u8>> = None;
+    // Kept as received (no second copy of up to 64 MB in the Pi's memory)
+    let mut binary: Option<axum::body::Bytes> = None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -1347,7 +1351,7 @@ pub async fn system_update(
                 .bytes()
                 .await
                 .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Lecture du fichier impossible: {}", e)))?;
-            binary = Some(bytes.to_vec());
+            binary = Some(bytes);
         }
     }
     let data = binary.filter(|d| !d.is_empty()).ok_or_else(|| err(StatusCode::BAD_REQUEST, "Aucun binaire reçu"))?;
