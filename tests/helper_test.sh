@@ -58,6 +58,15 @@ ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format "sda; reboot"
 ko    env AURION_FAKE_SYSBLOCK="$SB/block" AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-format sda
 mkdir -p "$SB/dev/usb1/1-2/host1/block/sdb"; ln -s "$SB/dev/usb1/1-2/host1/block/sdb" "$SB/block/sdb"
 ko    env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sda   # two keys: refused
+# Pi booting from a USB SSD (sda): the key (sdb) is the only one, the SSD is never touched
+has   "mkfs.exfat -L AURION /dev/sdb1" env AURION_FAKE_SYSBLOCK="$SB/block" AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-format sdb
+ko    env AURION_FAKE_SYSBLOCK="$SB/block" AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-format sda
+rm -rf "$SB"
+# A SATA/PCIe disk listed after the key does not hide it
+SB=$(mktemp -d); mkdir -p "$SB/dev/usb1/1-1/host0/block/sda" "$SB/dev/pcie/ata1/block/sdb" "$SB/block"
+ln -s "$SB/dev/usb1/1-1/host0/block/sda" "$SB/block/sda"
+ln -s "$SB/dev/pcie/ata1/block/sdb" "$SB/block/sdb"
+has   "mkfs.exfat -L AURION /dev/sda1" env AURION_FAKE_SYSBLOCK="$SB/block" "$HELPER" usb-format sda
 rm -rf "$SB"
 
 # power-profile (night energy saving)
@@ -102,6 +111,8 @@ has   "flush" env AURION_FAKE_FSTYPE=vfat "$HELPER" usb-add sdb
 ko    env AURION_FAKE_FSTYPE=ext4 "$HELPER" usb-add sda1
 ko    "$HELPER" usb-add "../../dev/mmcblk0"
 ko    "$HELPER" usb-add "mmcblk0p2"
+ko    env AURION_FAKE_FSTYPE=vfat AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-add sda1   # boot partition of a USB SSD
+has   "systemd-mount" env AURION_FAKE_FSTYPE=exfat AURION_FAKE_ROOTDEV=/dev/sda2 "$HELPER" usb-add sdb1
 ok    "$HELPER" mount-usb
 
 # misc

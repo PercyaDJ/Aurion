@@ -416,6 +416,8 @@ mount_opts() {
 cmd_usb_add() {
   local dev="${1:-}" fstype opts
   [[ "$dev" =~ ^sd[a-z]+[0-9]*$ ]] || die "périphérique invalide"
+  # Pi booting from a USB SSD: its partitions are never the photo key
+  grep -qxF "$(disk_of "$dev")" <<<"$(system_disks)" && die "$dev porte le système : ce n'est pas une clé photo"
   if [[ "$DRYRUN" != "1" ]] && mountpoint -q "$MOUNT_POINT"; then
     echo "$MOUNT_POINT déjà monté"; return 0
   fi
@@ -454,14 +456,35 @@ cmd_umount_usb() {
 SYS_BLOCK=/sys/block
 [[ "$DRYRUN" == "1" ]] && SYS_BLOCK="${AURION_FAKE_SYSBLOCK:-/nonexistent/aurion-sysblock}"
 
+# Whole disk of a partition: sda2 -> sda, mmcblk0p2 -> mmcblk0, nvme0n1p2 -> nvme0n1
+disk_of() {
+  local d="${1#/dev/}"
+  if [[ "$d" =~ ^((mmcblk|nvme[0-9]+n)[0-9]+)p[0-9]+$ ]]; then echo "${BASH_REMATCH[1]}"; else echo "${d%%[0-9]*}"; fi
+}
+
+# Disk(s) the system runs from (a Pi can boot from a USB SSD)
+system_disks() {
+  if [[ "$DRYRUN" == "1" ]]; then disk_of "${AURION_FAKE_ROOTDEV:-/dev/mmcblk0p2}"; return 0; fi
+  local m src
+  for m in / /boot/firmware; do
+    src=$(findmnt -n -o SOURCE "$m" 2>/dev/null) || continue
+    [[ "$src" == /dev/* ]] && disk_of "$src"
+  done
+  return 0
+}
+
 # Whole USB disks only (sysfs path through a USB controller): never the SD
-# card (mmcblk), an NVMe drive or a SATA disk.
+# card (mmcblk), an NVMe drive, a SATA disk, nor a USB disk the system boots from.
 usb_disks() {
-  local d
+  local d name sys
+  sys=$(system_disks)
   for d in "$SYS_BLOCK"/sd?; do
     [[ -e "$d" ]] || continue
-    readlink -f "$d" | grep -q '/usb' && echo "${d##*/}"
+    name=${d##*/}
+    grep -qxF "$name" <<<"$sys" && continue
+    if readlink -f "$d" | grep -q '/usb'; then echo "$name"; fi
   done
+  return 0
 }
 
 cmd_usb_format() {
