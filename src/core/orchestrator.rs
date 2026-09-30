@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
@@ -7,7 +7,9 @@ use crate::core::config::{AppConfig, DenoiseConfig};
 use crate::core::denoise::Stacker;
 use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram};
-use crate::core::models::{CaptureFrame, OutputFormat, Phase, SessionEvent, TimeRange};
+use crate::core::models::{
+    CaptureFrame, DetectionResult, ExposureSettings, OutputFormat, Phase, SessionEvent, StorageStatus, TimeRange,
+};
 use chrono::Datelike;
 use crate::core::dark_reminder::{DarkReminder, NightStats};
 use crate::core::layout::{self, NightLayout};
@@ -76,6 +78,10 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
     /// Main entry point — run the full autonomous loop.
     /// This blocks until shutdown.
+    ///
+    /// The night is a sequence of steps, each in its own method below:
+    /// resume or ARM, disconnect, night marker, wait for the time range,
+    /// key check, night folder, calibration, capture loop, end of night.
     pub async fn run(&self) -> anyhow::Result<()> {
         info!("Orchestrator: starting autonomous loop");
 
@@ -87,102 +93,19 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             self.wait_for_start().await;
         }
 
-        // ─── DISCONNECT timer ───────────────────────────────
         if self.is_shutdown().await {
             return Ok(());
         }
-        info!("Orchestrator: disconnect requested, 15s timer...");
-        self.set_phase(Phase::Disconnect).await;
-        sleep(DISCONNECT_DELAY).await;
-
-        // ─── Stop AP (best-effort) ──────────────────────────
-        if let Some(ref network) = self.network {
-            if let Err(e) = network.stop_ap().await {
-                warn!("Orchestrator: failed to stop AP: {}", e);
-            }
-        }
+        self.disconnect().await;
 
         // ─── Load config snapshot ───────────────────────────
         let mut config: AppConfig = self.state.config.read().await.clone();
-
-        // ─── Night marker (resume after a power cut) ────────
         let marker_path = self.state.paths.night_marker.clone();
-        let resumed_session = resume.as_ref().and_then(|(m, _)| m.session.clone());
-        match resume {
-            Some((marker, plan)) => {
-                if let ResumePlan::Timer(hours) = plan {
-                    config.time_range.duration_hours = Some(hours);
-                }
-                if let Err(e) = marker.save(&marker_path) {
-                    warn!("Orchestrator: cannot update night marker: {}", e);
-                }
-                self.log(&format!("Reprise de la nuit interrompue ({}/{})", marker.resumes, MAX_RESUMES)).await;
-            }
-            None => {
-                if let Err(e) = NightMarker::new(self.now(), config.time_range.duration_hours).save(&marker_path) {
-                    warn!("Orchestrator: cannot write night marker: {}", e);
-                }
-            }
-        }
+        let resumed_session = self.mark_night(&mut config, resume, &marker_path).await;
+        self.log_start_clock().await;
 
-        // ─── Log system clock immediately (critical for diagnosis without screen) ─
-        {
-            let sys_now = self.now();
-            let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
-            info!("Orchestrator: {}", clock_msg);
-            self.log(&clock_msg).await;
-
-            // Warn if the clock looks like epoch (Pi without NTP)
-            if sys_now.year() < 2024 {
-                let warn_msg = "[!] Horloge systeme < 2024 - NTP non synchronise ? La plage horaire peut ne pas fonctionner.";
-                warn!("Orchestrator: {}", warn_msg);
-                self.log(warn_msg).await;
-            }
-        }
-
-        // ─── Wait for time range to start ───────────────────
-        if config.time_range.duration_hours.is_none() {
-            let time_range = TimeRange { start: config.time_range.start, end: config.time_range.end };
-            let mut logged_wait = false;
-            loop {
-                if self.is_shutdown().await {
-                    return Ok(());
-                }
-                let now = self.now();
-                if time_range.contains(now.time()) {
-                    break;
-                }
-                // Pi 5: rather than idling for hours, power off and wake
-                // up just before the night (the marker resumes it).
-                let until_start = (next_occurrence(now, config.time_range.start) - now).num_seconds();
-                if self.system.can_wake() && until_start > SLEEP_IF_START_IN_SECS {
-                    let wake = next_occurrence(now, config.time_range.start) - chrono::Duration::seconds(WAKE_LEAD_SECS);
-                    if self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await.is_ok() {
-                        self.log(&format!("Nuit dans {} h : extinction, réveil programmé à {}", until_start / 3600, wake.format("%H:%M"))).await;
-                        self.set_phase(Phase::Shutdown).await;
-                        let _ = self.storage.sync().await;
-                        if let Err(e) = self.system.shutdown().await {
-                            error!("Orchestrator: shutdown before the night failed: {}", e);
-                        }
-                        return Ok(());
-                    }
-                }
-                if !logged_wait {
-                    let msg = format!(
-                        "Attente plage horaire ({} -> {}) | heure actuelle: {}",
-                        config.time_range.start, config.time_range.end,
-                        now.format("%H:%M:%S")
-                    );
-                    info!("Orchestrator: {}", msg);
-                    self.log(&msg).await;
-                    logged_wait = true;
-                }
-                sleep(Duration::from_secs(60)).await;
-            }
-            let start_msg = format!("Plage horaire atteinte - demarrage capture ({} -> {})",
-                config.time_range.start, config.time_range.end);
-            self.log(&start_msg).await;
-            info!("Orchestrator: {}", start_msg);
+        if !self.wait_for_night(&config).await {
+            return Ok(());
         }
 
         self.set_phase(Phase::Calibration).await;
@@ -191,58 +114,197 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // ─── Initialize core components ─────────────────────
         let mut sm = StateMachine::new(config.detection.consecutive_required);
         sm.set_phase(Phase::Calibration);
+        let mut exposure = ExposureController::from_config(&config.exposure);
+        let detector = AuroraDetector::from_config(&config.detection);
 
-        let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
-        let mut detector = AuroraDetector::from_config(&config.detection);
+        let storage_path = PathBuf::from(&config.storage.mount_point);
+        self.check_key_writable(&config, &storage_path).await;
+        let mut files = self.open_night_files(&storage_path, resumed_session.as_deref(), &marker_path).await;
 
-        // ─── USB storage: write-first check with auto-mount ─
-        // Don't rely on mountpoint -q (can lie). Try a real write directly.
-        // If it fails: attempt to (re)mount, then retry.
-        let configured_path = std::path::PathBuf::from(&config.storage.mount_point);
-        {
-            let probe_path = configured_path.join(".aurion_probe");
-            let mut storage_ok = false;
+        let is_safe_mode = !config.detection.detection_capture_enabled;
+        let mode = if is_safe_mode { "SAFE" } else { "FILTER" };
+        self.log_effective_config(&config, &mut files, mode).await;
+        self.calibrate(&config, &mut exposure, &mut files).await;
+        self.enter_first_phase(is_safe_mode, &mut sm, &mut files).await;
+        self.log_night_mode(&config, &mut files).await;
 
-            // First attempt: direct write (USB already mounted via fstab/boot)
-            if std::fs::create_dir_all(&configured_path).is_ok()
-                && std::fs::write(&probe_path, b"ok").is_ok() {
-                    let _ = std::fs::remove_file(&probe_path);
-                    self.log(&format!("USB accessible: {}", config.storage.mount_point)).await;
-                    storage_ok = true;
-                }
+        // ─── Main capture loop ──────────────────────────────
+        let range = TimeRange { start: config.time_range.start, end: config.time_range.end };
+        let mut night = NightLoop {
+            sm,
+            exposure,
+            detector,
+            confirmation: AuroraConfirmation::new(config.detection.consecutive_required),
+            stacker: None,
+            iterations: 0,
+            // A resumed night continues the numbering (timelapse order kept)
+            frame_number: files.path.as_deref().and_then(layout::max_frame_number).map(|n| n + 1).unwrap_or(0),
+            // Settings of the saved frames: the darks are taken at their average
+            stats: NightStats::new(),
+            last_aurora_at: None,
+            failures: CameraFailures::default(),
+            window: NightWindow::new(config.time_range.duration_hours, range, self.now()),
+            wait_iters: 0,
+        };
+        let interrupted = self.capture_loop(&config, &mut files, &mut night, mode).await;
 
-            // Second attempt: try to (re)mount then retry
-            if !storage_ok {
-                warn!("Orchestrator: direct write failed, attempting mount...");
-                self.log("USB: montage en cours...").await;
-                let _ = self.storage.mount().await; // ignore if already mounted
-                sleep(Duration::from_secs(3)).await;
-                if std::fs::create_dir_all(&configured_path).is_ok()
-                    && std::fs::write(&probe_path, b"ok").is_ok() {
-                        let _ = std::fs::remove_file(&probe_path);
-                        self.log(&format!("USB monte et accessible: {}", config.storage.mount_point)).await;
-                        storage_ok = true;
-                    }
-            }
+        self.finish_night(&config, files, night.stats, &marker_path, interrupted).await;
+        Ok(())
+    }
 
-            if !storage_ok {
-                // Log a clear warning — session continues and will try to write anyway
-                // (write may still succeed if permissions allow)
-                let msg = format!(
-                    "[!] USB ({}) non accessible en ecriture - la session va tenter de continuer",
-                    config.storage.mount_point
-                );
-                warn!("Orchestrator: {}", msg);
-                self.log(&msg).await;
+    /// DISCONNECT: leave the phone time to get the answer, then switch the
+    /// hotspot off (best effort).
+    async fn disconnect(&self) {
+        info!("Orchestrator: disconnect requested, 15s timer...");
+        self.set_phase(Phase::Disconnect).await;
+        sleep(DISCONNECT_DELAY).await;
+
+        if let Some(ref network) = self.network {
+            if let Err(e) = network.stop_ap().await {
+                warn!("Orchestrator: failed to stop AP: {}", e);
             }
         }
-        let storage_path: &Path = configured_path.as_path();
+    }
 
-        let opened = match &resumed_session {
+    /// Night marker (resume after a power cut): write a new one, or update
+    /// the resumed one. A resumed timer night only runs its remaining time.
+    /// Returns the folder name of the resumed night, if any.
+    async fn mark_night(
+        &self,
+        config: &mut AppConfig,
+        resume: Option<(NightMarker, ResumePlan)>,
+        marker_path: &Path,
+    ) -> Option<String> {
+        let resumed_session = resume.as_ref().and_then(|(m, _)| m.session.clone());
+        match resume {
+            Some((marker, plan)) => {
+                if let ResumePlan::Timer(hours) = plan {
+                    config.time_range.duration_hours = Some(hours);
+                }
+                if let Err(e) = marker.save(marker_path) {
+                    warn!("Orchestrator: cannot update night marker: {}", e);
+                }
+                self.log(&format!("Reprise de la nuit interrompue ({}/{})", marker.resumes, MAX_RESUMES)).await;
+            }
+            None => {
+                if let Err(e) = NightMarker::new(self.now(), config.time_range.duration_hours).save(marker_path) {
+                    warn!("Orchestrator: cannot write night marker: {}", e);
+                }
+            }
+        }
+        resumed_session
+    }
+
+    /// Log the system clock (critical for diagnosis without screen).
+    async fn log_start_clock(&self) {
+        let sys_now = self.now();
+        let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
+        info!("Orchestrator: {}", clock_msg);
+        self.log(&clock_msg).await;
+
+        // Warn if the clock looks like epoch (Pi without NTP)
+        if sys_now.year() < 2024 {
+            let warn_msg = "[!] Horloge systeme < 2024 - NTP non synchronise ? La plage horaire peut ne pas fonctionner.";
+            warn!("Orchestrator: {}", warn_msg);
+            self.log(warn_msg).await;
+        }
+    }
+
+    /// Time-range mode: wait for the start of the night. A Pi that can wake
+    /// itself (Pi 5) powers off and wakes up just before, rather than idling
+    /// for hours (the marker resumes the night). `false`: nothing more to do
+    /// (stop requested, or powered off until the night).
+    async fn wait_for_night(&self, config: &AppConfig) -> bool {
+        if config.time_range.duration_hours.is_some() {
+            return true;
+        }
+        let range = TimeRange { start: config.time_range.start, end: config.time_range.end };
+        let mut logged_wait = false;
+        loop {
+            if self.is_shutdown().await {
+                return false;
+            }
+            let now = self.now();
+            match before_night(now, &range, self.system.can_wake()) {
+                BeforeNight::Start => break,
+                BeforeNight::Sleep { wake, hours } => {
+                    if self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await.is_ok() {
+                        self.log(&format!("Nuit dans {} h : extinction, réveil programmé à {}", hours, wake.format("%H:%M"))).await;
+                        self.set_phase(Phase::Shutdown).await;
+                        let _ = self.storage.sync().await;
+                        if let Err(e) = self.system.shutdown().await {
+                            error!("Orchestrator: shutdown before the night failed: {}", e);
+                        }
+                        return false;
+                    }
+                }
+                BeforeNight::Wait => {}
+            }
+            if !logged_wait {
+                let msg = format!(
+                    "Attente plage horaire ({} -> {}) | heure actuelle: {}",
+                    config.time_range.start, config.time_range.end,
+                    now.format("%H:%M:%S")
+                );
+                info!("Orchestrator: {}", msg);
+                self.log(&msg).await;
+                logged_wait = true;
+            }
+            sleep(Duration::from_secs(60)).await;
+        }
+        let start_msg = format!("Plage horaire atteinte - demarrage capture ({} -> {})",
+            config.time_range.start, config.time_range.end);
+        self.log(&start_msg).await;
+        info!("Orchestrator: {}", start_msg);
+        true
+    }
+
+    /// USB storage: write-first check with auto-mount. Don't rely on
+    /// `mountpoint -q` (can lie): try a real write, and if it fails,
+    /// (re)mount and retry. The night goes on either way.
+    async fn check_key_writable(&self, config: &AppConfig, configured_path: &Path) {
+        let probe_path = configured_path.join(".aurion_probe");
+        let probe = || {
+            std::fs::create_dir_all(configured_path).is_ok() && std::fs::write(&probe_path, b"ok").is_ok() && {
+                let _ = std::fs::remove_file(&probe_path);
+                true
+            }
+        };
+
+        // First attempt: direct write (USB already mounted via fstab/boot)
+        if probe() {
+            self.log(&format!("USB accessible: {}", config.storage.mount_point)).await;
+            return;
+        }
+
+        // Second attempt: try to (re)mount then retry
+        warn!("Orchestrator: direct write failed, attempting mount...");
+        self.log("USB: montage en cours...").await;
+        let _ = self.storage.mount().await; // ignore if already mounted
+        sleep(Duration::from_secs(3)).await;
+        if probe() {
+            self.log(&format!("USB monte et accessible: {}", config.storage.mount_point)).await;
+            return;
+        }
+
+        // Clear warning: the session continues and will try to write anyway
+        // (write may still succeed if permissions allow)
+        let msg = format!(
+            "[!] USB ({}) non accessible en ecriture - la session va tenter de continuer",
+            config.storage.mount_point
+        );
+        warn!("Orchestrator: {}", msg);
+        self.log(&msg).await;
+    }
+
+    /// Session logs and night folder on the key (a resumed night continues
+    /// in its folder). Leftovers of a power cut are removed.
+    async fn open_night_files(&self, storage_path: &Path, resumed_session: Option<&str>, marker_path: &Path) -> NightFiles {
+        let opened = match resumed_session {
             Some(name) => SessionLogger::open_named(storage_path, name, self.now()),
             None => SessionLogger::new_at(storage_path, self.now()),
         };
-        let mut session_logger = match opened {
+        let logger = match opened {
             Ok(l) => {
                 info!("Orchestrator: session logger at {:?}", l.session_path());
                 Some(l)
@@ -253,8 +315,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
         };
 
-        // ─── Night folder on the key ────────────────────────
-        let night_name = session_logger
+        let night_name = logger
             .as_ref()
             .and_then(|l| l.session_path().file_name().map(|n| n.to_string_lossy().to_string()));
         let night_layout = night_name.as_deref().map(NightLayout::night).unwrap_or_else(NightLayout::root);
@@ -266,40 +327,41 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
         }
         // The marker remembers the folder so a resumed night continues in it
-        if let (Some(name), Some(mut m)) = (&night_name, NightMarker::load(&marker_path)) {
+        if let (Some(name), Some(mut m)) = (&night_name, NightMarker::load(marker_path)) {
             if m.session.as_deref() != Some(name.as_str()) {
                 m.session = Some(name.clone());
-                let _ = m.save(&marker_path);
+                let _ = m.save(marker_path);
             }
         }
+        NightFiles { logger, name: night_name, layout: night_layout, path: night_path }
+    }
 
-        let is_safe_mode = !config.detection.detection_capture_enabled;
-        let capture_mode_str = if is_safe_mode { "SAFE" } else { "FILTER" };
-        self.log(&format!("Mode: {}", capture_mode_str)).await;
-        // Dump effective config to session.log so we can verify from SSH next morning
-        if let Some(ref mut sl) = session_logger {
-            sl.log_text("=== CONFIG EFFECTIVE ===");
-            sl.log_text(&format!("Mode: {}", capture_mode_str));
-            sl.log_text(&format!("Format: {:?}", config.capture.output_format));
-            sl.log_text(&format!("Intervalle: {}s", config.capture.capture_interval_secs));
-            sl.log_text(&format!("Plage: {} -> {}", config.time_range.start, config.time_range.end));
-            sl.log_text(&format!("Minuteur: {:?}h", config.time_range.duration_hours));
-            sl.log_text(&format!("detection_capture_enabled: {}", config.detection.detection_capture_enabled));
-            sl.log_text(&format!("Mount point: {}", config.storage.mount_point));
-            sl.log_text("=======================");
-        }
+    /// Mode, and the effective config in session.log (checked the next
+    /// morning without a screen).
+    async fn log_effective_config(&self, config: &AppConfig, files: &mut NightFiles, mode: &str) {
+        self.log(&format!("Mode: {}", mode)).await;
+        files.text("=== CONFIG EFFECTIVE ===");
+        files.text(&format!("Mode: {}", mode));
+        files.text(&format!("Format: {:?}", config.capture.output_format));
+        files.text(&format!("Intervalle: {}s", config.capture.capture_interval_secs));
+        files.text(&format!("Plage: {} -> {}", config.time_range.start, config.time_range.end));
+        files.text(&format!("Minuteur: {:?}h", config.time_range.duration_hours));
+        files.text(&format!("detection_capture_enabled: {}", config.detection.detection_capture_enabled));
+        files.text(&format!("Mount point: {}", config.storage.mount_point));
+        files.text("=======================");
+    }
 
-        // ─── CALIBRATION: 3 frames to stabilize exposure ────
-        // Use /tmp for calibration captures — USB may be slow at startup
-        // and calibration frames are never saved to disk.
+    /// CALIBRATION: 3 frames to stabilize exposure. Captured in /tmp (the
+    /// USB key may be slow at startup), never saved.
+    async fn calibrate(&self, config: &AppConfig, exposure: &mut ExposureController, files: &mut NightFiles) {
         let tmp_path = Path::new("/tmp");
         info!("Orchestrator: calibrating exposure (3 frames)...");
         for i in 0..3 {
-            match self.camera.capture_jpg(&exposure_ctrl.current(), tmp_path).await {
+            match self.camera.capture_jpg(&exposure.current(), tmp_path).await {
                 Ok(frame) => {
                     let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
                     let hist = compute_histogram(roi_data);
-                    let settings = exposure_ctrl.update(&hist, Phase::Calibration);
+                    let settings = exposure.update(&hist, Phase::Calibration);
                     info!(
                         "Orchestrator: calibration {}/3 → ISO {} / {}µs",
                         i + 1, settings.iso, settings.shutter_us
@@ -312,274 +374,125 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
         }
 
-        let settings = exposure_ctrl.current();
+        let settings = exposure.current();
         let calib_msg = format!("Calibration done: ISO {} / {}µs", settings.iso, settings.shutter_us);
         self.log(&calib_msg).await;
-        if let Some(ref mut sl) = session_logger { sl.log_text(&calib_msg); }
+        files.text(&calib_msg);
+    }
 
-        // ─── Transition based on mode ───────────────────────
+    /// SAFE mode captures all night (RUN), FILTER mode watches for an aurora.
+    async fn enter_first_phase(&self, is_safe_mode: bool, sm: &mut StateMachine, files: &mut NightFiles) {
+        let phase = first_phase(is_safe_mode);
+        sm.set_phase(phase);
+        self.set_phase(phase).await;
         if is_safe_mode {
             info!("Orchestrator: SAFE mode → Run directly");
-            sm.set_phase(Phase::Run);
-            self.set_phase(Phase::Run).await;
             self.power_profile(PowerProfile::Capture).await;
             self.log("Phase: RUN (SAFE mode — capture toute la nuit)").await;
-            if let Some(ref mut sl) = session_logger { sl.log_text("Phase: RUN (SAFE mode)"); }
+            files.text("Phase: RUN (SAFE mode)");
         } else {
             info!("Orchestrator: FILTER mode → Watch");
-            sm.set_phase(Phase::Watch);
-            self.set_phase(Phase::Watch).await;
             self.power_profile(PowerProfile::Watch).await;
             self.log("Phase: WATCH (FILTER mode — attente détection)").await;
-            if let Some(ref mut sl) = session_logger { sl.log_text("Phase: WATCH (FILTER mode)"); }
+            files.text("Phase: WATCH (FILTER mode)");
         }
+    }
 
-        // ─── Compute deadline (timer vs time-range mode) ────
-        let deadline: Option<chrono::NaiveTime> = if let Some(hours) = config.time_range.duration_hours {
-            // Timer mode: run for N hours from now
-            let secs = (hours * 3600.0) as i64;
-            let end = self.now() + chrono::Duration::seconds(secs);
-            let msg = format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"));
-            self.log(&msg).await;
-            if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
-            Some(end.time())
+    /// End of the night: timer (N hours from now) or time range.
+    async fn log_night_mode(&self, config: &AppConfig, files: &mut NightFiles) {
+        let msg = if let Some(hours) = config.time_range.duration_hours {
+            let end = self.now() + chrono::Duration::seconds((hours * 3600.0) as i64);
+            format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"))
         } else {
-            // Time range mode: use configured end time
-            let msg = format!("Mode plage horaire: {} → {}", config.time_range.start, config.time_range.end);
-            self.log(&msg).await;
-            if let Some(ref mut sl) = session_logger { sl.log_text(&msg); }
-            None
+            format!("Mode plage horaire: {} → {}", config.time_range.start, config.time_range.end)
         };
+        self.log(&msg).await;
+        files.text(&msg);
+    }
 
-        // ─── Main capture loop ──────────────────────────────
-        let mut consecutive_detections = 0u32;
-        let mut stacker: Option<Stacker> = None;
-        let mut iterations = 0u64;
-        // A resumed night continues the numbering (timelapse order kept)
-        let mut frame_number = night_path.as_deref().and_then(layout::max_frame_number).map(|n| n + 1).unwrap_or(0);
-        // Settings of the saved frames: the darks are taken at their average
-        let mut night_stats = NightStats::new();
-        let mut last_aurora_at: Option<chrono::DateTime<chrono::Local>> = None;
-        let mut consecutive_io_errors = 0u32;
-        let loop_start = self.now();
-        let mut has_started_range = false;
-        let mut wait_iters = 0u64;
-        let mut interrupted = false;
-
+    /// The capture loop, until the end of the night. `true` when stopped
+    /// from outside (power watch, systemd): the night can be resumed.
+    async fn capture_loop(&self, config: &AppConfig, files: &mut NightFiles, night: &mut NightLoop, mode: &str) -> bool {
         loop {
             // Check for external shutdown signal
             if self.is_shutdown().await {
                 info!("Orchestrator: shutdown signal received");
-                interrupted = true;
-                break;
+                return true;
             }
 
-            // Check time limit
             let now = self.now();
-            let mut should_stop = false;
-            let mut wait_for_start = false;
-
-            if let Some(_dl) = deadline {
-                let elapsed = now.signed_duration_since(loop_start);
-                let max_duration = config.time_range.duration_hours.unwrap_or(0.0);
-                should_stop = elapsed.num_seconds() >= (max_duration * 3600.0) as i64;
-            } else {
-                let time_range = TimeRange {
-                    start: config.time_range.start,
-                    end: config.time_range.end,
-                };
-                if time_range.contains(now.time()) {
-                    has_started_range = true;
-                } else {
-                    if has_started_range {
-                        // We were in the range, and now we exited -> STOP
-                        should_stop = true;
-                    } else {
-                        // Not in range, and haven't started yet -> WAIT
-                        wait_for_start = true;
-                    }
-                }
-            };
-
-            if wait_for_start {
-                if wait_iters.is_multiple_of(30) {
+            let window = night.window.check(now);
+            if window == WindowState::Wait {
+                if night.wait_iters.is_multiple_of(30) {
                     let wait_msg = format!(
                         "Attente du début de plage (actuel: {}, début: {})",
                         now.format("%H:%M:%S"), config.time_range.start
                     );
                     info!("Orchestrator: {}", wait_msg);
                     self.log(&wait_msg).await;
-                    if let Some(ref mut sl) = session_logger { sl.log_text(&wait_msg); }
+                    files.text(&wait_msg);
                 }
-                wait_iters += 1;
+                night.wait_iters += 1;
                 sleep(Duration::from_secs(10)).await;
                 continue;
             }
 
             // Log each loop iteration so we can trace from session.log
-            {
-                let iter_msg = format!(
-                    "[loop] heure={} phase={:?} should_stop={}",
-                    now.format("%H:%M:%S"), sm.phase(), should_stop
-                );
-                info!("Orchestrator: {}", iter_msg);
-                if let Some(ref mut sl) = session_logger { sl.log_text(&iter_msg); }
-            }
+            let should_stop = window == WindowState::Stop;
+            let iter_msg = format!(
+                "[loop] heure={} phase={:?} should_stop={}",
+                now.format("%H:%M:%S"), night.sm.phase(), should_stop
+            );
+            info!("Orchestrator: {}", iter_msg);
+            files.text(&iter_msg);
 
             if should_stop {
                 let stop_msg = format!("Heure de fin de plage atteinte ({}) — arret capture", now.format("%H:%M:%S"));
                 info!("Orchestrator: {}", stop_msg);
                 self.log(&stop_msg).await;
-                if let Some(ref mut sl) = session_logger { sl.log_text(&stop_msg); }
-                break;
+                files.text(&stop_msg);
+                return false;
             }
 
-            // Check storage — log result, don't silently abort
-            if let Ok(info) = self.storage.info() {
-                let status = info.status(
-                    config.storage.warning_percent as f64,
-                    config.storage.critical_percent as f64,
-                );
-                let storage_msg = format!("[storage] libre={:.1}% ({} octets) statut={:?}", info.free_percent(), info.free_bytes, status);
-                if let Some(ref mut sl) = session_logger { sl.log_text(&storage_msg); }
-                
-                // Hard limit: < 50MB free triggers an immediate OS shutdown to prevent FS corruption
-                if info.free_bytes < 50_000_000 {
-                    let msg = "Stockage critique (< 50Mo restants) — Arrêt système immédiat";
-                    self.log(msg).await;
-                    if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
-                    break;
-                } else if status == crate::core::models::StorageStatus::Critical {
-                    let msg = "Stockage critique (seuil %) — Arrêt session";
-                    self.log(msg).await;
-                    if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
-                    break;
-                }
-            } else {
-                // df failed — USB may not be mounted, log it
-                let msg = "[storage] df echoue - USB inaccessible ?";
-                if let Some(ref mut sl) = session_logger { sl.log_text(msg); }
-                warn!("Orchestrator: {}", msg);
+            if !self.check_storage(config, files).await {
+                return false;
             }
 
-            let current_phase = sm.phase();
-            let exposure = exposure_ctrl.current();
+            let current_phase = night.sm.phase();
+            let exposure = night.exposure.current();
+            let (live_capture_interval, live_watch_interval) = self.live_intervals(&mut night.detector).await;
 
-            // ─── Live config (hot-reload of mutable params) ─────
-            // Re-read only the parameters that are safe to change mid-session:
-            //   - capture_interval_secs / watch_interval_secs
-            //   - detection thresholds (sensitivity, ROI, etc.)
-            // Immutable params (mount_point, output_format, time_range) use the snapshot.
-            let live_cfg: AppConfig = self.state.config.read().await.clone();
-            detector.update_config(&live_cfg.detection);
-            // 0 = next photo right after this one (the exposure sets the pace)
-            let live_capture_interval = live_cfg.capture.capture_interval_secs;
-            let live_watch_interval = live_cfg.capture.watch_interval_secs.max(5);
-            drop(live_cfg);
-
-            // ─── Capture frame (format-aware, single capture) ──
-            // In RAW mode: capture_raw_and_jpg() returns (raw_frame, jpg_frame)
-            //   → jpg_frame used for analysis (exposure + detection)
-            //   → raw_frame saved to storage (no second capture)
-            // In JPG mode: capture_jpg() for analysis + save
-            // Camera always writes temp files to /tmp, not the USB drive.
-            // Watching the sky (FILTER mode, nothing saved): a JPEG is enough,
-            // no RAW readout / DNG writing for a frame that is thrown away.
-            let wants_raw = current_phase == Phase::Run && config.capture.output_format.captures_raw();
+            let wants_raw = captures_raw_now(current_phase, config.capture.output_format);
             let capture_started = tokio::time::Instant::now();
-            let (analysis_frame, raw_frame_opt): (CaptureFrame, Option<CaptureFrame>) =
-                match wants_raw {
-                    false => {
-                        match self.camera.capture_jpg(&exposure, Path::new("/tmp")).await {
-                            Ok(f) => { consecutive_io_errors = 0; (f, None) }
-                            Err(e) => {
-                                consecutive_io_errors += 1;
-                                let fail_msg = format!("CAPTURE ECHEC JPG: {} ({}/5)", e, consecutive_io_errors);
-                                error!("Orchestrator: {}", fail_msg);
-                                self.log(&format!("Capture echouee: {} ({}/5)", e, consecutive_io_errors)).await;
-                                if let Some(ref mut sl) = session_logger { sl.log_text(&fail_msg); }
-                                if consecutive_io_errors >= 5 {
-                                    let rec_msg = "5 erreurs consecutives - pause 5min";
-                                    self.log(rec_msg).await;
-                                    if let Some(ref mut sl) = session_logger { sl.log_text(rec_msg); }
-                                    warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
-                                    sleep(Duration::from_secs(300)).await;
-                                    consecutive_io_errors = 0;
-                                }
-                                sleep(Duration::from_secs(5)).await;
-                                continue;
-                            }
-                        }
-                    }
-                    true => {
-                        // Single capture: returns (dng_frame, jpg_frame)
-                        match self.camera.capture_raw_and_jpg(&exposure, Path::new("/tmp")).await {
-                            Ok((raw, jpg)) => { consecutive_io_errors = 0; (jpg, Some(raw)) }
-                            Err(e) => {
-                                consecutive_io_errors += 1;
-                                let fail_msg = format!("CAPTURE ECHEC RAW: {} ({}/5)", e, consecutive_io_errors);
-                                error!("Orchestrator: {}", fail_msg);
-                                self.log(&format!("Capture RAW echouee: {} ({}/5)", e, consecutive_io_errors)).await;
-                                if let Some(ref mut sl) = session_logger { sl.log_text(&fail_msg); }
-                                if consecutive_io_errors >= 5 {
-                                    let rec_msg = "5 erreurs RAW consecutives - pause 5min";
-                                    self.log(rec_msg).await;
-                                    if let Some(ref mut sl) = session_logger { sl.log_text(rec_msg); }
-                                    warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
-                                    sleep(Duration::from_secs(300)).await;
-                                    consecutive_io_errors = 0;
-                                }
-                                sleep(Duration::from_secs(5)).await;
-                                continue;
-                            }
-                        }
-                    }
-                };
+            let Some((analysis_frame, raw_frame)) = self.capture(wants_raw, &exposure, &mut night.failures, files).await else {
+                continue;
+            };
             let capture_ms = capture_started.elapsed().as_millis() as u64;
-            let frame = &analysis_frame;
 
-            // ─── Exposure update (metering on the sky ROI only) ─
-            let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
-            let hist = compute_histogram(roi_data);
-            // Timelapse: optionally freeze the exposure once capturing
-            // (zero flicker; ramping can be done in post-processing).
-            if !(current_phase == Phase::Run && config.exposure.lock_in_run) {
-                exposure_ctrl.update(&hist, current_phase);
-            }
-
-            // ─── Detection ──────────────────────────────────
-            // The detector extracts the ROI itself: give it the full frame
-            // (passing the already-cropped ROI used to shrink the analysed
-            // area to roi² — e.g. 65 % × 65 % = 42 % of the sky).
-            let det_result = detector.analyze(&frame.data, frame.width, frame.height);
+            let det_result = night.analyze(&analysis_frame, config, current_phase);
 
             // ─── Session logging ────────────────────────────
-            if let Some(ref mut logger) = session_logger {
-                let event = SessionEvent {
+            if let Some(ref mut logger) = files.logger {
+                let event = night_event(NightEventInput {
                     timestamp: self.now().format("%Y-%m-%dT%H:%M:%S").to_string(),
-                    phase: format!("{:?}", current_phase),
-                    capture_mode: capture_mode_str.to_string(),
-                    exposure_us: exposure.shutter_us,
-                    iso: exposure.iso,
-                    format: format!("{:?}", config.capture.output_format),
-                    roi_excluded_percent: 100 - config.detection.roi_top_percent,
-                    aurora_score: det_result.aurora_score,
-                    aurora_detected: det_result.detected,
-                    aurora_color: det_result.aurora_color.to_string(),
-                    consecutive_hits: consecutive_detections,
-                    moon_mask_active: det_result.moon_masked,
-                    frame_number: (current_phase == Phase::Run).then_some(frame_number),
-                    capture_ms: Some(capture_ms),
-                };
+                    config,
+                    mode,
+                    phase: current_phase,
+                    exposure: &exposure,
+                    detection: &det_result,
+                    consecutive_hits: night.confirmation.hits(),
+                    frame_number: night.frame_number,
+                    capture_ms,
+                });
                 if let Err(e) = logger.log_event(&event) {
                     warn!("Orchestrator: log event failed: {}", e);
                 }
             }
 
             // ─── Power-cut safety: push the logs to the USB key every ~6 frames ─
-            iterations += 1;
-            if iterations.is_multiple_of(6) {
-                if let Some(ref mut sl) = session_logger {
+            night.iterations += 1;
+            if night.iterations.is_multiple_of(6) {
+                if let Some(ref mut sl) = files.logger {
                     if let Err(e) = sl.flush() {
                         warn!("Orchestrator: session log sync failed: {}", e);
                     }
@@ -588,95 +501,173 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
             // ─── Phase-specific logic ───────────────────────
             match current_phase {
-                Phase::Watch => {
-                    // FILTER mode: waiting for aurora
-                    if det_result.detected {
-                        consecutive_detections += 1;
-                        info!(
-                            "Orchestrator: aurora detected ({}/{}) score={:.2} color={}",
-                            consecutive_detections, config.detection.consecutive_required,
-                            det_result.aurora_score, det_result.aurora_color
-                        );
-                        if consecutive_detections >= config.detection.consecutive_required {
-                            info!("Orchestrator: aurora CONFIRMED → RUN");
-                            sm.set_phase(Phase::Run);
-                            self.set_phase(Phase::Run).await;
-                            self.power_profile(PowerProfile::Capture).await;
-                            self.log("🌌 Aurore confirmée → capture intensive!").await;
-                        }
-                    } else {
-                        consecutive_detections = 0;
-                    }
-
-                    // Watch interval (hot-reloadable)
-                    sleep(Duration::from_secs(live_watch_interval)).await;
-                }
-
+                Phase::Watch => self.watch_step(config, night, &det_result, live_watch_interval).await,
                 Phase::Run => {
-                    // Save the captured frame (NO double capture — raw_frame_opt already holds the DNG)
-                    if det_result.detected {
-                        last_aurora_at = Some(self.now());
-                    }
-                    let keep_raw = match config.capture.output_format {
-                        OutputFormat::JpgAuroraRaw => last_aurora_at
-                            .is_some_and(|t| (self.now() - t).num_seconds() <= AURORA_RAW_HOLD_SECS),
-                        f => f.captures_raw(),
-                    };
-                    let raw = raw_frame_opt.as_ref().filter(|_| keep_raw);
-                    self.save_frame(&config, &night_layout, &analysis_frame, raw, frame_number, det_result.detected, &mut stacker).await;
-                    frame_number += 1;
-                    night_stats.add(exposure.iso, exposure.shutter_us, self.system.temperature_c());
-
-                    // In FILTER mode during Run, if detection drops we keep capturing
-                    // (conservative: don't stop on momentary gaps)
-
+                    let shot = Shot { frame: &analysis_frame, raw: raw_frame.as_ref(), detected: det_result.detected, exposure: &exposure };
+                    self.run_step(config, files, night, shot).await;
                     // Wait for configured capture interval (hot-reloadable timelapse pacing)
-                    if live_capture_interval > 0 {
-                        sleep(Duration::from_secs(live_capture_interval as u64)).await;
-                    } else {
-                        // Back to back. Safety net: a camera answering instantly
-                        // (fault) must not make the loop spin on the CPU.
-                        let spent = capture_started.elapsed();
-                        if spent < Duration::from_secs(1) {
-                            sleep(Duration::from_secs(1) - spent).await;
-                        }
+                    if let Some(pause) = run_pause(live_capture_interval, capture_started.elapsed()) {
+                        sleep(pause).await;
                     }
                 }
-
                 _ => {
                     // Should not happen but handle gracefully
                     sleep(Duration::from_secs(1)).await;
                 }
             }
         }
+    }
 
-        // ─── SHUTDOWN ───────────────────────────────────────
+    /// Free space on the key: logged every frame; `false` stops the night
+    /// before the file system gets full.
+    async fn check_storage(&self, config: &AppConfig, files: &mut NightFiles) -> bool {
+        let Ok(info) = self.storage.info() else {
+            // df failed — USB may not be mounted, log it
+            let msg = "[storage] df echoue - USB inaccessible ?";
+            files.text(msg);
+            warn!("Orchestrator: {}", msg);
+            return true;
+        };
+        let status = info.status(
+            config.storage.warning_percent as f64,
+            config.storage.critical_percent as f64,
+        );
+        let storage_msg = format!("[storage] libre={:.1}% ({} octets) statut={:?}", info.free_percent(), info.free_bytes, status);
+        files.text(&storage_msg);
+
+        let msg = match storage_verdict(info.free_bytes, status) {
+            StorageVerdict::Continue => return true,
+            StorageVerdict::StopNearlyFull => "Stockage critique (< 50Mo restants) — Arrêt système immédiat",
+            StorageVerdict::StopCritical => "Stockage critique (seuil %) — Arrêt session",
+        };
+        self.log(msg).await;
+        files.text(msg);
+        false
+    }
+
+    /// Live config (hot-reload of mutable params): capture and watch
+    /// intervals, detection thresholds (sensitivity, ROI…). Immutable params
+    /// (mount_point, output_format, time_range) use the snapshot.
+    async fn live_intervals(&self, detector: &mut AuroraDetector) -> (u32, u64) {
+        let live_cfg: AppConfig = self.state.config.read().await.clone();
+        detector.update_config(&live_cfg.detection);
+        // 0 = next photo right after this one (the exposure sets the pace)
+        (live_cfg.capture.capture_interval_secs, live_cfg.capture.watch_interval_secs.max(5))
+    }
+
+    /// One capture, format-aware. With RAW: a single capture returns the DNG
+    /// (saved) and the JPEG (analysis). Temp files go to /tmp, not the key.
+    /// `None` after a failure (logged, with a 5 min pause after 5 in a row).
+    async fn capture(
+        &self,
+        wants_raw: bool,
+        exposure: &ExposureSettings,
+        failures: &mut CameraFailures,
+        files: &mut NightFiles,
+    ) -> Option<(CaptureFrame, Option<CaptureFrame>)> {
+        let result = if wants_raw {
+            self.camera.capture_raw_and_jpg(exposure, Path::new("/tmp")).await.map(|(raw, jpg)| (jpg, Some(raw)))
+        } else {
+            self.camera.capture_jpg(exposure, Path::new("/tmp")).await.map(|f| (f, None))
+        };
+        let e = match result {
+            Ok(frames) => {
+                failures.success();
+                return Some(frames);
+            }
+            Err(e) => e,
+        };
+        let n = failures.failure();
+        let (kind, label, pause_msg) = if wants_raw {
+            ("RAW", "Capture RAW echouee", "5 erreurs RAW consecutives - pause 5min")
+        } else {
+            ("JPG", "Capture echouee", "5 erreurs consecutives - pause 5min")
+        };
+        let fail_msg = format!("CAPTURE ECHEC {}: {} ({}/{})", kind, e, n, MAX_CAMERA_FAILURES);
+        error!("Orchestrator: {}", fail_msg);
+        self.log(&format!("{}: {} ({}/{})", label, e, n, MAX_CAMERA_FAILURES)).await;
+        files.text(&fail_msg);
+        if failures.needs_pause() {
+            self.log(pause_msg).await;
+            files.text(pause_msg);
+            warn!("Orchestrator: 5 consecutive camera errors → pausing 5min for auto-recovery");
+            sleep(Duration::from_secs(300)).await;
+            failures.reset();
+        }
+        sleep(Duration::from_secs(5)).await;
+        None
+    }
+
+    /// WATCH (FILTER mode): switch to RUN once the aurora is confirmed on
+    /// consecutive frames, then wait for the watch interval.
+    async fn watch_step(&self, config: &AppConfig, night: &mut NightLoop, det: &DetectionResult, interval_secs: u64) {
+        let confirmed = night.confirmation.observe(det.detected);
+        if det.detected {
+            info!(
+                "Orchestrator: aurora detected ({}/{}) score={:.2} color={}",
+                night.confirmation.hits(), config.detection.consecutive_required,
+                det.aurora_score, det.aurora_color
+            );
+        }
+        if confirmed {
+            info!("Orchestrator: aurora CONFIRMED → RUN");
+            night.sm.set_phase(Phase::Run);
+            self.set_phase(Phase::Run).await;
+            self.power_profile(PowerProfile::Capture).await;
+            self.log("🌌 Aurore confirmée → capture intensive!").await;
+        }
+        sleep(Duration::from_secs(interval_secs)).await;
+    }
+
+    /// RUN: save the frame already captured (no second capture). A drop in
+    /// detection never stops the capture (momentary gaps are common).
+    async fn run_step(
+        &self,
+        config: &AppConfig,
+        files: &NightFiles,
+        night: &mut NightLoop,
+        shot: Shot<'_>,
+    ) {
+        if shot.detected {
+            night.last_aurora_at = Some(self.now());
+        }
+        let raw = shot.raw.filter(|_| keeps_raw(config.capture.output_format, night.last_aurora_at, self.now()));
+        self.save_frame(config, &files.layout, shot.frame, raw, night.frame_number, shot.detected, &mut night.stacker).await;
+        night.frame_number += 1;
+        night.stats.add(shot.exposure.iso, shot.exposure.shutter_us, self.system.temperature_c());
+    }
+
+    /// SHUTDOWN: close the logs, write the aurora index, forget or keep the
+    /// marker, leave the darks reminder, program the next wake-up (expedition),
+    /// sync and power off.
+    async fn finish_night(&self, config: &AppConfig, files: NightFiles, stats: NightStats, marker_path: &Path, interrupted: bool) {
         info!("Orchestrator: entering shutdown sequence");
         self.set_phase(Phase::Shutdown).await;
         self.log("Phase: SHUTDOWN").await;
 
+        let NightFiles { mut logger, name, path, .. } = files;
+
         // Darks reminder shown on the home screen at the next power-on
         let dark_path = self.state.paths.dark_reminder.clone();
-        if let Some(reminder) = night_stats.reminder(night_name.clone(), self.now().timestamp_millis()) {
+        if let Some(reminder) = stats.reminder(name, self.now().timestamp_millis()) {
             let reminder = reminder.merge(DarkReminder::load(&dark_path));
             let summary = reminder.summary();
             if let Err(e) = reminder.save(&dark_path) {
                 warn!("Orchestrator: cannot write the darks reminder: {}", e);
             }
-            if let Some(ref mut sl) = session_logger {
+            if let Some(ref mut sl) = logger {
                 sl.log_text(&summary);
             }
             self.log(&summary).await;
         }
 
-        if let Some(ref mut sl) = session_logger {
+        if let Some(mut sl) = logger {
             sl.log_text("Fin de session");
             let _ = sl.flush();
         }
-        drop(session_logger);
 
         // Spreadsheet of the auroras of the night (rewritten after a resume)
-        if let Some(ref dir) = night_path {
+        if let Some(ref dir) = path {
             match layout::write_aurora_index(dir) {
                 Ok(n) => self.log(&format!("aurores.csv : {} image(s) avec aurore", n)).await,
                 Err(e) => warn!("Orchestrator: aurores.csv: {}", e),
@@ -686,13 +677,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // Night finished normally: nothing to resume at next boot. An
         // external stop (power watch, systemd) keeps the marker.
         if !interrupted {
-            NightMarker::remove(&marker_path);
+            NightMarker::remove(marker_path);
         }
 
         // Expedition: a Raspberry Pi 5 wakes itself up for the next night
         if !interrupted && config.expedition.enabled {
             if config.time_range.duration_hours.is_none() && self.system.can_wake() {
-                let wake = next_occurrence(self.now(), config.time_range.start) - chrono::Duration::seconds(WAKE_LEAD_SECS);
+                let wake = wake_before(self.now(), config.time_range.start);
                 match self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await {
                     Ok(()) => self.log(&format!("Expédition : réveil programmé le {}", wake.format("%d/%m à %H:%M"))).await,
                     Err(e) => self.log(&format!("Expédition : réveil automatique impossible ({})", e)).await,
@@ -713,8 +704,6 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         if let Err(e) = self.system.shutdown().await {
             error!("Orchestrator: system shutdown failed: {}", e);
         }
-
-        Ok(())
     }
 
     /// Save a captured frame to storage.
@@ -1009,6 +998,288 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     }
 }
 
+// ─── Steps of the night: state and decisions ──────────────────────────
+// The decisions of the capture loop are plain functions and small types,
+// tested on their own below; the orchestrator only wires them to the ports.
+
+/// Session logs and night folder on the key.
+struct NightFiles {
+    logger: Option<SessionLogger>,
+    /// Folder name of the night (`None` without a session logger).
+    name: Option<String>,
+    layout: NightLayout,
+    /// `sessions/<night>`; `None` without a session logger.
+    path: Option<PathBuf>,
+}
+
+impl NightFiles {
+    /// Line in session.log (nothing without a logger).
+    fn text(&mut self, msg: &str) {
+        if let Some(ref mut sl) = self.logger {
+            sl.log_text(msg);
+        }
+    }
+}
+
+/// One capture of the loop, as the RUN step saves it.
+struct Shot<'a> {
+    /// JPEG used for analysis (and saved as JPEG).
+    frame: &'a CaptureFrame,
+    /// DNG of the same capture, when the camera produced one.
+    raw: Option<&'a CaptureFrame>,
+    detected: bool,
+    exposure: &'a ExposureSettings,
+}
+
+/// Everything the capture loop keeps from one frame to the next.
+struct NightLoop {
+    sm: StateMachine,
+    exposure: ExposureController,
+    detector: AuroraDetector,
+    confirmation: AuroraConfirmation,
+    stacker: Option<Stacker>,
+    iterations: u64,
+    frame_number: u64,
+    stats: NightStats,
+    last_aurora_at: Option<chrono::DateTime<chrono::Local>>,
+    failures: CameraFailures,
+    window: NightWindow,
+    wait_iters: u64,
+}
+
+impl NightLoop {
+    /// Exposure update (metering on the sky ROI only), then detection.
+    fn analyze(&mut self, frame: &CaptureFrame, config: &AppConfig, phase: Phase) -> DetectionResult {
+        let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
+        let hist = compute_histogram(roi_data);
+        // Timelapse: optionally freeze the exposure once capturing
+        // (zero flicker; ramping can be done in post-processing).
+        if !(phase == Phase::Run && config.exposure.lock_in_run) {
+            self.exposure.update(&hist, phase);
+        }
+        // The detector extracts the ROI itself: give it the full frame
+        // (passing the already-cropped ROI used to shrink the analysed
+        // area to roi² — e.g. 65 % × 65 % = 42 % of the sky).
+        self.detector.analyze(&frame.data, frame.width, frame.height)
+    }
+}
+
+/// Where the night stands at a given moment of the capture loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowState {
+    /// Before the time range (time-range mode only).
+    Wait,
+    Capture,
+    /// Timer elapsed, or time range left after being in it.
+    Stop,
+}
+
+/// The capture window: timer mode (N hours from the start of the loop) or
+/// time-range mode (stops when leaving the range, once it was entered).
+#[derive(Debug, Clone)]
+pub struct NightWindow {
+    timer_secs: Option<i64>,
+    range: TimeRange,
+    start: chrono::DateTime<chrono::Local>,
+    entered: bool,
+}
+
+impl NightWindow {
+    pub fn new(duration_hours: Option<f64>, range: TimeRange, start: chrono::DateTime<chrono::Local>) -> Self {
+        Self { timer_secs: duration_hours.map(|h| (h * 3600.0) as i64), range, start, entered: false }
+    }
+
+    pub fn check(&mut self, now: chrono::DateTime<chrono::Local>) -> WindowState {
+        match self.timer_secs {
+            Some(max) if now.signed_duration_since(self.start).num_seconds() >= max => WindowState::Stop,
+            Some(_) => WindowState::Capture,
+            None if self.range.contains(now.time()) => {
+                self.entered = true;
+                WindowState::Capture
+            }
+            None if self.entered => WindowState::Stop,
+            None => WindowState::Wait,
+        }
+    }
+}
+
+/// Before a time-range night: what to do now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeforeNight {
+    Start,
+    /// Power off and wake up at `wake` (the night starts in `hours` h).
+    Sleep { wake: chrono::DateTime<chrono::Local>, hours: i64 },
+    Wait,
+}
+
+/// Start now, wait, or (a Pi that can wake itself) power off until just
+/// before the night when it starts in more than [`SLEEP_IF_START_IN_SECS`].
+pub fn before_night(now: chrono::DateTime<chrono::Local>, range: &TimeRange, can_wake: bool) -> BeforeNight {
+    if range.contains(now.time()) {
+        return BeforeNight::Start;
+    }
+    let until_start = (next_occurrence(now, range.start) - now).num_seconds();
+    if can_wake && until_start > SLEEP_IF_START_IN_SECS {
+        return BeforeNight::Sleep { wake: wake_before(now, range.start), hours: until_start / 3600 };
+    }
+    BeforeNight::Wait
+}
+
+/// Wake-up time for the next night starting at `start`.
+pub fn wake_before(now: chrono::DateTime<chrono::Local>, start: chrono::NaiveTime) -> chrono::DateTime<chrono::Local> {
+    next_occurrence(now, start) - chrono::Duration::seconds(WAKE_LEAD_SECS)
+}
+
+/// Below this free space the night stops at once, before the file system
+/// gets corrupted by a full disk.
+pub const MIN_FREE_BYTES: u64 = 50_000_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageVerdict {
+    Continue,
+    /// Less than [`MIN_FREE_BYTES`] left.
+    StopNearlyFull,
+    /// Below the configured critical percentage.
+    StopCritical,
+}
+
+pub fn storage_verdict(free_bytes: u64, status: StorageStatus) -> StorageVerdict {
+    if free_bytes < MIN_FREE_BYTES {
+        StorageVerdict::StopNearlyFull
+    } else if status == StorageStatus::Critical {
+        StorageVerdict::StopCritical
+    } else {
+        StorageVerdict::Continue
+    }
+}
+
+/// FILTER mode: an aurora counts once seen on `required` frames in a row.
+#[derive(Debug, Clone)]
+pub struct AuroraConfirmation {
+    required: u32,
+    hits: u32,
+}
+
+impl AuroraConfirmation {
+    pub fn new(required: u32) -> Self {
+        Self { required, hits: 0 }
+    }
+
+    /// Frames in a row with an aurora so far.
+    pub fn hits(&self) -> u32 {
+        self.hits
+    }
+
+    /// Record a frame; `true` when the aurora is confirmed.
+    pub fn observe(&mut self, detected: bool) -> bool {
+        if detected {
+            self.hits += 1;
+            self.hits >= self.required
+        } else {
+            self.hits = 0;
+            false
+        }
+    }
+}
+
+/// Camera failures in a row before a recovery pause.
+pub const MAX_CAMERA_FAILURES: u32 = 5;
+
+#[derive(Debug, Clone, Default)]
+pub struct CameraFailures {
+    count: u32,
+}
+
+impl CameraFailures {
+    pub fn success(&mut self) {
+        self.count = 0;
+    }
+
+    /// Record a failure; returns the number in a row.
+    pub fn failure(&mut self) -> u32 {
+        self.count += 1;
+        self.count
+    }
+
+    pub fn needs_pause(&self) -> bool {
+        self.count >= MAX_CAMERA_FAILURES
+    }
+
+    pub fn reset(&mut self) {
+        self.count = 0;
+    }
+}
+
+/// SAFE mode captures all night, FILTER mode watches first.
+pub fn first_phase(is_safe_mode: bool) -> Phase {
+    if is_safe_mode { Phase::Run } else { Phase::Watch }
+}
+
+/// Watching the sky (nothing saved): a JPEG is enough, no RAW readout nor
+/// DNG writing for a frame that is thrown away.
+pub fn captures_raw_now(phase: Phase, format: OutputFormat) -> bool {
+    phase == Phase::Run && format.captures_raw()
+}
+
+/// Whether the DNG of this frame is kept. `JpgAuroraRaw`: only during an
+/// aurora and [`AURORA_RAW_HOLD_SECS`] after the last detection.
+pub fn keeps_raw(
+    format: OutputFormat,
+    last_aurora_at: Option<chrono::DateTime<chrono::Local>>,
+    now: chrono::DateTime<chrono::Local>,
+) -> bool {
+    match format {
+        OutputFormat::JpgAuroraRaw => last_aurora_at.is_some_and(|t| (now - t).num_seconds() <= AURORA_RAW_HOLD_SECS),
+        f => f.captures_raw(),
+    }
+}
+
+/// Pause after a RUN frame: the configured interval, or back to back
+/// (`0`) with at least 1 s per frame, so that a camera answering instantly
+/// (fault) never makes the loop spin on the CPU.
+pub fn run_pause(interval_secs: u32, spent: Duration) -> Option<Duration> {
+    if interval_secs > 0 {
+        Some(Duration::from_secs(interval_secs as u64))
+    } else if spent < Duration::from_secs(1) {
+        Some(Duration::from_secs(1) - spent)
+    } else {
+        None
+    }
+}
+
+/// What one line of event.jsonl is made of.
+struct NightEventInput<'a> {
+    timestamp: String,
+    config: &'a AppConfig,
+    mode: &'a str,
+    phase: Phase,
+    exposure: &'a ExposureSettings,
+    detection: &'a DetectionResult,
+    consecutive_hits: u32,
+    frame_number: u64,
+    capture_ms: u64,
+}
+
+/// One line of event.jsonl. The frame number only exists in RUN (saved frames).
+fn night_event(i: NightEventInput) -> SessionEvent {
+    SessionEvent {
+        timestamp: i.timestamp,
+        phase: format!("{:?}", i.phase),
+        capture_mode: i.mode.to_string(),
+        exposure_us: i.exposure.shutter_us,
+        iso: i.exposure.iso,
+        format: format!("{:?}", i.config.capture.output_format),
+        roi_excluded_percent: 100 - i.config.detection.roi_top_percent,
+        aurora_score: i.detection.aurora_score,
+        aurora_detected: i.detection.detected,
+        aurora_color: i.detection.aurora_color.to_string(),
+        consecutive_hits: i.consecutive_hits,
+        moon_mask_active: i.detection.moon_masked,
+        frame_number: (i.phase == Phase::Run).then_some(i.frame_number),
+        capture_ms: Some(i.capture_ms),
+    }
+}
+
 /// Result of [`Orchestrator::process_jpeg`].
 struct ProcessedJpeg {
     jpeg: Vec<u8>,
@@ -1069,5 +1340,200 @@ mod tests {
         let cropped = crop_roi(&data, 100, 100, 50);
         // Should return full data since crop would exceed bounds
         assert_eq!(cropped.len(), 30);
+    }
+
+    // ─── Steps of the night ───────────────────────────────
+
+    use chrono::{Local, NaiveTime, TimeZone};
+
+    fn at(h: u32, m: u32) -> chrono::DateTime<Local> {
+        Local.with_ymd_and_hms(2026, 1, 15, h, m, 0).unwrap()
+    }
+
+    fn night_range() -> TimeRange {
+        TimeRange { start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(), end: NaiveTime::from_hms_opt(6, 0, 0).unwrap() }
+    }
+
+    #[test]
+    fn timer_window_stops_after_its_duration() {
+        let mut w = NightWindow::new(Some(0.5), night_range(), at(12, 0));
+        assert_eq!(w.check(at(12, 0)), WindowState::Capture);
+        assert_eq!(w.check(at(12, 29)), WindowState::Capture);
+        assert_eq!(w.check(at(12, 30)), WindowState::Stop);
+    }
+
+    #[test]
+    fn timer_window_ignores_the_time_range() {
+        // Noon is outside 21:00 → 06:00, the timer runs anyway
+        let mut w = NightWindow::new(Some(1.0), night_range(), at(12, 0));
+        assert_eq!(w.check(at(12, 10)), WindowState::Capture);
+    }
+
+    #[test]
+    fn range_window_waits_then_captures_then_stops_on_leaving() {
+        let mut w = NightWindow::new(None, night_range(), at(20, 0));
+        assert_eq!(w.check(at(20, 50)), WindowState::Wait, "before the range, never entered");
+        assert_eq!(w.check(at(21, 0)), WindowState::Capture);
+        assert_eq!(w.check(at(23, 59)), WindowState::Capture);
+        assert_eq!(w.check(Local.with_ymd_and_hms(2026, 1, 16, 5, 59, 0).unwrap()), WindowState::Capture, "overnight");
+        assert_eq!(w.check(Local.with_ymd_and_hms(2026, 1, 16, 6, 1, 0).unwrap()), WindowState::Stop, "left after entering");
+    }
+
+    #[test]
+    fn before_night_starts_inside_the_range() {
+        assert_eq!(before_night(at(22, 0), &night_range(), true), BeforeNight::Start);
+    }
+
+    #[test]
+    fn before_night_sleeps_only_when_the_pi_can_wake_and_the_night_is_far() {
+        let far = at(14, 0); // 7 h before 21:00
+        assert_eq!(
+            before_night(far, &night_range(), true),
+            BeforeNight::Sleep { wake: at(20, 50), hours: 7 }
+        );
+        assert_eq!(before_night(far, &night_range(), false), BeforeNight::Wait, "Pi 4 without wake alarm");
+        let near = at(19, 30); // 1 h 30 before: not worth a power cycle
+        assert_eq!(before_night(near, &night_range(), true), BeforeNight::Wait);
+    }
+
+    #[test]
+    fn wake_up_is_ten_minutes_before_the_next_night() {
+        assert_eq!(wake_before(at(7, 0), NaiveTime::from_hms_opt(21, 0, 0).unwrap()), at(20, 50));
+        // After tonight's start: tomorrow's
+        assert_eq!(
+            wake_before(at(22, 0), NaiveTime::from_hms_opt(21, 0, 0).unwrap()),
+            Local.with_ymd_and_hms(2026, 1, 16, 20, 50, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn storage_stops_before_the_disk_is_full() {
+        assert_eq!(storage_verdict(MIN_FREE_BYTES - 1, StorageStatus::Ok), StorageVerdict::StopNearlyFull);
+        assert_eq!(storage_verdict(MIN_FREE_BYTES, StorageStatus::Critical), StorageVerdict::StopCritical);
+        assert_eq!(storage_verdict(MIN_FREE_BYTES, StorageStatus::Warning), StorageVerdict::Continue);
+        assert_eq!(storage_verdict(u64::MAX, StorageStatus::Ok), StorageVerdict::Continue);
+    }
+
+    #[test]
+    fn aurora_needs_consecutive_frames() {
+        let mut c = AuroraConfirmation::new(3);
+        assert!(!c.observe(true));
+        assert!(!c.observe(true));
+        assert!(!c.observe(false), "a gap starts again");
+        assert_eq!(c.hits(), 0);
+        assert!(!c.observe(true));
+        assert!(!c.observe(true));
+        assert!(c.observe(true));
+        assert_eq!(c.hits(), 3);
+    }
+
+    #[test]
+    fn camera_pause_after_five_failures_in_a_row() {
+        let mut f = CameraFailures::default();
+        for n in 1..MAX_CAMERA_FAILURES {
+            assert_eq!(f.failure(), n);
+            assert!(!f.needs_pause());
+        }
+        f.success();
+        assert_eq!(f.failure(), 1, "a success resets the count");
+        for _ in 1..MAX_CAMERA_FAILURES {
+            f.failure();
+        }
+        assert!(f.needs_pause());
+        f.reset();
+        assert!(!f.needs_pause());
+    }
+
+    #[test]
+    fn safe_mode_captures_at_once_filter_mode_watches() {
+        assert_eq!(first_phase(true), Phase::Run);
+        assert_eq!(first_phase(false), Phase::Watch);
+    }
+
+    #[test]
+    fn raw_is_only_read_out_when_saved() {
+        assert!(!captures_raw_now(Phase::Watch, OutputFormat::RawDng), "watching: JPEG only");
+        assert!(captures_raw_now(Phase::Run, OutputFormat::RawAndJpg));
+        assert!(!captures_raw_now(Phase::Run, OutputFormat::Jpg));
+    }
+
+    #[test]
+    fn aurora_raw_is_kept_during_the_aurora_and_ten_minutes_after() {
+        let now = at(23, 0);
+        let hold = chrono::Duration::seconds(AURORA_RAW_HOLD_SECS);
+        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, None, now), "no aurora yet");
+        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(now), now));
+        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(now - hold), now));
+        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, Some(now - hold - chrono::Duration::seconds(1)), now));
+        assert!(keeps_raw(OutputFormat::RawDng, None, now));
+        assert!(!keeps_raw(OutputFormat::Jpg, Some(now), now));
+    }
+
+    #[test]
+    fn run_pause_follows_the_interval_or_one_second_back_to_back() {
+        assert_eq!(run_pause(10, Duration::from_secs(3)), Some(Duration::from_secs(10)));
+        assert_eq!(run_pause(0, Duration::from_millis(300)), Some(Duration::from_millis(700)), "camera answering instantly");
+        assert_eq!(run_pause(0, Duration::from_secs(8)), None, "long exposure: next photo at once");
+    }
+
+    #[test]
+    fn frame_number_is_logged_for_saved_frames_only() {
+        let config = AppConfig::default();
+        let exposure = ExposureSettings::new(800, 2_000_000);
+        let detection = DetectionResult::negative();
+        let event = |phase| night_event(NightEventInput {
+            timestamp: "2026-01-15T23:00:00".into(),
+            config: &config,
+            mode: "FILTER",
+            phase,
+            exposure: &exposure,
+            detection: &detection,
+            consecutive_hits: 2,
+            frame_number: 42,
+            capture_ms: 1500,
+        });
+        let run = event(Phase::Run);
+        assert_eq!(run.frame_number, Some(42));
+        assert_eq!((run.iso, run.exposure_us, run.consecutive_hits, run.capture_ms), (800, 2_000_000, 2, Some(1500)));
+        assert_eq!(run.roi_excluded_percent, 100 - config.detection.roi_top_percent);
+        assert_eq!(event(Phase::Watch).frame_number, None);
+    }
+
+    #[tokio::test]
+    async fn exposure_lock_freezes_the_exposure_in_run_only() {
+        use crate::adapters::pc::{CameraMock, SkyPattern};
+        let mut config = AppConfig::default();
+        config.exposure.lock_in_run = true;
+        let frame = CameraMock::with_pattern(SkyPattern::Dark)
+            .capture_jpg(&ExposureSettings::new(800, 2_000_000), Path::new("/tmp"))
+            .await
+            .unwrap();
+        let night = |c: &AppConfig| NightLoop {
+            sm: StateMachine::new(c.detection.consecutive_required),
+            exposure: ExposureController::from_config(&c.exposure),
+            detector: AuroraDetector::from_config(&c.detection),
+            confirmation: AuroraConfirmation::new(c.detection.consecutive_required),
+            stacker: None,
+            iterations: 0,
+            frame_number: 0,
+            stats: NightStats::new(),
+            last_aurora_at: None,
+            failures: CameraFailures::default(),
+            window: NightWindow::new(Some(1.0), night_range(), at(21, 0)),
+            wait_iters: 0,
+        };
+
+        let mut locked = night(&config);
+        let before = locked.exposure.current();
+        locked.analyze(&frame, &config, Phase::Run);
+        assert_eq!(locked.exposure.current(), before, "RUN with the lock: frozen");
+
+        let mut watching = night(&config);
+        let mut reference = ExposureController::from_config(&config.exposure);
+        let hist = compute_histogram(crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent));
+        let expected = reference.update(&hist, Phase::Watch);
+        assert_ne!(expected, before, "the test frame must move the exposure");
+        watching.analyze(&frame, &config, Phase::Watch);
+        assert_eq!(watching.exposure.current(), expected, "WATCH: metered on the sky ROI");
     }
 }

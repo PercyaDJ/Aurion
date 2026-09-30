@@ -148,8 +148,9 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 
 | Paquet | Rôle dans l'image | Joignable depuis le Wi-Fi | Décision |
 |---|---|---|---|
-| network-manager | gère le point d'accès Wi-Fi | oui, indirectement | **à vérifier** : lire le vecteur CVSS de CVE-2026-10805 et CVE-2025-9615 ; accepté seulement si l'attaque est locale (AV:L) |
-| sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | **à vérifier** : vecteur de CVE-2026-82474 ; la règle sudo n'autorise que `aurion-helper` |
+| network-manager | gère le point d'accès Wi-Fi | oui, indirectement | accepté (1.11.0) : les deux failles demandent un compte local sur le Pi (AV:L). CVE-2026-10805 (CVSS 3.1 `AV:L/AC:H/PR:L/UI:R`) touche le moteur DHCP dhclient, CVE-2025-9615 (`AV:L/AC:L/PR:L`) la lecture de fichiers d'un autre utilisateur ; aucune n'est déclenchable depuis le Wi-Fi |
+| sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | accepté (1.11.0) : CVE-2026-82474 (CVSS 4.0 `AV:L/PR:L`) ne contourne que le mode `intercept` de sudo, jamais activé ici ; la règle n'autorise que `aurion-helper`, qui revalide chaque argument |
+| rsync | copie du noyau et du micrologiciel vers `/boot/firmware` (dépendance de `raspi-firmware`) | non | gardé à jour (3.5.0+ds1-0+deb13u1 minimum, contrôlé à la fabrication) ; retrait impossible : `raspi-firmware`, indispensable au démarrage, en dépend |
 | libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
 | systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
 | busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |
@@ -174,7 +175,7 @@ Réévaluation : à chaque relevé ARBOR (release ou renvoi manuel) ; tout corre
 | Image carte SD : mot de passe Wi-Fi d'usine commun (`aurora2024`) jusqu'à ce que l'utilisateur le change | Moyen | choix d'accessibilité pour un public non technique (le mot de passe est imprimé dans le guide). Depuis la 1.6.0, l'accueil propose de le changer dès la première connexion (appliqué aussitôt) et la vérification avant la nuit le signale en orange. L'installation par script ou paquet génère toujours un mot de passe unique | rendre le changement obligatoire avant la première nuit, si le terrain montre que l'encadré est ignoré |
 | Réinitialisation du mot de passe par un fichier sur la clé USB | Faible | qui peut brancher une clé et rallumer le Pi a de toute façon l'accès physique (carte SD, photos) ; le fichier n'agit qu'une fois et la remise à zéro est journalisée | aucune |
 | Pas d'authentification applicative | Moyen | choix d'ergonomie : le Wi-Fi WPA2 fait office de clé | PIN optionnel (plan d'action A3) |
-| `nmcli` reçoit le mot de passe du hotspot en argument pendant une fraction de seconde | Faible | limitation de `nmcli` ; processus root, aucun autre utilisateur sur le Pi | fichier de connexion NetworkManager en 0600 |
+| `nmcli` reçoit le mot de passe du Wi-Fi de maintenance (partage de connexion du téléphone) en argument pendant une fraction de seconde | Faible | processus root, aucun autre utilisateur sur le Pi. Corrigé pour le hotspot Aurion en 1.11.0 (fichier de connexion NetworkManager en 0600) | même méthode pour le Wi-Fi de maintenance, après essai sur le matériel |
 | Hotspot en WPA2-PSK (pas WPA3) | Faible | compatibilité avec tous les téléphones | option WPA3-SAE |
 | Interface en HTTP (pas HTTPS) | Faible | réseau fermé du Pi ; un certificat auto-signé effraie les navigateurs | aucune dans l'immédiat |
 | Mise à jour OTA non signée | Moyen | contrôles de format et d'exécution mais pas de signature | signature Ed25519 des releases (plan A2) |

@@ -20,7 +20,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | V12 | Mise à jour depuis GitHub par le partage de connexion d'un iPhone et d'un Android, retour au Wi-Fi Aurion | S | version affichée après reconnexion, retour arrière fonctionnel |
 | V13 | Temps d'allumage : lire « Wi-Fi prêt après l'allumage » (Diagnostics) sur Pi 4 et Pi 5, avec et sans clé ; `systemd-analyze blame` pour repérer les services lents | S | Wi-Fi visible le plus vite possible ; chiffres consignés dans GUIDE_DEMARRAGE.md |
 | V14 | Préparer la clé : clé neuve non formatée, clé ext4, clé NTFS ; vérifier qu'elle est montée et utilisée juste après | S | point vert « Clé USB » sans débrancher |
-| V15 | Image 1.10.4 allégée : premier allumage, Wi-Fi Aurion, caméra, clé, mise à l'heure du module horloge (`hwclock -r` après une synchronisation par le téléphone) | S | tout fonctionne comme en 1.10.0 |
+| V15 | Image 1.11.0 : hotspot Aurion démarré par fichier de connexion (journal sans « fichier de connexion refusé »), premier allumage, Wi-Fi Aurion, caméra, clé, mise à l'heure du module horloge (`hwclock -r` après une synchronisation par le téléphone) | S | tout fonctionne comme en 1.10.0 |
 | V10 | ISO maximal utile pour le RAW : vérifier au-delà de quel ISO le gain devient numérique (sans effet sur le DNG) sur l'IMX477 | S | valeur mesurée ; `iso_max` par défaut ajusté si nécessaire |
 
 ## Énergie (P1)
@@ -37,7 +37,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
 | Q1 | P1 | Enregistrer la température du capteur et les réglages réellement appliqués par image (`rpicam-still --metadata`, si disponible sur votre version) dans `event.jsonl` | S |
-| Q2 | P1 | ~~Rappel automatique « faites vos darks » à la fin de la nuit~~ : fait dans la prochaine version (encadré sur l'accueil au prochain allumage, ISO, pose et température moyens de la nuit, bouton qui lance les darks) ; reste à vérifier sur le terrain que la température du processeur suit bien celle du capteur | S |
+| Q2 | P1 | ~~Rappel automatique « faites vos darks » à la fin de la nuit~~ : fait en 1.11.0 (encadré sur l'accueil au prochain allumage, ISO, pose et température moyens de la nuit, bouton qui lance les darks) ; reste à vérifier sur le terrain que la température du processeur suit bien celle du capteur | S |
 | Q3 | P1 | Rampe d'exposition douce au crépuscule (« holy grail ») : variation limitée par image, puis verrou une fois la nuit noire | M |
 | Q4 | P2 | Intervalle adaptatif : plus rapide quand le score d'aurore monte, plus lent sinon (place disque et batterie) | M |
 | Q5 | P2 | Rafale automatique en RAW sur les pics d'aurore (score au-dessus d'un seuil) pour l'empilement au post-traitement | M |
@@ -48,7 +48,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 
 | ID | Priorité | Action | Effort |
 |---|---|---|---|
-| A1 | P1 | Écrire le mot de passe du hotspot dans un fichier de connexion NetworkManager (0600) plutôt qu'en argument de `nmcli` | S |
+| A1 | P1 | ~~Mot de passe du hotspot dans un fichier de connexion NetworkManager (0600)~~ : fait en 1.11.0 (repli sur l'ancienne méthode si NetworkManager refuse le fichier) ; reste le Wi-Fi de maintenance | S |
 | A2 | P1 | Signer les releases (Ed25519) et vérifier la signature avant toute mise à jour OTA ou `get.sh` | M |
 | A3 | P2 | Code PIN optionnel pour l'interface (utile en mode maintenance sur un réseau partagé) | M |
 | A4 | P2 | Séparer les actions root dans un petit service dédié (socket local) pour durcir `aurion.service` (`ProtectSystem`, `NoNewPrivileges`) | L |
@@ -66,7 +66,7 @@ Effort : S (moins d'une demi-journée), M (1 à 2 jours), L (plus).
 
 | ID | Action | Effort |
 |---|---|---|
-| C1 | Découper `orchestrator::run` en étapes testables séparément | M |
+| C1 | ~~Découper `orchestrator::run` en étapes testables séparément~~ : fait en 1.11.0 (même comportement, vérifié sur les 23 nuits simulées) | M |
 | C2 | ~~Un dossier par nuit sur la clé~~ : fait en 1.7.0 (les anciennes captures restent lisibles à la racine, sans migration) | - |
 | C3 | Factoriser le CSS et le JavaScript des pages (menu et rafraîchissement factorisés en 1.6.0 ; reste : styles en ligne de la galerie et des réglages) | M |
 | C4 | Tests sur banc matériel : un Pi dédié en CI (runner auto-hébergé) qui lance V1 automatiquement | L |

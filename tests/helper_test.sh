@@ -15,7 +15,8 @@ stdin(){ local data="$1"; shift; "$@" <<<"$data"; }
 
 # ap-start
 ok    stdin "motdepasse12" "$HELPER" ap-start Aurion 6
-has   "802-11-wireless.mode ap" stdin "motdepasse12" "$HELPER" ap-start Aurion 6
+has   "mode=ap, 0600" stdin "motdepasse12" "$HELPER" ap-start Aurion 6
+hasnt "motdepasse12" stdin "motdepasse12" "$HELPER" ap-start Aurion 6
 has   "redirect 80 -> 8080" stdin "motdepasse12" "$HELPER" ap-start Aurion 6
 ko    stdin "motdepasse12" "$HELPER" ap-start "" 6
 ko    stdin "motdepasse12" "$HELPER" ap-start "$(printf 'Evil\nwpa=0')" 6

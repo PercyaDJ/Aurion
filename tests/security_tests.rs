@@ -248,8 +248,10 @@ async fn ota_update_installs_and_keeps_backup() {
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, b"old version").unwrap();
 
-    // /bin/true is a real executable for this machine that accepts --version
-    let new_bin = std::fs::read("/bin/true").unwrap();
+    // A real executable for this machine that accepts --version under any
+    // name. Not /bin/true: on recent Ubuntu it is the uutils multicall binary,
+    // which picks its command from its own file name and fails as "aurion.new".
+    let new_bin = std::fs::read("/bin/bash").unwrap();
     let res = t.server.post("/api/system/update").multipart(multipart_with(new_bin.clone())).await;
     res.assert_status_ok();
 
