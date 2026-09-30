@@ -36,6 +36,7 @@ has   "radio wifi off" "$HELPER" ap-stop
 has   "192.0.2.10" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 has   "mode=infrastructure, 0600" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 hasnt "motdepasse12" stdin "motdepasse12" "$HELPER" wifi-connect Maison
+has   "redirect 80 -> 8080" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 ko    stdin "court" "$HELPER" wifi-connect Maison
 ko    stdin "motdepasse12" "$HELPER" wifi-connect "$(printf 'x\ny')"
 

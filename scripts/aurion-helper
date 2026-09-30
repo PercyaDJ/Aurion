@@ -102,6 +102,8 @@ read_secret() {
 }
 
 # ─── Captive portal (DNS answered by the AP, port 80 → web UI) ─
+# The port 80 redirect is also set on a joined Wi-Fi (phone hotspot, home):
+# http://aurion.local then works without ":8080" everywhere.
 
 captive_on() {
   have nft || [[ "$DRYRUN" == "1" ]] || { echo "nft absent: redirection du port 80 ignorée" >&2; return 0; }
@@ -326,6 +328,8 @@ method=ignore"; then
     run wpa_supplicant -B -i "$WLAN" -c "$RUN_DIR/wpa.conf" -P "$RUN_DIR/wpa.pid"
     if have dhcpcd; then run dhcpcd -w "$WLAN"; else run dhclient "$WLAN"; fi
   fi
+  # Port 80 → interface on this network too: http://aurion.local, no port
+  captive_on
   [[ "$DRYRUN" == "1" ]] && { echo "192.0.2.10"; return 0; }
   for _ in $(seq 1 15); do
     ip=$(ip -4 -o addr show "$WLAN" | awk '{print $4}' | cut -d/ -f1 | head -n1)

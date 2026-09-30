@@ -11,7 +11,7 @@ Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_
 | Système | Raspberry Pi OS Lite 64 bits (Bullseye, Bookworm ou Trixie) |
 | Service | `aurion.service` (systemd, `Type=notify`, redémarrage automatique, watchdog 180 s) |
 | Utilisateur du service | `aurion` (image carte SD) ou l'utilisateur choisi à l'installation |
-| Interface | Wi-Fi `Aurion`, `http://192.168.4.1:8080` |
+| Interface | Wi-Fi `Aurion` : `http://aurion.local` ou `http://192.168.4.1:8080`. Partage de connexion du téléphone ou Wi-Fi de la maison : `http://aurion.local` ou l'adresse IP affichée dans *Diagnostics* (image 1.13.0 et plus ; iPhone, iPad, Android 12 et plus) |
 | Compte de maintenance (image) | `pi` / `aurion`, SSH désactivé par défaut |
 | Journaux | `journalctl -u aurion` (en RAM, perdus à l'extinction) et `sessions/*/session.log` sur la clé |
 
@@ -114,7 +114,14 @@ sans regraver la carte SD. Déroulé :
    paquet : ni apt, ni `config.txt`, ni réglages touchés. Si l'installation échoue en cours de route, tout est remis
    comme avant. Une nouvelle version qui refuse la configuration en place est refusée (le mot de passe Wi-Fi n'est
    jamais réinitialisé par une mise à jour).
-3. Aurion redémarre sur la nouvelle version, à l'essai.
+3. Aurion redémarre sur la nouvelle version, à l'essai. La caméra remet son Wi-Fi Aurion ; à la reconnexion, une
+   fenêtre donne le résultat (validée après 3 minutes, ou retour à la version précédente avec la raison), le nombre
+   d'avertissements et d'erreurs non bloquants, et le lien vers le journal.
+
+**Journal de mise à jour (1.13.0)** : un fichier par mise à jour, sur la carte SD (`/opt/aurion/config/journaux-maj/`, les
+30 derniers) et sur la clé USB (`aurion-maj/`, tous). Une ligne par étape : `INFO`, `OK`, `AVERTISSEMENT` (n'a pas
+arrêté la mise à jour : coupure du partage de connexion, copie des réglages impossible…) ou `ERREUR`. Lisibles et
+téléchargeables dans *Diagnostics*, rubrique *Journaux de mise à jour*.
 
 Une caméra en 1.12 (helper version 4) ne sait pas installer le paquet : elle reçoit le programme seul, et
 *Diagnostics* signale « helper à mettre à jour ». Il faut alors regraver une fois la carte SD (image 1.13.0 ou plus

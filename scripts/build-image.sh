@@ -198,6 +198,29 @@ install -m 0644 "$HERE/deploy/aurion-firstboot.service" "$ROOT/etc/systemd/syste
 install -d "$ROOT/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/aurion-firstboot.service "$ROOT/etc/systemd/system/multi-user.target.wants/aurion-firstboot.service"
 
+# Name on the network: http://aurion.local answers on any Wi-Fi (the camera's
+# own, the phone hotspot, the home Wi-Fi), announced by avahi (mDNS). The
+# base image calls itself "raspberrypi".
+echo aurion >"$ROOT/etc/hostname"
+if grep -q '^127\.0\.1\.1' "$ROOT/etc/hosts"; then
+  sed -i 's/^127\.0\.1\.1.*/127.0.1.1\taurion/' "$ROOT/etc/hosts"
+else
+  printf '127.0.1.1\taurion\n' >>"$ROOT/etc/hosts"
+fi
+# Also listed as a web page by the "Bonjour" / network discovery apps
+install -d "$ROOT/etc/avahi/services"
+cat >"$ROOT/etc/avahi/services/aurion.service" <<'XML'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>Aurion</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>80</port>
+  </service>
+</service-group>
+XML
+
 # Maintenance account (keyboard + screen only, SSH stays off): pi / aurion.
 # Its presence also skips the interactive first-boot user wizard.
 echo "pi:$(openssl passwd -6 aurion)" >"$WORK/userconf.txt"

@@ -39,7 +39,9 @@ Les voyants du Pi restent **éteints** : c'est volontaire, pour ne pas éclairer
 Le Pi s'installe tout seul au premier démarrage, il peut redémarrer une fois. Ensuite, sur le téléphone :
 
 1. Réglages Wi-Fi : rejoignez **Aurion**, mot de passe **aurora2024**.
-2. La page Aurion s'ouvre toute seule. Sinon, ouvrez le navigateur à l'adresse **http://192.168.4.1:8080**.
+2. La page Aurion s'ouvre toute seule. Sinon, ouvrez le navigateur à l'adresse **http://aurion.local** (ou
+   **http://192.168.4.1:8080**). L'adresse `aurion.local` marche aussi quand la caméra est sur le partage de
+   connexion du téléphone ou sur le Wi-Fi de la maison : iPhone, iPad, Android 12 et plus.
 3. Un encadré **Protégez votre caméra** propose de choisir votre mot de passe Wi-Fi (10 caractères minimum).
    Le Wi-Fi Aurion redémarre aussitôt : reconnectez-vous avec le nouveau mot de passe.
 
@@ -126,7 +128,7 @@ Cochez **Mode expert** en bas du menu pour afficher les réglages fins, les pres
 | Symptôme | Solution |
 |---|---|
 | Le Wi-Fi « Aurion » n'apparaît pas | attendre 5 minutes au premier démarrage ; débrancher et rebrancher l'alimentation |
-| La page ne s'ouvre pas | taper http://192.168.4.1:8080 dans le navigateur |
+| La page ne s'ouvre pas | taper http://aurion.local ou http://192.168.4.1:8080 dans le navigateur |
 | Point rouge « Clé USB absente » | rebrancher la clé ; en essayer une autre |
 | Point rouge « Clé USB à préparer » | la clé n'est pas lisible (neuve non formatée, format d'ordinateur Linux…) : bouton **Préparer la clé** sous le point rouge. **Tout son contenu est effacé** |
 | Point rouge « Caméra non détectée » | Pi débranché, vérifier la nappe (sens et loquet) des deux côtés |

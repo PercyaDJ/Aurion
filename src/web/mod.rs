@@ -20,6 +20,7 @@ pub mod security;
 pub mod static_files;
 pub mod signing;
 pub mod update;
+pub mod update_journal;
 
 /// Maximum size of a regular API request body.
 const API_BODY_LIMIT: usize = 1024 * 1024;
@@ -259,6 +260,9 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/system/shutdown", post(api::system_shutdown))
         .route("/api/system/update/online", post(update::start_online_update))
         .route("/api/system/update/status", get(update::get_update_status))
+        .route("/api/system/update/seen", post(update::mark_seen))
+        .route("/api/system/update/journal", get(update::list_journals))
+        .route("/api/system/update/journal/:name", get(update::get_journal))
         .route("/api/system/rollback", post(update::rollback))
         .route(
             "/api/system/update",

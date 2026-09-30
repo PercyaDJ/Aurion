@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::config::PASSWORD_MASK;
 use crate::core::validate;
 use crate::web::api::{capture_in_progress, err, install_binary, require_system_actions, ApiError};
+use crate::web::update_journal::{self as journal, Level};
 use crate::web::AppState;
 
 /// GitHub repository of the project (public: no token needed).
@@ -56,17 +57,36 @@ pub struct UpdateStatus {
     pub ok: Option<bool>,
     pub channel: String,
     pub message: String,
+    /// Journal of this update (`update_journal`), empty before 1.13.
+    #[serde(default)]
+    pub log: String,
+    /// "essai" (installed, on trial), "validee" (confirmed after its first
+    /// minutes) or "echec" (refused, failed or rolled back); empty while running.
+    #[serde(default)]
+    pub outcome: String,
+    /// The result window was closed on the phone.
+    #[serde(default)]
+    pub seen: bool,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
 }
 
 fn status_path(state: &AppState) -> std::path::PathBuf {
     state.paths.config_file.with_file_name("update_status.json")
 }
 
-pub fn read_status(state: &AppState) -> UpdateStatus {
-    let mut status: UpdateStatus = std::fs::read(status_path(state))
+/// The file as written, without the power-cut interpretation.
+fn read_raw_status(state: &AppState) -> UpdateStatus {
+    std::fs::read(status_path(state))
         .ok()
         .and_then(|d| serde_json::from_slice(&d).ok())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+pub fn read_status(state: &AppState) -> UpdateStatus {
+    let mut status = read_raw_status(state);
     // "Running" in the file but not in this process: interrupted (power cut)
     if status.running && !state.online_update_running.load(Ordering::SeqCst) {
         status.running = false;
@@ -85,13 +105,40 @@ fn write_status(state: &AppState, status: &UpdateStatus) {
 async fn set_status(state: &AppState, channel: &str, running: bool, ok: Option<bool>, message: impl Into<String>) {
     let message = message.into();
     state.add_log(format!("Mise à jour en ligne : {}", message)).await;
-    write_status(state, &UpdateStatus {
-        running,
-        at: chrono::Local::now().format("%d/%m %H:%M").to_string(),
-        ok,
-        channel: channel.to_string(),
-        message,
-    });
+    let mut status = read_raw_status(state);
+    status.running = running;
+    status.at = chrono::Local::now().format("%d/%m %H:%M").to_string();
+    status.ok = ok;
+    if !channel.is_empty() {
+        status.channel = channel.to_string();
+    }
+    status.message = message.clone();
+    write_status(state, &status);
+    let level = match (running, ok) {
+        (false, Some(true)) => Level::Ok,
+        (false, Some(false)) => Level::Error,
+        _ => Level::Info,
+    };
+    note(state, level, &message).await;
+}
+
+/// Final result of the update, shown once in a window on the phone.
+fn set_outcome(state: &AppState, outcome: &str, to: Option<&str>) {
+    let mut status = read_raw_status(state);
+    status.outcome = outcome.to_string();
+    status.seen = false;
+    if let Some(v) = to {
+        status.to = v.to_string();
+    }
+    write_status(state, &status);
+}
+
+/// A line in the journal of the current update.
+async fn note(state: &AppState, level: Level, message: &str) {
+    let log = read_raw_status(state).log;
+    if !log.is_empty() {
+        journal::write(state, &log, level, message).await;
+    }
 }
 
 /// A freshly installed version runs "on trial" (marker `aurion.trial` next to
@@ -132,10 +179,14 @@ pub async fn startup_checks(state: AppState, confirm_after: Duration) {
         };
         let msg = format!("la version {} a été retirée ({}) : retour automatique à la version précédente", failed.trim(), why);
         set_status(&state, "", false, Some(false), msg).await;
+        set_outcome(&state, "echec", None);
     }
     let trial = trial_marker(&target);
     if !trial.exists() {
         return;
+    }
+    if read_raw_status(&state).outcome == "essai" {
+        note(&state, Level::Info, &format!("Version {} démarrée, à l'essai pendant {} s", crate::VERSION, confirm_after.as_secs())).await;
     }
     tokio::time::sleep(confirm_after).await;
     if !trial.exists() {
@@ -145,6 +196,7 @@ pub async fn startup_checks(state: AppState, confirm_after: Duration) {
     if let (true, Some(e)) = (state.system_actions, hotspot_error) {
         let reason = format!("son Wi-Fi Aurion ne démarrait pas : {}", first_line(&e));
         state.add_log(format!("Version {} non confirmée : {}", crate::VERSION, reason)).await;
+        note(&state, Level::Error, &format!("Version {} non confirmée : {}", crate::VERSION, reason)).await;
         let _ = std::fs::write(rollback_reason(&target), &reason);
         match crate::sys::helper(&["app-rollback"], None, Duration::from_secs(120)).await {
             Ok(_) => crate::web::api::schedule_restart(&state),
@@ -154,6 +206,12 @@ pub async fn startup_checks(state: AppState, confirm_after: Duration) {
     }
     if std::fs::remove_file(&trial).is_ok() {
         state.add_log(format!("Version {} confirmée : elle démarre et fonctionne", crate::VERSION)).await;
+        if read_raw_status(&state).outcome == "essai" {
+            let msg = format!("{} validée : elle fonctionne depuis {} s, Wi-Fi Aurion compris", crate::VERSION, confirm_after.as_secs());
+            set_status(&state, "", false, Some(true), msg).await;
+            set_outcome(&state, "validee", Some(crate::VERSION));
+            journal::prune(&state);
+        }
     }
 }
 
@@ -301,6 +359,14 @@ pub async fn start_online_update(
         ),
         None => "Téléchargement avec la connexion actuelle du Pi…".to_string(),
     };
+    let log = journal::new_name(&req.channel);
+    write_status(&state, &UpdateStatus {
+        channel: req.channel.clone(),
+        log: log.clone(),
+        from: crate::VERSION.to_string(),
+        ..Default::default()
+    });
+    journal::write(&state, &log, Level::Info, &format!("Mise à jour demandée depuis la version {}, canal {}", crate::VERSION, req.channel)).await;
     set_status(&state, &req.channel, true, None, message).await;
     let st = state.clone();
     let channel = req.channel.clone();
@@ -339,8 +405,15 @@ async fn run_online_update(state: AppState, channel: String, wifi: Option<(Strin
     // "running" without the flag reads as "interrompue" (power cut) and the
     // phone would stop following an update that actually worked.
     match &result {
-        Ok(version) => set_status(&state, &channel, false, Some(true), format!("{} installée, redémarrage", version)).await,
-        Err(e) => set_status(&state, &channel, false, Some(false), e.clone()).await,
+        Ok(version) => {
+            let msg = format!("{} installée, redémarrage : validation après {} s de fonctionnement", version, TRIAL_CONFIRM_SECS);
+            set_status(&state, &channel, false, Some(true), msg).await;
+            set_outcome(&state, "essai", Some(version.trim_start_matches("aurion ")));
+        }
+        Err(e) => {
+            set_status(&state, &channel, false, Some(false), e.clone()).await;
+            set_outcome(&state, "echec", None);
+        }
     }
     state.online_update_running.store(false, Ordering::SeqCst);
     match result {
@@ -374,6 +447,7 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
                 }
                 Err(e) => {
                     state.add_log(format!("Wi-Fi « {} » pas encore disponible ({}/6) : {}", ssid, attempt, e)).await;
+                    note(state, Level::Warning, &format!("Wi-Fi « {} » pas encore disponible ({}/6) : {}", ssid, attempt, first_line(&e))).await;
                     tokio::time::sleep(Duration::from_secs(20)).await;
                 }
             }
@@ -398,15 +472,22 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
         .unwrap_or_else(|| "?".into());
 
     // Settings copied to the USB key before anything changes
-    if let Err(e) = state.config.read().await.save_usb_backup() {
-        state.add_log(format!("Copie des réglages sur la clé USB impossible avant la mise à jour : {}", e)).await;
+    let backup = state.config.read().await.save_usb_backup();
+    match backup {
+        Ok(()) => note(state, Level::Ok, "Réglages copiés sur la clé USB").await,
+        Err(e) => {
+            state.add_log(format!("Copie des réglages sur la clé USB impossible avant la mise à jour : {}", e)).await;
+            note(state, Level::Warning, &format!("Copie des réglages sur la clé USB impossible : {}", e)).await;
+        }
     }
+    note(state, Level::Info, &format!("Version trouvée sur GitHub : {}", tag)).await;
 
     if helper_version(state).await.is_some_and(|v| v >= BUNDLE_HELPER_VERSION) {
         if let Some((bundle_url, sum_url, sig_url)) = bundle_urls(&json, &state.update.download_prefix)? {
             return install_bundle(state, &tag, &bundle_url, &sum_url, &sig_url).await;
         }
         state.add_log(format!("{} ne contient pas de {} : programme seul", tag, BUNDLE_ASSET)).await;
+        note(state, Level::Warning, &format!("{} ne contient pas de {} : programme seul, sans ses fichiers système", tag, BUNDLE_ASSET)).await;
     }
 
     let (tag, binary_url) = asset_url(&json, &state.update.download_prefix)?;
@@ -430,6 +511,7 @@ async fn install_bundle(state: &AppState, tag: &str, url: &str, sum_url: &str, s
     check_sha256(&data, &published_sum)?;
     let signature = fetch_small_bytes(state, sig_url).await.map_err(|e| format!("Signature de {} introuvable : {}", tag, e))?;
     crate::web::signing::verify(&data, &signature, &state.update.trusted_keys)?;
+    note(state, Level::Ok, &format!("Paquet téléchargé ({} Ko), empreinte et signature vérifiées", data.len() / 1024)).await;
 
     let dir = &state.paths.tmp_dir;
     let bundle = dir.join(format!("aurion-update-{}.tar.gz", std::process::id()));
@@ -450,7 +532,11 @@ async fn install_bundle(state: &AppState, tag: &str, url: &str, sum_url: &str, s
     };
     let _ = std::fs::remove_file(&bundle);
     let _ = std::fs::remove_file(&sig);
-    let version = result?.lines().last().unwrap_or(tag).trim().to_string();
+    let output = result?;
+    for line in output.lines().filter(|l| !l.trim().is_empty()) {
+        note(state, Level::Info, &format!("installation : {}", line.trim())).await;
+    }
+    let version = output.lines().last().unwrap_or(tag).trim().to_string();
     state.add_log(format!("Mise à jour installée : {}. Redémarrage…", version)).await;
     crate::web::api::schedule_restart(state);
     Ok(version)
@@ -515,17 +601,17 @@ async fn download(state: &AppState, url: &str, tag: &str) -> Result<Vec<u8>, Str
                 last_error = first_line(&e).to_string();
                 if attempt < DOWNLOAD_ATTEMPTS {
                     let got = std::fs::metadata(&tmp).map(|m| m.len() / 1024).unwrap_or(0);
-                    state
-                        .add_log(format!(
-                            "Téléchargement de {} coupé ({} Ko reçus), reprise dans {} s ({}/{}) : {}",
-                            tag,
-                            got,
-                            DOWNLOAD_RETRY_DELAY.as_secs(),
-                            attempt,
-                            DOWNLOAD_ATTEMPTS,
-                            last_error
-                        ))
-                        .await;
+                    let msg = format!(
+                        "Téléchargement de {} coupé ({} Ko reçus), reprise dans {} s ({}/{}) : {}",
+                        tag,
+                        got,
+                        DOWNLOAD_RETRY_DELAY.as_secs(),
+                        attempt,
+                        DOWNLOAD_ATTEMPTS,
+                        last_error
+                    );
+                    state.add_log(msg.clone()).await;
+                    note(state, Level::Warning, &msg).await;
                     tokio::time::sleep(DOWNLOAD_RETRY_DELAY).await;
                 }
             }
@@ -550,13 +636,46 @@ pub async fn get_update_status(State(state): State<AppState>) -> Json<serde_json
         None
     };
     let helper_outdated = state.system_actions && helper.as_deref() != Some(EXPECTED_HELPER_VERSION);
+    let last = read_status(&state);
+    let (warnings, errors) = match last.log.is_empty() {
+        true => (0, 0),
+        false => journal::read(&state, &last.log).await.map(|t| journal::counts(&t)).unwrap_or((0, 0)),
+    };
     Json(serde_json::json!({
         "version": crate::VERSION,
-        "last": read_status(&state),
+        "last": last,
+        "warnings": warnings,
+        "errors": errors,
         "rollback_available": has_previous,
         "helper_version": helper,
         "helper_outdated": helper_outdated,
     }))
+}
+
+/// The result window was read: not shown again.
+pub async fn mark_seen(State(state): State<AppState>) -> Json<UpdateStatus> {
+    let mut status = read_raw_status(&state);
+    if !status.seen {
+        status.seen = true;
+        write_status(&state, &status);
+    }
+    Json(read_status(&state))
+}
+
+/// Update journals, newest first.
+pub async fn list_journals(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "journals": journal::list(&state) }))
+}
+
+/// One journal, as plain text.
+pub async fn get_journal(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<([(axum::http::header::HeaderName, &'static str); 1], String), ApiError> {
+    match journal::read(&state, &name).await {
+        Some(text) => Ok(([(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")], text)),
+        None => Err(err(StatusCode::NOT_FOUND, "Journal introuvable")),
+    }
 }
 
 /// Swap the current binary with the previous one (`.prev`) and restart:

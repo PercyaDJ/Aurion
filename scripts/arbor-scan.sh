@@ -3,7 +3,8 @@
 #   scripts/arbor-scan.sh app [aurion-sbom.cdx.json]   SBOM Syft du dépôt, Semgrep, Trivy -> Aurion_Application
 #   scripts/arbor-scan.sh image <aurion-image-sbom.cdx.json>                         -> Aurion_Image
 # Une clé par projet : ARBOR_API_KEY (application), ARBOR_IMAGE_API_KEY (image). Sans clé, rien n'est
-# installé ni envoyé (avertissement) : pas de minutes perdues.
+# installé ni envoyé (avertissement) : pas de minutes perdues. Avec ARBOR_REQUIRED=1 (workflows Release et
+# ARBOR), une clé absente est une erreur : l'envoi ne peut pas manquer sans que le job soit rouge.
 # Outils en versions figées, scripts d'installation pris sur le tag : un changement amont ne modifie
 # pas ce qui s'exécute ici.
 set -euo pipefail
@@ -19,6 +20,14 @@ need_syft() {
   command -v syft >/dev/null || curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
     | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
 }
+missing_key() { # <message>
+  if [[ "${ARBOR_REQUIRED:-0}" == "1" ]]; then
+    echo "::error::$1"
+    exit 1
+  fi
+  echo "::warning::$1"
+  exit 0
+}
 upload() { # <project> <key> <kind> <file>
   ARBOR_PROJECT="$1" ARBOR_API_KEY="$2" bash scripts/arbor-upload.sh "$3" "$4"
 }
@@ -26,10 +35,7 @@ upload() { # <project> <key> <kind> <file>
 case "${1:-}" in
   app)
     key="${ARBOR_API_KEY:-}"
-    if [[ -z "$key" ]]; then
-      echo "::warning::Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé."
-      exit 0
-    fi
+    [[ -n "$key" ]] || missing_key "Secret ARBOR_API_KEY absent (Settings > Secrets and variables > Actions) : rien n'est envoyé."
     out=$(mktemp -d)
     sbom="${2:-}"
     if [[ -z "$sbom" ]]; then
@@ -53,10 +59,7 @@ case "${1:-}" in
   image)
     [[ -n "${2:-}" ]] || { echo "Usage : $0 image <aurion-image-sbom.cdx.json>"; exit 1; }
     key="${ARBOR_IMAGE_API_KEY:-}"
-    if [[ -z "$key" ]]; then
-      echo "::warning::Secret ARBOR_IMAGE_API_KEY absent : SBOM de l'image non envoyé."
-      exit 0
-    fi
+    [[ -n "$key" ]] || missing_key "Secret ARBOR_IMAGE_API_KEY absent : SBOM de l'image non envoyé."
     upload "$IMAGE_PROJECT" "$key" sboms "$2"
     ;;
   *) echo "Usage : $0 app [sbom] | image <sbom>"; exit 1 ;;

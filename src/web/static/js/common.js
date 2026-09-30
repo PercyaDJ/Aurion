@@ -132,3 +132,70 @@ async function aurionPrepareUsbKey(onDone) {
         showToast(e.message, 'error');
     }
 }
+
+// ─── Résultat d'une mise à jour ────────────────────────────
+// Après une mise à jour, le téléphone se reconnecte au Wi-Fi Aurion : la
+// première page ouverte affiche le résultat (validée ou retour arrière), avec
+// le nombre d'avertissements et le lien vers le journal. Pendant les minutes
+// d'essai, un bandeau l'annonce et la page vérifie toute seule.
+let aurionUpdateTimer = null;
+async function aurionUpdateResult() {
+    let u;
+    try { u = await (await fetch('/api/system/update/status')).json(); } catch (_) { return; }
+    const last = (u && u.last) || {};
+    const banner = document.getElementById('aurionUpdateBanner');
+    if (last.outcome === 'essai') {
+        if (!banner) {
+            const b = document.createElement('div');
+            b.id = 'aurionUpdateBanner';
+            b.setAttribute('role', 'status');
+            b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:900;padding:0.6rem 1rem;'
+                + 'background:var(--bg-card);border-top:1px solid var(--border);color:var(--text-primary);'
+                + 'font-size:0.85rem;text-align:center;';
+            b.textContent = `Mise à jour vers ${last.to || 'la nouvelle version'} installée : vérification en cours `
+                + '(environ 3 minutes), le résultat s\'affichera ici.';
+            document.body.appendChild(b);
+        }
+        if (!aurionUpdateTimer) aurionUpdateTimer = setInterval(aurionUpdateResult, 20000);
+        return;
+    }
+    if (banner) banner.remove();
+    if (aurionUpdateTimer) { clearInterval(aurionUpdateTimer); aurionUpdateTimer = null; }
+    if ((last.outcome === 'validee' || last.outcome === 'echec') && !last.seen) aurionShowUpdateResult(u);
+}
+
+function aurionShowUpdateResult(u) {
+    if (document.getElementById('aurionUpdateDialog')) return;
+    const last = u.last || {};
+    const ok = last.outcome === 'validee';
+    const overlay = document.createElement('div');
+    overlay.id = 'aurionUpdateDialog';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;'
+        + 'padding:1rem;background:rgba(0,0,0,0.6);';
+    const counts = [];
+    if (u.warnings) counts.push(`${u.warnings} avertissement${u.warnings > 1 ? 's' : ''}`);
+    if (u.errors) counts.push(`${u.errors} erreur${u.errors > 1 ? 's' : ''}`);
+    const detail = counts.length ? `Journal : ${counts.join(', ')} (non bloquants si la mise à jour est validée).`
+        : 'Journal : aucun avertissement ni erreur.';
+    const title = ok ? `Mise à jour validée : ${aurionEscape(last.to || u.version || '')}`
+        : 'Mise à jour non appliquée';
+    const journal = last.log
+        ? `<a class="btn btn-outline btn-block" style="margin-top:0.75rem;" href="/api/system/update/journal/${encodeURIComponent(last.log)}" target="_blank" rel="noopener">Voir le journal de mise à jour</a>`
+        : '';
+    overlay.innerHTML = `<div class="card" style="max-width:26rem;width:100%;margin:0;">
+        <div class="card-title" style="margin-bottom:0.5rem;">${ok ? '✅' : '↩️'} ${title}</div>
+        <p style="margin:0 0 0.5rem;">${aurionEscape(last.message || '')}</p>
+        <p class="muted small" style="margin:0;">${detail}</p>
+        ${journal}
+        <p class="muted small" style="margin:0.5rem 0 0;">Tous les journaux : Diagnostics, rubrique « Journaux de mise à jour ».</p>
+        <button type="button" class="btn btn-primary btn-block" style="margin-top:0.75rem;" id="aurionUpdateOk">OK</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('aurionUpdateOk').addEventListener('click', async () => {
+        overlay.remove();
+        try { await fetch('/api/system/update/seen', { method: 'POST' }); } catch (_) { }
+    });
+}
+document.addEventListener('DOMContentLoaded', aurionUpdateResult);

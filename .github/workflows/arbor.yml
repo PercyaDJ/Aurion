@@ -28,6 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARBOR_IMAGE_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
+          ARBOR_REQUIRED: "1"
         run: |
           gh release download --repo "$GITHUB_REPOSITORY" -p aurion-image-sbom.cdx.json -D "$RUNNER_TEMP"
           bash scripts/arbor-scan.sh image "$RUNNER_TEMP/aurion-image-sbom.cdx.json"
@@ -35,4 +36,5 @@ jobs:
       - name: Aurion_Application (SBOM, Semgrep, Trivy)
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
+          ARBOR_REQUIRED: "1"
         run: bash scripts/arbor-scan.sh app

@@ -57,6 +57,7 @@ check "premier démarrage : mot de passe d'usine, sans apt" 'grep -q -- "--no-pa
 check "compte de maintenance (pas d'assistant bloquant)" 'grep -q "^pi:" "$W/userconf.txt" && cut -d: -f2 "$W/userconf.txt" | grep -q "^.6."'
 check "notice lisible depuis un PC" 'grep -q "aurora2024" "$W/lisezmoi.txt"'
 check "config.txt prêt dès le premier démarrage (LED, Bluetooth, chien de garde)" 'grep -q "^arm_64bit=1" "$W/configtxt.txt" && grep -q "^dtparam=watchdog=on" "$W/configtxt.txt" && grep -q "^dtparam=act_led_trigger=none" "$W/configtxt.txt" && grep -q "^dtoverlay=disable-bt" "$W/configtxt.txt"'
+check "nom réseau aurion (http://aurion.local)" '[[ "$(cat "$R/etc/hostname")" == aurion ]] && grep -qP "^127\.0\.1\.1\taurion$" "$R/etc/hosts" && grep -q "_http._tcp" "$R/etc/avahi/services/aurion.service"'
 check "SSH non activé" '! grep -qiE "/ssh(\.txt)?$" "$W/bootfiles.txt"'
 
 echo
