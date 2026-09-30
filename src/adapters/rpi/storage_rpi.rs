@@ -66,37 +66,12 @@ impl StoragePort for StorageRpi {
             return Err(StorageError::WriteFailed(format!("aucune clé USB montée sur {}", self.mount_point)));
         }
         let full_path = std::path::Path::new(&self.mount_point).join(path);
-        if let Some(parent) = full_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
-        }
-
-        // Write to a temporary name then rename: a power cut never leaves a
-        // truncated image with a valid name on the drive.
-        let file_name = full_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let tmp = full_path.with_file_name(format!(".{}.part", file_name));
-        let to_err = |e: std::io::Error| {
-            if e.raw_os_error() == Some(libc::ENOSPC) {
-                StorageError::DiskFull
-            } else {
-                StorageError::WriteFailed(e.to_string())
-            }
-        };
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp).map_err(to_err)?;
-            f.write_all(data).map_err(to_err)?;
-            // Data on the key BEFORE the file gets its final name: after a
-            // power cut an image is either complete or absent, never half.
-            f.sync_all().map_err(to_err)?;
-        }
-        std::fs::rename(&tmp, &full_path).map_err(to_err)?;
-        if let Some(parent) = full_path.parent() {
-            if let Ok(dir) = std::fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
-        }
-        Ok(())
+        // Up to ~20 MB written and fsynced to a USB key that can be slow:
+        // on a blocking thread, never on the async workers
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || write_durably(&full_path, &data))
+            .await
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))?
     }
 
     async fn sync(&self) -> Result<(), StorageError> {
@@ -113,6 +88,41 @@ impl StoragePort for StorageRpi {
     }
 }
 
+/// Write a file so that after a power cut it is either complete or absent.
+fn write_durably(full_path: &std::path::Path, data: &[u8]) -> Result<(), StorageError> {
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
+    }
+
+    // Write to a temporary name then rename: a power cut never leaves a
+    // truncated image with a valid name on the drive.
+    let file_name = full_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = full_path.with_file_name(format!(".{}.part", file_name));
+    let to_err = |e: std::io::Error| {
+        if e.raw_os_error() == Some(libc::ENOSPC) {
+            StorageError::DiskFull
+        } else {
+            StorageError::WriteFailed(e.to_string())
+        }
+    };
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp).map_err(to_err)?;
+        f.write_all(data).map_err(to_err)?;
+        // Data on the key BEFORE the file gets its final name: after a
+        // power cut an image is either complete or absent, never half.
+        f.sync_all().map_err(to_err)?;
+    }
+    std::fs::rename(&tmp, full_path).map_err(to_err)?;
+    if let Some(parent) = full_path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +135,21 @@ mod tests {
         assert!(storage.save_file("sessions/n/JPG/a.jpg", b"jpeg").await.is_err());
         assert!(!dir.path().join("sessions").exists(), "no folder created on the card");
         assert!(storage.info().is_err(), "the SD card free space is not the key's");
+    }
+
+    #[tokio::test]
+    async fn a_file_is_written_whole_on_a_mounted_key() {
+        // /dev/shm: a writable mount point on any Linux machine
+        let shm = std::path::Path::new("/dev/shm");
+        if !crate::sys::storage_health(shm).is_mountpoint {
+            return;
+        }
+        let storage = StorageRpi::new("/dev/shm".into());
+        let rel = format!("aurion-test-{}/JPG/a.jpg", std::process::id());
+        storage.save_file(&rel, b"jpeg bytes").await.unwrap();
+        assert_eq!(std::fs::read(shm.join(&rel)).unwrap(), b"jpeg bytes");
+        assert!(!shm.join(format!("aurion-test-{}/JPG/.a.jpg.part", std::process::id())).exists());
+        std::fs::remove_dir_all(shm.join(format!("aurion-test-{}", std::process::id()))).unwrap();
     }
 
     #[test]

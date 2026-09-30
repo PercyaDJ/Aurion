@@ -1,8 +1,8 @@
 [Unit]
 Description=Aurion : installation au premier démarrage
 ConditionPathExists=/usr/lib/aurion/firstboot-pending
-After=local-fs.target systemd-udev-settle.service userconfig.service NetworkManager.service
-Wants=systemd-udev-settle.service
+# No systemd-udev-settle (deprecated, slow): mount-usb waits for the key itself
+After=local-fs.target userconfig.service NetworkManager.service
 
 [Service]
 Type=oneshot

@@ -154,6 +154,39 @@ pub fn recent_image_sizes(mount: &FsPath, max: usize) -> Vec<(String, u64)> {
     sample(scan_images(mount, None))
 }
 
+/// What the capacity estimate of the home page needs: sizes of the latest
+/// images and the throughput of the last night.
+pub type CapacityInputs = (Vec<(String, u64)>, Option<f64>);
+
+type CapacityCache = Option<(std::time::Instant, PathBuf, CapacityInputs)>;
+static CAPACITY_CACHE: std::sync::Mutex<CapacityCache> = std::sync::Mutex::new(None);
+const CAPACITY_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// [`recent_image_sizes`] and [`recent_night_rate`] of a key, scanned at most
+/// every 2 min: the home page asks every 10 s, and between two nights the
+/// key does not change (deletions from the gallery clear the cache).
+pub fn capacity_inputs(mount: &FsPath) -> CapacityInputs {
+    if let Ok(cache) = CAPACITY_CACHE.lock() {
+        if let Some((at, path, inputs)) = cache.as_ref() {
+            if path == mount && at.elapsed() < CAPACITY_TTL {
+                return inputs.clone();
+            }
+        }
+    }
+    let inputs = (recent_image_sizes(mount, 60), recent_night_rate(mount));
+    if let Ok(mut cache) = CAPACITY_CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), mount.to_path_buf(), inputs.clone()));
+    }
+    inputs
+}
+
+/// Images were deleted or written: the next estimate scans the key again.
+pub fn clear_capacity_cache() {
+    if let Ok(mut cache) = CAPACITY_CACHE.lock() {
+        *cache = None;
+    }
+}
+
 /// Bytes written per hour during the most recent night that lasted at least
 /// 15 min with 20 images or more: the most honest capacity estimate, since
 /// it includes the real exposure times, pauses and file sizes.
@@ -632,6 +665,7 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
         let data = make_thumbnail(&source)?;
         let _ = std::fs::create_dir_all(&cache_dir);
         let _ = std::fs::write(&cache_path, &data);
+        trim_thumb_cache(&cache_dir, THUMB_CACHE_MAX_FILES);
         Some(data)
     })
     .await;
@@ -639,6 +673,27 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
     match result {
         Ok(Some(data)) => jpeg(data),
         _ => (StatusCode::UNPROCESSABLE_ENTITY, "Image illisible").into_response(),
+    }
+}
+
+/// The cache lives in RAM (tmpfs of 200 MB shared with the capture files):
+/// ~15 kB per thumbnail, 2000 of them stay well below.
+const THUMB_CACHE_MAX_FILES: usize = 2000;
+
+/// Keep at most `max` thumbnails in the cache, the most recently written.
+fn trim_thumb_cache(dir: &FsPath, max: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if files.len() <= max {
+        return;
+    }
+    files.sort();
+    let excess = files.len() - max;
+    for (_, path) in files.into_iter().take(excess) {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -671,21 +726,28 @@ pub async fn delete_gallery_images(
     Json(req): Json<GalleryDeleteRequest>,
 ) -> Json<GalleryDeleteResponse> {
     let mount = mount_point(&state).await;
-    let mut deleted = 0;
-    let mut errors = Vec::new();
-
-    for filename in &req.filenames {
-        if !validate::is_safe_image_name(filename) {
-            tracing::warn!("Delete rejected: invalid filename {:?}", filename);
-            errors.push(format!("{}: nom de fichier invalide", filename));
-            continue;
+    let cache_dir = state.paths.thumb_cache_dir.clone();
+    // Hundreds of files on an exFAT key: off the async workers
+    let (deleted, errors) = tokio::task::spawn_blocking(move || {
+        let mut deleted = 0;
+        let mut errors = Vec::new();
+        for filename in &req.filenames {
+            if !validate::is_safe_image_name(filename) {
+                tracing::warn!("Delete rejected: invalid filename {:?}", filename);
+                errors.push(format!("{}: nom de fichier invalide", filename));
+                continue;
+            }
+            match remove_image(&mount, &cache_dir, filename) {
+                Ok(true) => deleted += 1,
+                Ok(false) => errors.push(format!("{}: fichier introuvable", filename)),
+                Err(e) => errors.push(format!("{}: {}", filename, e)),
+            }
         }
-        match remove_image(&mount, &state.paths.thumb_cache_dir, filename) {
-            Ok(true) => deleted += 1,
-            Ok(false) => errors.push(format!("{}: fichier introuvable", filename)),
-            Err(e) => errors.push(format!("{}: {}", filename, e)),
-        }
-    }
+        (deleted, errors)
+    })
+    .await
+    .unwrap_or_else(|e| (0, vec![e.to_string()]));
+    clear_capacity_cache();
 
     state.add_log(format!("{} image(s) supprimée(s)", deleted)).await;
     Json(GalleryDeleteResponse { deleted, errors })
@@ -701,15 +763,24 @@ pub async fn delete_gallery_session(State(state): State<AppState>, Path(session)
         return (StatusCode::NOT_FOUND, "Session introuvable").into_response();
     }
 
-    let mut deleted = 0;
-    for image in session_images(&mount, &session) {
-        if std::fs::remove_file(&image.path).is_ok() {
-            let _ = std::fs::remove_file(thumb_path(&mount, &image));
-            let _ = std::fs::remove_file(state.paths.thumb_cache_dir.join(&image.info.filename));
-            deleted += 1;
+    let cache_dir = state.paths.thumb_cache_dir.clone();
+    let name = session.clone();
+    // A whole night (up to thousands of files): off the async workers
+    let (deleted, removed) = tokio::task::spawn_blocking(move || {
+        let mut deleted = 0;
+        for image in session_images(&mount, &name) {
+            if std::fs::remove_file(&image.path).is_ok() {
+                let _ = std::fs::remove_file(thumb_path(&mount, &image));
+                let _ = std::fs::remove_file(cache_dir.join(&image.info.filename));
+                deleted += 1;
+            }
         }
-    }
-    if let Err(e) = std::fs::remove_dir_all(&session_dir) {
+        (deleted, std::fs::remove_dir_all(&session_dir))
+    })
+    .await
+    .unwrap_or_else(|e| (0, Err(std::io::Error::other(e.to_string()))));
+    clear_capacity_cache();
+    if let Err(e) = removed {
         state.add_log(format!("Suppression du dossier de session impossible: {}", e)).await;
     }
     state.add_log(format!("Session {} et {} image(s) supprimées", session, deleted)).await;
@@ -848,6 +919,22 @@ pub async fn download_gallery_session_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thumbnail_cache_keeps_the_most_recent_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            let p = dir.path().join(format!("aurora_{}.jpg", i));
+            std::fs::write(&p, b"t").unwrap();
+            let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + i);
+            std::fs::File::options().write(true).open(&p).unwrap().set_modified(t).unwrap();
+        }
+        trim_thumb_cache(dir.path(), 3);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left, ["aurora_2.jpg", "aurora_3.jpg", "aurora_4.jpg"]);
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()

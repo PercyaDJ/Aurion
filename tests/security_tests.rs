@@ -234,6 +234,20 @@ async fn ota_update_rejects_garbage_and_foreign_binaries() {
 }
 
 #[tokio::test]
+async fn ota_update_over_64_mb_is_refused() {
+    let t = common::env();
+    let target = t.dir.path().join("bin/aurion");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, b"old version").unwrap();
+    // A valid ELF header followed by padding beyond the limit
+    let mut big = std::fs::read("/bin/bash").unwrap();
+    big.resize(65 * 1024 * 1024 + 1, 0);
+    let res = t.server.post("/api/system/update").multipart(multipart_with(big)).await;
+    assert!(res.status_code().is_client_error(), "{}", res.status_code());
+    assert_eq!(std::fs::read(&target).unwrap(), b"old version", "nothing installed");
+}
+
+#[tokio::test]
 async fn ota_update_refused_during_capture() {
     let t = common::env();
     *t.state.phase.write().await = aurion::core::models::Phase::Run;

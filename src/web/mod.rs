@@ -23,7 +23,7 @@ pub mod update;
 /// Maximum size of a regular API request body.
 const API_BODY_LIMIT: usize = 1024 * 1024;
 /// Maximum size of an uploaded Aurion binary (OTA update).
-pub const UPDATE_BODY_LIMIT: usize = 128 * 1024 * 1024;
+pub const UPDATE_BODY_LIMIT: usize = update::MAX_BINARY_BYTES as usize + 1024 * 1024; // binary + multipart envelope
 /// Number of log lines kept in memory for the diagnostics page.
 const LOG_CAPACITY: usize = 500;
 

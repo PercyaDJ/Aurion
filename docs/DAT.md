@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.11.1**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.11.2**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -236,6 +236,12 @@ flowchart LR
 Publier une version : changer `version` dans `Cargo.toml` et pousser sur `main`. Chaque push sur `main` publie
 aussi la pré-release **edge** (même workflow `release.yml`, un seul job, binaire `aurion-arm64` seul, version `X.Y.Z-edge.<commit>`),
 installable depuis le téléphone (voir GUIDE_DEVELOPPEMENT.md).
+
+Attention pendant une release (environ 18 min) : ne pas fusionner sur `main` une PR qui modifie `.github/workflows/`.
+GitHub refuse alors au jeton du workflow de créer le tag de la version (403 « Resource not accessible by
+integration »), car les workflows du commit visé ne sont plus ceux de la pointe de `main`. C'est arrivé à la 1.11.0,
+publiée avec la 1.11.1. Si cela se produit : relancer le workflow Release depuis la pointe de `main`, ou laisser la
+version suivante publier le tout.
 
 ## 11. Interfaces (API HTTP)
 

@@ -236,15 +236,22 @@ async fn main() -> anyhow::Result<()> {
 
             sd_notify("READY=1");
 
+            // The night runs in its own task: its image processing and key
+            // writes never hold up the web server nor the systemd watchdog
+            // (all used to share one task).
+            let night = tokio::spawn(async move { orchestrator.run().await });
+
             tokio::select! {
                 result = aurion::web::start_server(state.clone(), port) => {
                     if let Err(e) = result {
                         tracing::error!("Web server error: {}", e);
                     }
                 }
-                result = orchestrator.run() => {
-                    if let Err(e) = result {
-                        tracing::error!("Orchestrator error: {}", e);
+                result = night => {
+                    match result {
+                        Ok(Err(e)) => tracing::error!("Orchestrator error: {}", e),
+                        Err(e) => tracing::error!("Orchestrator task failed: {}", e),
+                        Ok(Ok(())) => {}
                     }
                 }
                 _ = async {

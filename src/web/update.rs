@@ -30,8 +30,8 @@ pub const ASSET: &str = "aurion-arm64";
 /// replaces the application only: a new helper (root) needs the SD image or
 /// the .deb once.
 pub const EXPECTED_HELPER_VERSION: &str = "3";
-/// Largest binary accepted (the real one is a few MB).
-const MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
+/// Largest binary accepted, uploaded or downloaded (the real one is a few MB).
+pub const MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct UpdateStatus {

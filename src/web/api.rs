@@ -329,14 +329,10 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         }
     } else if let Some((_, free)) = crate::sys::disk_usage(&mount) {
         let m = mount.clone();
-        let images: Vec<(String, u64)> = tokio::task::spawn_blocking(move || {
-            crate::web::gallery::recent_image_sizes(&m, 60)
-        })
-        .await
-        .unwrap_or_default();
+        let (images, rate) = tokio::task::spawn_blocking(move || crate::web::gallery::capacity_inputs(&m))
+            .await
+            .unwrap_or_default();
         // Measured throughput of the last night first, model otherwise
-        let m2 = mount.clone();
-        let rate = tokio::task::spawn_blocking(move || crate::web::gallery::recent_night_rate(&m2)).await.ok().flatten();
         let hours = match rate {
             Some(bytes_per_hour) if bytes_per_hour > 0.0 => round1(free as f64 / bytes_per_hour),
             _ => capacity_hours(&config, free, bytes_per_capture(&config, &images)),
@@ -452,12 +448,14 @@ async fn rpicam_still(
     awb: &str,
 ) -> Result<Vec<u8>, String> {
     let shutter = settings.shutter_us.to_string();
-    let gain = format!("{:.2}", settings.iso as f64 / 100.0);
+    let gain = crate::core::exposure::rpicam_gain(settings.iso);
     let out = output.to_string_lossy().to_string();
     let timeout = Duration::from_secs(settings.shutter_us.div_ceil(1_000_000) * 3 + 20);
     crate::sys::run(
         "rpicam-still",
-        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb],
+        // Small EXIF thumbnail: the auto-exposure meters it, not the 12 MP image
+        &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb,
+          "--thumb", "320:240:70"],
         timeout,
     )
     .await?;
@@ -493,11 +491,18 @@ pub async fn capture_preview(State(state): State<AppState>) -> Response {
                 return err(StatusCode::INTERNAL_SERVER_ERROR, format!("Caméra indisponible: {}", e)).into_response();
             }
         };
-        let hist = image::load_from_memory(&data).ok().map(|img| {
-            let rgb = img.to_rgb8();
-            let roi = crate::core::orchestrator::crop_roi(rgb.as_raw(), rgb.width(), rgb.height(), config.detection.roi_top_percent);
-            crate::core::exposure::compute_histogram(roi)
-        });
+        // Up to 4 shots: decode the EXIF thumbnail (or a reduced image), never
+        // the full 12 MP picture, and off the async workers
+        let roi_top = config.detection.roi_top_percent;
+        let jpeg = data.clone();
+        let hist = tokio::task::spawn_blocking(move || {
+            crate::core::jpeg::decode_for_analysis(&jpeg, 640).map(|(rgb, w, h, _)| {
+                crate::core::exposure::compute_histogram(crate::core::orchestrator::crop_roi(&rgb, w, h, roi_top))
+            })
+        })
+        .await
+        .ok()
+        .flatten();
         last = Some((data, settings));
         let Some(hist) = hist else { break };
         let next = expo.jump(&hist);
@@ -762,6 +767,13 @@ pub async fn capture_darks(
     if state.darks.read().await.as_ref().map(|d| d.running).unwrap_or(false) {
         return Err(err(StatusCode::CONFLICT, "Une série de darks est déjà en cours"));
     }
+    // The DNGs go to the key: without it they would fill the SD card
+    if cfg!(feature = "rpi") {
+        let mount = state.config.read().await.storage.mount_point.clone();
+        if !crate::sys::storage_health(FsPath::new(&mount)).is_mountpoint {
+            return Err(err(StatusCode::CONFLICT, "Clé USB absente : les darks sont enregistrés sur la clé"));
+        }
+    }
     let camera = state.camera_lock.clone().try_lock_owned()
         .map_err(|_| err(StatusCode::CONFLICT, "Caméra occupée (preview en cours)"))?;
 
@@ -779,7 +791,7 @@ pub async fn capture_darks(
         let mut error = None;
         for n in 0..count {
             let shutter = shutter_us.to_string();
-            let gain = format!("{:.2}", iso as f64 / 100.0);
+            let gain = crate::core::exposure::rpicam_gain(iso);
             let out = tmp.to_string_lossy().to_string();
             let _ = std::fs::remove_file(&tmp_dng);
             let timeout = Duration::from_secs(shutter_us.div_ceil(1_000_000) * 3 + 20);
@@ -789,13 +801,22 @@ pub async fn capture_darks(
                   "--awb", "daylight", "--denoise", "off", "--thumb", "none"],
                 timeout,
             )
-            .await
-            .and_then(|_| std::fs::read(&tmp_dng).map_err(|e| format!("DNG absent: {}", e)))
-            .and_then(|dng| {
-                let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
-                std::fs::create_dir_all(&mount).map_err(|e| e.to_string())?;
-                crate::core::config::write_atomic(&mount.join(name), &dng, 0o644).map_err(|e| e.to_string())
-            });
+            .await;
+            // ~20 MB DNG read and written to the key off the async workers
+            let res = match res {
+                Ok(_) => {
+                    let (src, dir) = (tmp_dng.clone(), mount.clone());
+                    let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
+                    tokio::task::spawn_blocking(move || {
+                        let dng = std::fs::read(&src).map_err(|e| format!("DNG absent: {}", e))?;
+                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                        crate::core::config::write_atomic(&dir.join(name), &dng, 0o644).map_err(|e| e.to_string())
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                }
+                Err(e) => Err(e),
+            };
             if let Err(e) = res {
                 error = Some(e);
                 break;
@@ -1272,6 +1293,9 @@ fn expected_elf_machine() -> Option<u16> {
 
 /// Check that `data` is an executable ELF for this machine.
 pub fn validate_update_binary(data: &[u8]) -> Result<(), String> {
+    if data.len() as u64 > crate::web::update::MAX_BINARY_BYTES {
+        return Err(format!("Fichier trop gros ({} Mo, 64 Mo au plus)", data.len() / 1_048_576));
+    }
     if data.len() < 64 || &data[..4] != b"\x7fELF" {
         return Err("Le fichier n'est pas un binaire Linux (ELF)".into());
     }
@@ -1315,7 +1339,8 @@ pub async fn system_update(
         return Err(err(StatusCode::CONFLICT, "Capture en cours : mise à jour impossible"));
     }
 
-    let mut binary: Option<Vec<u8>> = None;
+    // Kept as received (no second copy of up to 64 MB in the Pi's memory)
+    let mut binary: Option<axum::body::Bytes> = None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -1326,7 +1351,7 @@ pub async fn system_update(
                 .bytes()
                 .await
                 .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Lecture du fichier impossible: {}", e)))?;
-            binary = Some(bytes.to_vec());
+            binary = Some(bytes);
         }
     }
     let data = binary.filter(|d| !d.is_empty()).ok_or_else(|| err(StatusCode::BAD_REQUEST, "Aucun binaire reçu"))?;
@@ -1468,7 +1493,10 @@ mod tests {
     #[test]
     fn update_binary_validation() {
         assert!(validate_update_binary(b"not an elf at all").is_err());
-        let own = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        // Only the ELF header is checked: the first MB of the running test
+        // binary (a debug build can exceed the 64 MB limit)
+        let mut own = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        own.truncate(1 << 20);
         assert!(validate_update_binary(&own).is_ok(), "the running test binary must be accepted");
         // Same file with a foreign architecture
         let mut foreign = own.clone();

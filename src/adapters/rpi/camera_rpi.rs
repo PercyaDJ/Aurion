@@ -85,8 +85,7 @@ impl CameraRpi {
         cmd.arg("--shutter").arg(shutter_us.to_string());
 
         // ISO → analogue gain (ISO 100 = gain 1.0, ISO 800 = gain 8.0)
-        let gain = exposure.iso as f64 / 100.0;
-        cmd.arg("--gain").arg(format!("{:.1}", gain));
+        cmd.arg("--gain").arg(crate::core::exposure::rpicam_gain(exposure.iso));
 
         // Fixed white balance by default: same colours on every frame
         cmd.arg("--awb").arg(&self.awb);
