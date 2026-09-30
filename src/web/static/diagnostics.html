@@ -158,6 +158,10 @@
                     <span class="info-value" id="wifiIp">--</span>
                 </div>
             </div>
+            <p class="form-hint" id="wifiAddress" style="margin-bottom: 0.75rem;">
+                Sur n'importe quel Wi-Fi (celui d'Aurion, le partage de connexion du téléphone, le Wi-Fi de la maison),
+                l'interface répond à <b>http://aurion.local</b> (iPhone, iPad, Android 12 et plus).
+            </p>
             <button class="btn btn-outline btn-block" onclick="scanWifi()" id="scanBtn">
                 Scanner les réseaux
             </button>
@@ -203,12 +207,16 @@
             <input type="password" id="updPassword" class="form-input" autocomplete="off" placeholder="Mot de passe"
                 style="margin-bottom: 0.5rem;">
             <button class="btn btn-primary btn-block" id="githubUpdateBtn" onclick="startGithubUpdate()">Mettre à jour maintenant</button>
-            <p class="muted small" style="margin-top:0.5rem;">Ensuite : activez le partage de connexion du téléphone,
-                attendez 2 à 5 min, puis reconnectez-vous au Wi-Fi Aurion et revenez sur cette page.</p>
+            <p class="muted small" style="margin-top:0.5rem;">Ensuite : activez le partage de connexion du téléphone et
+                attendez 2 à 5 min. La caméra télécharge, installe, puis remet son Wi-Fi Aurion : reconnectez-vous-y, une
+                fenêtre donne le résultat (validée, ou retour à la version précédente et pourquoi) et le lien vers le
+                journal. Une coupure du partage de quelques minutes ne fait pas échouer la mise à jour.</p>
             <div id="githubUpdateStatus" class="muted small" style="margin-top: 0.5rem;"></div>
             <div id="helperWarning" class="warning-box warning" style="display:none;margin-top:0.5rem;"></div>
             <button class="btn btn-outline btn-block" id="rollbackBtn" onclick="rollbackUpdate()" style="margin-top:0.75rem;display:none;">
                 Revenir à la version précédente</button>
+            <label class="form-label" style="margin-top:0.75rem;">Journaux de mise à jour</label>
+            <div id="updateJournals" class="muted small">Aucun journal pour l'instant.</div>
         </div>
 
         <!-- Software update (OTA) -->
@@ -367,7 +375,8 @@
                 w.style.display = u.helper_outdated ? '' : 'none';
                 w.textContent = u.helper_outdated
                     ? "Le programme système d'Aurion (aurion-helper) est d'une version plus ancienne : certaines fonctions "
-                      + "(réveil programmé, profil d'énergie) restent inactives. Installez une fois l'image carte SD ou le paquet .deb de cette version."
+                      + "restent inactives. Version 5 ou plus : une mise à jour depuis GitHub le remet à niveau. "
+                      + "Plus ancien : installez une fois l'image carte SD de cette version, les mises à jour suivantes s'en chargeront."
                     : '';
             } catch (_) { }
         }
@@ -417,6 +426,7 @@
 
         loadUpdateStatus();
         loadUpdateWifi();
+        loadJournals();
         aurionPoll(loadUpdateStatus, 10000);
         updateDiagnostics();
         updateWifiStatus();
@@ -460,7 +470,30 @@
                     modeEl.style.color = 'var(--red)';
                 }
                 ipEl.textContent = data.ip_address || '--';
+                const addr = document.getElementById('wifiAddress');
+                if (data.mode === 'client' && data.ip_address) {
+                    addr.innerHTML = 'Sur ce Wi-Fi, l\'interface répond à <b>http://aurion.local</b> (iPhone, iPad, Android 12 et plus) '
+                        + 'et à <b>http://' + escapeHtml(data.ip_address) + '</b>.';
+                }
             } catch (e) { /* ignore */ }
+        }
+
+        async function loadJournals() {
+            try {
+                const data = await (await fetch('/api/system/update/journal')).json();
+                const list = data.journals || [];
+                const el = document.getElementById('updateJournals');
+                if (!list.length) return;
+                el.innerHTML = list.slice(0, 10).map(j => {
+                    const flags = [];
+                    if (j.warnings) flags.push(j.warnings + ' avert.');
+                    if (j.errors) flags.push(j.errors + ' erreur' + (j.errors > 1 ? 's' : ''));
+                    const url = '/api/system/update/journal/' + encodeURIComponent(j.name);
+                    return '<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.25rem 0;">'
+                        + '<a href="' + url + '" target="_blank" rel="noopener">' + escapeHtml(j.name) + '</a>'
+                        + '<span>' + escapeHtml(flags.join(', ') || 'OK') + ' · <a href="' + url + '" download="' + escapeHtml(j.name) + '">télécharger</a></span></div>';
+                }).join('');
+            } catch (_) { }
         }
 
         async function scanWifi() {
@@ -563,7 +596,7 @@
                 statusEl.style.color = data.success ? 'var(--green)' : 'var(--red)';
                 statusEl.textContent = data.message;
                 if (data.ip_address) {
-                    statusEl.innerHTML += '<br><strong>Interface : http://' + escapeHtml(data.ip_address) + ':8080</strong>';
+                    statusEl.innerHTML += '<br><strong>Interface : http://aurion.local ou http://' + escapeHtml(data.ip_address) + '</strong>';
                 }
                 updateWifiStatus();
             } catch (e) {

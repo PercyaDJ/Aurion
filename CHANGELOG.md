@@ -1,8 +1,50 @@
 # Journal des versions
 
-## Non publié
+## 1.13.0
 
-### Sécurité
+Objectif : chaque nouvelle fonctionnalité d'Aurion arrive par le téléphone, boîtier fermé, même quand elle touche au
+système de la caméra.
+
+- **Paquet de mise à jour complet** : la mise à jour depuis GitHub installe `aurion-update.tar.gz`, qui contient le
+  programme **et** ses fichiers système : `aurion-helper` (le seul programme lancé en root), les services systemd, la
+  règle de la clé USB, les clés de signature. Avant, seul le programme changeait et un nouveau helper demandait de
+  regraver la carte SD.
+- **Signature revérifiée en root** : le helper contrôle de nouveau la signature du paquet avec ses propres copies des
+  clés, avant d'installer quoi que ce soit.
+- **Retour arrière complet** : les fichiers remplacés sont sauvegardés avant l'installation. Une version qui ne démarre
+  pas, ou dont le **Wi-Fi Aurion ne démarre pas**, est retirée seule, programme et fichiers système ensemble, et
+  *Diagnostics* en donne la raison. Le retour est lancé par le helper sauvegardé : un helper cassé ne peut pas
+  l'empêcher. Le bouton *Revenir à la version précédente* remet aussi l'ensemble.
+- **Téléchargement qui reprend** : une coupure du partage de connexion de quelques minutes ne fait plus échouer la
+  mise à jour ; le téléchargement reprend là où il s'était arrêté.
+- **Fenêtre de résultat** : après la mise à jour, la caméra remet son Wi-Fi Aurion ; à la reconnexion du téléphone,
+  une fenêtre indique « Mise à jour validée » (après 3 minutes de fonctionnement) ou le retour à la version précédente
+  et sa raison, avec le nombre d'avertissements et d'erreurs non bloquants. Pendant les 3 minutes d'essai, un bandeau
+  l'annonce et la page se met à jour seule.
+- **Journal de mise à jour** : un fichier par mise à jour (carte SD et clé USB), une ligne par étape (`OK`,
+  `AVERTISSEMENT`, `ERREUR`), lisible et téléchargeable dans *Diagnostics*.
+- **Accès depuis n'importe quel téléphone ou tablette** : l'image nomme le Pi « aurion » (il s'appelait
+  « raspberrypi ») et l'annonce sur le réseau. `http://aurion.local` répond sur le Wi-Fi Aurion, le partage de
+  connexion du téléphone ou le Wi-Fi de la maison, sans `:8080` : iPhone, iPad, Android 12 et plus. *Diagnostics*
+  affiche aussi l'adresse IP du moment.
+- Les réglages sont copiés sur la clé USB juste avant chaque mise à jour.
+- Une mise à jour ne réinitialise jamais les réglages ni le mot de passe Wi-Fi : une version qui refuserait la
+  configuration en place est annulée.
+- Décision de sécurité : les paquets du système (Raspberry Pi OS) ne sont plus mis à jour boîtier fermé, la caméra ne
+  rejoignant jamais Internet d'elle-même ; chaque nouvelle image les corrige (registre dans `AUDIT_SECURITE.md`).
+- **Passage à la 1.13.0** : une caméra en 1.12 (helper version 4) reçoit le programme seul ; il faut regraver une fois
+  la carte SD avec l'image 1.13.0 pour que les mises à jour suivantes installent le paquet complet.
+
+### CI et publication
+- CI plus rapide, mêmes contrôles : le test de l'installeur réutilise le programme compilé par les tests (il
+  recompilait toutes les dépendances, environ 70 s) ; les tests sont compilés légèrement optimisés et sans
+  informations de débogage (simulations de nuit environ 3 fois plus rapides) ; l'empaquetage et l'image ne sont
+  refaits que si un fichier qui les compose change.
+- Une PR qui modifie le code sans monter la version l'annonce dans la CI : à la fusion, rien ne serait publié ni
+  envoyé à ARBOR.
+- ARBOR : une clé d'envoi absente fait échouer le workflow Release (au lieu d'un simple avertissement).
+
+### Sécurité de l'image
 - Plan ARBOR du 30/09/2026 (image 1.12.1) : les 13 CVE openssl signalées sans correctif (dont CVE-2026-84782,
   CVSS 8.2) sont corrigées par Debian en 3.5.7-1~deb13u3, la version déjà présente dans l'image (avis OSV mis à
   jour le 30/09/2026). Aucune montée de version nécessaire : faux positif ARBOR, à relancer.

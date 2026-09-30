@@ -60,6 +60,11 @@ jobs:
 
       - name: Tests
         if: steps.version.outputs.skip == 'false'
+        # Same test build as the CI (light optimizations, no debug info); the
+        # published binary is built separately, in release mode
+        env:
+          CARGO_PROFILE_DEV_OPT_LEVEL: 1
+          CARGO_PROFILE_DEV_DEBUG: 0
         run: |
           cargo test --locked
           # The root helper and the installer ship in the release too
@@ -80,17 +85,18 @@ jobs:
           else
             sudo apt-get install -y gcc-aarch64-linux-gnu
             build="$v-edge.${GITHUB_SHA::7}"
-            AURION_BUILD=$build CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
-              cargo build --release --locked --features rpi --target aarch64-unknown-linux-musl
-            mkdir -p dist
-            cp target/aarch64-unknown-linux-musl/release/aurion dist/aurion-arm64
+            # Same packaging as a release: the phone installs aurion-update.tar.gz
+            AURION_BUILD=$build bash scripts/package.sh
+            cp "dist/aurion-$v-rpi-arm64/aurion" dist/aurion-arm64
           fi
-          (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256)
+          (cd dist && sha256sum aurion-arm64 > aurion-arm64.sha256 && sha256sum aurion-update.tar.gz > aurion-update.tar.gz.sha256)
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
-      # The Pi only installs a binary signed with keys/aurion-signing.pub (or
+      # The Pi only installs what is signed with keys/aurion-signing.pub (or
       # the offline backup key): without the signature it would be refused.
-      - name: Signature du binaire
+      # aurion-update.tar.gz: application and system files (Aurion 1.13+);
+      # aurion-arm64: the bare binary, for cameras still on 1.12.
+      - name: Signature du binaire et du paquet de mise à jour
         env:
           AURION_SIGNING_KEY: ${{ secrets.AURION_SIGNING_KEY }}
         run: |
@@ -101,10 +107,12 @@ jobs:
           key=$(mktemp)
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$AURION_SIGNING_KEY" >"$key"
-          openssl pkeyutl -sign -rawin -inkey "$key" -in dist/aurion-arm64 -out dist/aurion-arm64.sig
-          # The secret must be the private half of the key built into Aurion
-          openssl pkeyutl -verify -pubin -inkey keys/aurion-signing.pub -rawin \
-            -in dist/aurion-arm64 -sigfile dist/aurion-arm64.sig
+          for f in aurion-arm64 aurion-update.tar.gz; do
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "dist/$f" -out "dist/$f.sig"
+            # The secret must be the private half of the key built into Aurion
+            openssl pkeyutl -verify -pubin -inkey keys/aurion-signing.pub -rawin \
+              -in "dist/$f" -sigfile "dist/$f.sig"
+          done
 
       - name: Déplacer le tag edge sur ce commit
         env:
@@ -128,6 +136,9 @@ jobs:
             dist/aurion-arm64
             dist/aurion-arm64.sha256
             dist/aurion-arm64.sig
+            dist/aurion-update.tar.gz
+            dist/aurion-update.tar.gz.sha256
+            dist/aurion-update.tar.gz.sig
 
       - name: Image carte SD (Raspberry Pi OS Lite 64 bits + Aurion)
         if: steps.version.outputs.skip == 'false'
@@ -169,9 +180,10 @@ jobs:
             Guide pas à pas : docs/GUIDE_DEMARRAGE.md
 
             Autres fichiers : paquet `.deb` (`sudo apt install ./aurion_*.deb`) et archive `.tar.gz`
-            pour une installation sur un Raspberry Pi OS existant. `aurion-arm64` : utilisé par la mise à jour
-            depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*), avec sa signature `aurion-arm64.sig`
-            (envoi par fichier : choisir les deux). `aurion-sbom.cdx.json` et
+            pour une installation sur un Raspberry Pi OS existant. `aurion-update.tar.gz` : utilisé par la mise à
+            jour depuis le téléphone (Diagnostics, *Mettre à jour depuis GitHub*), programme et fichiers système,
+            signé (`.sig`). `aurion-arm64` et sa signature : programme seul, pour les caméras en 1.12 et l'envoi par
+            fichier (choisir les deux). `aurion-sbom.cdx.json` et
             `aurion-image-sbom.cdx.json` : inventaires CycloneDX de l'application et du système de l'image.
           files: |
             dist/*.img.xz
@@ -180,6 +192,8 @@ jobs:
             dist/*.sha256
             dist/aurion-arm64
             dist/aurion-arm64.sig
+            dist/aurion-update.tar.gz
+            dist/aurion-update.tar.gz.sig
             dist/*.cdx.json
 
       # Straight after the release: the image just published and the code it was built from
@@ -188,6 +202,8 @@ jobs:
         env:
           ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
           ARBOR_IMAGE_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
+          # A missing key fails the job (red) instead of a warning nobody reads
+          ARBOR_REQUIRED: "1"
         run: |
           bash scripts/arbor-scan.sh image dist/aurion-image-sbom.cdx.json
           bash scripts/arbor-scan.sh app dist/aurion-sbom.cdx.json

@@ -112,6 +112,7 @@ async fn start_hotspot(state: &AppState) {
         if let Err(e) = aurion::adapters::rpi::NetworkRpi::new().start_ap(&net.ssid, &net.password, net.channel).await {
             tracing::warn!("Failed to start Wi-Fi AP: {} — continuing", e);
             state.add_log(format!("Hotspot Wi-Fi non démarré: {}", e)).await;
+            *state.hotspot_error.lock().unwrap() = Some(e.to_string());
         }
     }
     if let Some(up) = aurion::sys::uptime_secs() {

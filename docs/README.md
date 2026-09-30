@@ -9,6 +9,7 @@
 | [SPECIFICATIONS.md](SPECIFICATIONS.md) | tous | ce que fait Aurion : exigences, règles de gestion, critères d'acceptation |
 | [UX.md](UX.md) | conception | principes d'interface, frictions supprimées, écrans, mode simple / expert |
 | [DAT.md](DAT.md) | développeurs | Dossier d'Architecture Technique : composants, déroulé de la nuit, données, réseau, sécurité, livraison, API |
+| [CONCEPTION_AB.md](CONCEPTION_AB.md) | développeurs | mise à jour complète du système A/B (tryboot) : étude reportée |
 | [DEX.md](DEX.md) | exploitation | Dossier d'Exploitation : installation, nuit type, supervision, mises à jour, sauvegarde, incidents |
 | [AUDIT_CODE.md](AUDIT_CODE.md) | développeurs | architecture, qualité, couverture, bugs corrigés, dette restante |
 | [AUDIT_SECURITE.md](AUDIT_SECURITE.md) | développeurs | modèle de menace, failles corrigées, dépendances, risques résiduels |
@@ -19,4 +20,4 @@
 
 Installation avancée : [DEPLOY_RPI.md](../DEPLOY_RPI.md).
 
-Version couverte : **1.12.1** (30/09/2026).
+Version couverte : **1.13.0** (30/09/2026).

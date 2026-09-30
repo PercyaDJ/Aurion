@@ -1,6 +1,6 @@
 # Dossier d'Exploitation (DEX)
 
-Version couverte : **1.12.1**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
+Version couverte : **1.13.0**. Public : l'utilisateur averti ou la personne qui maintient les caméras.
 Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_DEMARRAGE.md](GUIDE_DEMARRAGE.md).
 
 ## 1. Fiche d'identité
@@ -11,7 +11,7 @@ Pour une première utilisation sans connaissance technique, lire d'abord [GUIDE_
 | Système | Raspberry Pi OS Lite 64 bits (Bullseye, Bookworm ou Trixie) |
 | Service | `aurion.service` (systemd, `Type=notify`, redémarrage automatique, watchdog 180 s) |
 | Utilisateur du service | `aurion` (image carte SD) ou l'utilisateur choisi à l'installation |
-| Interface | Wi-Fi `Aurion`, `http://192.168.4.1:8080` |
+| Interface | Wi-Fi `Aurion` : `http://aurion.local` ou `http://192.168.4.1:8080`. Partage de connexion du téléphone ou Wi-Fi de la maison : `http://aurion.local` ou l'adresse IP affichée dans *Diagnostics* (image 1.13.0 et plus ; iPhone, iPad, Android 12 et plus) |
 | Compte de maintenance (image) | `pi` / `aurion`, SSH désactivé par défaut |
 | Journaux | `journalctl -u aurion` (en RAM, perdus à l'extinction) et `sessions/*/session.log` sur la clé |
 
@@ -97,17 +97,49 @@ Les journaux système sont en RAM : pour garder le journal d'une nuit, se fier �
 
 | Méthode | Procédure | Retour arrière |
 |---|---|---|
-| Depuis GitHub (sans ordinateur) | *Diagnostics*, *Mettre à jour depuis GitHub* : canal stable ou développement, partage de connexion du téléphone | bouton *Revenir à la version précédente* |
+| Depuis GitHub (sans ordinateur) | *Diagnostics*, *Mettre à jour depuis GitHub* : canal stable ou développement, partage de connexion du téléphone. Installe le paquet signé `aurion-update.tar.gz` : programme **et** fichiers système (1.13.0) | bouton *Revenir à la version précédente* |
 | Par fichier | *Diagnostics*, *Mise à jour par fichier*, les deux fichiers `aurion-arm64` et `aurion-arm64.sig` de la release | idem (`/opt/aurion/aurion.prev`) |
 | Paquet | `sudo apt install ./aurion_X.Y.Z_arm64.deb` | réinstaller le paquet précédent |
 | Script | `sudo ./install.sh` depuis un clone à jour | idem |
 
-**Retour arrière automatique (1.12.1)** : une version installée démarre « à l'essai » (fichier
+**Paquet de mise à jour (1.13.0)** : la mise à jour depuis GitHub installe `aurion-update.tar.gz`, qui contient le
+programme et les fichiers système dont il a besoin : `aurion-helper` (le seul programme lancé en root), les services
+systemd, la règle de la clé USB et les clés publiques. Une nouvelle fonctionnalité qui touche au système arrive donc
+sans regraver la carte SD. Déroulé :
+
+1. Aurion copie les réglages sur la clé USB, télécharge le paquet (le téléchargement reprend tout seul après une
+   coupure du partage de connexion, pendant quelques minutes), contrôle son empreinte et sa signature.
+2. `aurion-helper app-update` (root) **revérifie la signature** avec les clés de `/usr/local/share/aurion/keys`,
+   sauvegarde les fichiers qu'il va remplacer dans `/var/lib/aurion/prev/`, puis lance le `install.sh --update` du
+   paquet : ni apt, ni `config.txt`, ni réglages touchés. Si l'installation échoue en cours de route, tout est remis
+   comme avant. Une nouvelle version qui refuse la configuration en place est refusée (le mot de passe Wi-Fi n'est
+   jamais réinitialisé par une mise à jour).
+3. Aurion redémarre sur la nouvelle version, à l'essai. La caméra remet son Wi-Fi Aurion ; à la reconnexion, une
+   fenêtre donne le résultat (validée après 3 minutes, ou retour à la version précédente avec la raison), le nombre
+   d'avertissements et d'erreurs non bloquants, et le lien vers le journal.
+
+**Journal de mise à jour (1.13.0)** : un fichier par mise à jour, sur la carte SD (`/opt/aurion/config/journaux-maj/`, les
+30 derniers) et sur la clé USB (`aurion-maj/`, tous). Une ligne par étape : `INFO`, `OK`, `AVERTISSEMENT` (n'a pas
+arrêté la mise à jour : coupure du partage de connexion, copie des réglages impossible…) ou `ERREUR`. Lisibles et
+téléchargeables dans *Diagnostics*, rubrique *Journaux de mise à jour*.
+
+Une caméra en 1.12 (helper version 4) ne sait pas installer le paquet : elle reçoit le programme seul, et
+*Diagnostics* signale « helper à mettre à jour ». Il faut alors regraver une fois la carte SD (image 1.13.0 ou plus
+récente) ; ensuite, tout arrive par le téléphone.
+
+**Retour arrière automatique (1.12.1, étendu en 1.13.0)** : une version installée démarre « à l'essai » (fichier
 `/opt/aurion/aurion.trial`). Si le service échoue 3 fois en 15 minutes, systemd lance `aurion-rollback.service`, qui
 remet la version précédente (`aurion.prev`, la version en échec est gardée en `aurion.failed`) et relance le service ;
 *Diagnostics* l'annonce au démarrage suivant. Après 3 minutes de fonctionnement, la version est confirmée et le
 fichier d'essai disparaît. Une version confirmée qui échoue (matériel, par exemple) n'est jamais remplacée : le
 service est simplement relancé.
+
+Depuis la 1.13.0 : après une mise à jour par paquet, le retour arrière remet aussi les fichiers système sauvegardés
+(helper, services, règle USB, clés), et il est lancé par le helper **sauvegardé**, pas par le nouveau : un helper cassé
+ne peut pas empêcher son propre retour arrière. Une version dont le Wi-Fi Aurion ne démarre pas n'est jamais
+confirmée : elle est retirée au bout des 3 minutes, sans quoi le téléphone ne pourrait plus joindre la caméra.
+*Diagnostics* affiche la raison du retour. Le bouton *Revenir à la version précédente* remet, lui aussi, programme et
+fichiers système quand la version en place vient d'un paquet.
 
 La mise à jour est refusée pendant une nuit. Depuis la 1.12.0, seul un binaire **signé par le projet** est installé,
 par GitHub comme par fichier (voir « Signature des versions » ci-dessous). Retour arrière manuel :
@@ -120,8 +152,9 @@ sudo systemctl start aurion
 
 ### Signature des versions
 
-Chaque binaire `aurion-arm64` publié est accompagné de `aurion-arm64.sig`, sa signature Ed25519. Aurion contient
-deux clés publiques (`keys/`) et refuse tout binaire qui n'est pas signé par l'une d'elles : un tiers qui publierait
+Chaque fichier installable publié (`aurion-update.tar.gz`, `aurion-arm64`) est accompagné de sa signature Ed25519
+(`.sig`). Aurion contient deux clés publiques (`keys/`) et refuse tout ce qui n'est pas signé par l'une d'elles ; pour
+le paquet, le helper root vérifie de nouveau avec ses propres copies des clés : un tiers qui publierait
 une release (compte ou jeton GitHub compromis) ou enverrait un fichier depuis le Wi-Fi Aurion ne peut rien installer.
 
 | Clé | Où est la partie privée | Rôle |
@@ -134,10 +167,10 @@ une release (compte ou jeton GitHub compromis) ou enverrait un fichier depuis le
 - Le workflow vérifie que le secret correspond à `keys/aurion-signing.pub` avant de publier ; secret absent ou faux :
   la publication s'arrête, aucun binaire non signé ne sort.
 - **Clé principale perdue ou compromise** : générer une nouvelle paire, remplacer `keys/aurion-signing.pub` et le
-  secret, puis signer **à la main avec la clé de secours** le binaire de cette version et l'envoyer par fichier (ou
-  publier sa signature à la place de celle du workflow). Les caméras l'acceptent, puis ne font plus confiance qu'aux
-  nouvelles clés : aucune n'a besoin d'être ouverte.
-  `openssl pkeyutl -sign -rawin -inkey aurion-secours.key -in aurion-arm64 -out aurion-arm64.sig`
+  secret, puis signer **à la main avec la clé de secours** le paquet de cette version et publier cette signature à
+  la place de celle du workflow. Les caméras l'acceptent, puis ne font plus confiance qu'aux nouvelles clés (le paquet
+  les installe aussi pour le helper) : aucune n'a besoin d'être ouverte.
+  `openssl pkeyutl -sign -rawin -inkey aurion-secours.key -in aurion-update.tar.gz -out aurion-update.tar.gz.sig`
 - Transition : une caméra en 1.11.x ou avant ne vérifie pas encore les signatures ; elle installe la 1.12.0
   normalement, et n'accepte ensuite que des versions signées.
 

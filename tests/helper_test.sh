@@ -36,6 +36,7 @@ has   "radio wifi off" "$HELPER" ap-stop
 has   "192.0.2.10" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 has   "mode=infrastructure, 0600" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 hasnt "motdepasse12" stdin "motdepasse12" "$HELPER" wifi-connect Maison
+has   "redirect 80 -> 8080" stdin "motdepasse12" "$HELPER" wifi-connect Maison
 ko    stdin "court" "$HELPER" wifi-connect Maison
 ko    stdin "motdepasse12" "$HELPER" wifi-connect "$(printf 'x\ny')"
 
@@ -46,7 +47,7 @@ ko    "$HELPER" set-time 0
 ko    "$HELPER" set-time "1767225600; reboot"
 ko    "$HELPER" set-time 9999999999
 # version (checked by the application)
-has   "4" "$HELPER" version
+has   "5" "$HELPER" version
 
 # app-rollback: a trial version that keeps failing is replaced by the previous one
 APP=$(mktemp -d)
@@ -62,6 +63,71 @@ has   "pas de retour arrière" env AURION_FAKE_APP_DIR="$APP" "$HELPER" app-roll
 has   "systemctl start --no-block aurion.service" env AURION_FAKE_APP_DIR="$APP" "$HELPER" app-rollback
 ok    test "$(cat "$APP/aurion")" = NEW2
 rm -rf "$APP"
+
+# app-update: signed package (application + system files), checked again as root
+FR=$(mktemp -d); APP=$(mktemp -d); PK=$(mktemp -d)
+mkdir -p "$FR/usr/local/share/aurion/keys" "$FR/usr/local/sbin" "$FR/etc/systemd/system"
+openssl genpkey -algorithm ed25519 -out "$PK/projet.key" 2>/dev/null
+openssl pkey -in "$PK/projet.key" -pubout -out "$FR/usr/local/share/aurion/keys/aurion-signing.pub"
+openssl genpkey -algorithm ed25519 -out "$PK/autre.key" 2>/dev/null
+printf 'OLD-HELPER' >"$FR/usr/local/sbin/aurion-helper"; printf 'OLD-UNIT' >"$FR/etc/systemd/system/aurion.service"
+printf '#!/bin/sh\necho "aurion 1.12.1"\n' >"$APP/aurion"; chmod +x "$APP/aurion"
+make_bundle() { # <dir> <version> [file to leave out]
+  local d="$1/p"; rm -rf "$d"; mkdir -p "$d/deploy" "$d/config" "$d/keys"
+  printf '#!/bin/sh\necho "aurion %s"\n' "$2" >"$d/aurion"; chmod +x "$d/aurion"
+  for f in aurion-helper install.sh deploy/aurion.service deploy/99-aurion-usb.rules config/default.json keys/aurion-signing.pub; do
+    [[ "$f" == "${3:-}" ]] || printf 'x' >"$d/$f"
+  done
+  tar -C "$d" -czf "$1/paquet.tar.gz" .
+  openssl pkeyutl -sign -rawin -inkey "$PK/projet.key" -in "$1/paquet.tar.gz" -out "$1/paquet.sig"
+}
+upd() { env AURION_FAKE_ROOT="$FR" AURION_FAKE_APP_DIR="$APP" "$HELPER" "$@"; }
+make_bundle "$PK" 1.13.0
+has   "aurion 1.13.0" upd app-update "$PK/paquet.tar.gz" "$PK/paquet.sig"
+has   "install.sh --update --user aurion" upd app-update "$PK/paquet.tar.gz" "$PK/paquet.sig"
+ok    test "$(cat "$APP/aurion.trial")" = "aurion 1.13.0"
+ok    test "$(cat "$FR/var/lib/aurion/prev/pour-version")" = "aurion 1.13.0"
+has   "usr/local/sbin/aurion-helper" tar -tf "$FR/var/lib/aurion/prev/fichiers.tar"
+has   "etc/systemd/system/aurion.service" tar -tf "$FR/var/lib/aurion/prev/fichiers.tar"
+ok    test ! -e "$FR/var/lib/aurion/update"
+# Refused: altered package, other key, bad signature file, incomplete package, no such file
+cp "$PK/paquet.tar.gz" "$PK/altere.tar.gz"; printf 'x' >>"$PK/altere.tar.gz"
+has   "signature refusée" upd app-update "$PK/altere.tar.gz" "$PK/paquet.sig"
+openssl pkeyutl -sign -rawin -inkey "$PK/autre.key" -in "$PK/paquet.tar.gz" -out "$PK/autre.sig"
+has   "signature refusée" upd app-update "$PK/paquet.tar.gz" "$PK/autre.sig"
+printf 'court' >"$PK/court.sig"
+ko    upd app-update "$PK/paquet.tar.gz" "$PK/court.sig"
+ko    upd app-update "$PK/absent.tar.gz" "$PK/paquet.sig"
+ko    upd app-update "$PK/paquet.tar.gz"
+ln -s "$PK/paquet.tar.gz" "$PK/lien.tar.gz"
+ko    upd app-update "$PK/lien.tar.gz" "$PK/paquet.sig"
+make_bundle "$PK" 1.13.0 install.sh
+has   "paquet incomplet" upd app-update "$PK/paquet.tar.gz" "$PK/paquet.sig"
+# A trial version that keeps failing: system files AND application put back
+make_bundle "$PK" 1.13.0
+printf '#!/bin/sh\necho "aurion 1.12.1"\n' >"$APP/aurion"
+upd app-update "$PK/paquet.tar.gz" "$PK/paquet.sig" >/dev/null 2>&1
+printf 'NEW-HELPER' >"$FR/usr/local/sbin/aurion-helper"; printf 'NEW-UNIT' >"$FR/etc/systemd/system/aurion.service"
+printf 'NEW-BIN' >"$APP/aurion"
+has   "version précédente rétablie" upd app-rollback
+ok    test "$(cat "$FR/usr/local/sbin/aurion-helper")" = OLD-HELPER
+ok    test "$(cat "$FR/etc/systemd/system/aurion.service")" = OLD-UNIT
+has   "aurion 1.12.1" "$APP/aurion" --version
+ok    test "$(cat "$APP/aurion.failed")" = NEW-BIN
+has   "aurion 1.13.0" cat "$APP/aurion.rolled-back"
+ok    test ! -e "$APP/aurion.trial"
+ok    test ! -e "$FR/var/lib/aurion/prev"
+# Manual rollback (Diagnostics): only with a full copy made for the running version
+upd app-update "$PK/paquet.tar.gz" "$PK/paquet.sig" >/dev/null 2>&1
+printf '#!/bin/sh\necho "aurion 1.13.0"\n' >"$APP/aurion"
+printf 'NEW-HELPER' >"$FR/usr/local/sbin/aurion-helper"
+has   "programme et fichiers système" upd app-rollback manual
+ok    test "$(cat "$FR/usr/local/sbin/aurion-helper")" = OLD-HELPER
+hasnt "systemctl start" upd app-rollback manual
+out=$(upd app-rollback manual 2>&1); code=$?
+if [[ $code -eq 3 ]]; then passes=$((passes+1)); else echo "FAIL: app-rollback manual sans copie → code $code ($out)"; fails=$((fails+1)); fi
+ko    upd app-rollback autre
+rm -rf "$FR" "$APP" "$PK"
 
 # usb-format: USB disks only, never the SD card or the system disk
 SB=$(mktemp -d); mkdir -p "$SB/dev/usb1/1-1/host0/block/sda" "$SB/dev/mmc/block/mmcblk0" "$SB/block"

@@ -168,9 +168,40 @@ async fn a_new_version_runs_on_trial_until_confirmed() {
     assert_eq!(s["last"]["ok"], true, "{}", s);
     let trial = t.dir.path().join("bin/aurion.trial");
     assert!(trial.exists(), "installed on trial: the helper can put the previous version back");
+    assert_eq!(s["last"]["outcome"], "essai", "window on the phone waits for the confirmation: {}", s);
     // Next start: once it has run long enough, the version confirms itself
     aurion::web::update::startup_checks(t.state.clone(), std::time::Duration::from_millis(10)).await;
     assert!(!trial.exists(), "confirmed");
+    let s: Value = t.server.get("/api/system/update/status").await.json();
+    assert_eq!(s["last"]["outcome"], "validee", "{}", s);
+    assert_eq!(s["last"]["seen"], false, "shown once on the phone");
+    // The journal tells every step, ends with the confirmation
+    let log = s["last"]["log"].as_str().unwrap().to_string();
+    let text = t.server.get(&format!("/api/system/update/journal/{}", log)).await.text();
+    assert!(text.contains("Mise à jour demandée") && text.contains("validée"), "{}", text);
+    let list: Value = t.server.get("/api/system/update/journal").await.json();
+    assert_eq!(list["journals"][0]["name"], log.as_str());
+    // Closed on the phone: not shown again
+    t.server.post("/api/system/update/seen").await.assert_status_ok();
+    let s: Value = t.server.get("/api/system/update/status").await.json();
+    assert_eq!(s["last"]["seen"], true);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_update_is_reported_with_its_journal() {
+    let bin = std::fs::read("/bin/bash").unwrap();
+    let wrong = format!("{}  aurion-arm64\n", sha256_hex(b"another file"));
+    let sig = common::sign(&bin);
+    let (t, s) = online_update(fake_github_with(bin, Some(wrong), Some(sig)).await).await;
+    assert_eq!(s["last"]["outcome"], "echec", "{}", s);
+    assert!(s["errors"].as_u64().unwrap() >= 1, "{}", s);
+    let log = s["last"]["log"].as_str().unwrap();
+    let text = t.server.get(&format!("/api/system/update/journal/{}", log)).await.text();
+    assert!(text.contains("ERREUR") && text.contains("Empreinte"), "{}", text);
+    // Nothing but journals is ever served
+    for bad in ["..%2F..%2Fetc%2Fpasswd", "aurion.json", "x.txt"] {
+        t.server.get(&format!("/api/system/update/journal/{}", bad)).await.assert_status(StatusCode::NOT_FOUND);
+    }
 }
 
 #[tokio::test]

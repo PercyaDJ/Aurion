@@ -15,7 +15,8 @@
 #   aurion-helper shutdown
 #   aurion-helper mount-usb | umount-usb
 #   aurion-helper usb-add <kernel-name>         (called by the udev rule)
-#   aurion-helper app-rollback                  (called by aurion-rollback.service)
+#   aurion-helper app-update <paquet> <sig>     (signed update: application + system files)
+#   aurion-helper app-rollback [manual]         (called by aurion-rollback.service)
 #
 # Network: NetworkManager when it manages wlan0 (Raspberry Pi OS
 # Bookworm/Trixie), hostapd + dnsmasq otherwise.
@@ -48,7 +49,7 @@ CLIENT_CON=aurion-client
 NM_CON_DIR=/etc/NetworkManager/system-connections
 [[ "$DRYRUN" == "1" ]] && NM_CON_DIR="$RUN_DIR"
 # Bumped when commands change: the application checks it (Diagnostics).
-HELPER_VERSION=4
+HELPER_VERSION=5
 RTC_DIR=/sys/class/rtc/rtc0
 # Dry-run (tests): a fake RTC folder, never the real /sys
 [[ "$DRYRUN" == "1" ]] && RTC_DIR="${AURION_FAKE_RTC:-/nonexistent/aurion-rtc}"
@@ -101,6 +102,8 @@ read_secret() {
 }
 
 # ─── Captive portal (DNS answered by the AP, port 80 → web UI) ─
+# The port 80 redirect is also set on a joined Wi-Fi (phone hotspot, home):
+# http://aurion.local then works without ":8080" everywhere.
 
 captive_on() {
   have nft || [[ "$DRYRUN" == "1" ]] || { echo "nft absent: redirection du port 80 ignorée" >&2; return 0; }
@@ -325,6 +328,8 @@ method=ignore"; then
     run wpa_supplicant -B -i "$WLAN" -c "$RUN_DIR/wpa.conf" -P "$RUN_DIR/wpa.pid"
     if have dhcpcd; then run dhcpcd -w "$WLAN"; else run dhclient "$WLAN"; fi
   fi
+  # Port 80 → interface on this network too: http://aurion.local, no port
+  captive_on
   [[ "$DRYRUN" == "1" ]] && { echo "192.0.2.10"; return 0; }
   for _ in $(seq 1 15); do
     ip=$(ip -4 -o addr show "$WLAN" | awk '{print $4}' | cut -d/ -f1 | head -n1)
@@ -539,30 +544,147 @@ cmd_usb_format() {
 
 APP_DIR=/opt/aurion
 [[ "$DRYRUN" == "1" ]] && APP_DIR="${AURION_FAKE_APP_DIR:-/nonexistent/aurion-app}"
+# System files: "/" (dry-run: a fake root, the real system is never touched)
+SYS_ROOT=""
+[[ "$DRYRUN" == "1" ]] && SYS_ROOT="${AURION_FAKE_ROOT:-/nonexistent/aurion-root}"
+STATE_DIR="$SYS_ROOT/var/lib/aurion"
+KEYS_DIR="$SYS_ROOT/usr/local/share/aurion/keys"
+MAX_BUNDLE_BYTES=$((64 * 1024 * 1024))
+# System files an update may replace: saved before, put back by app-rollback
+SNAPSHOT_FILES=(usr/local/sbin/aurion-helper usr/local/share/aurion/keys etc/aurion.env etc/sudoers.d/aurion
+  etc/systemd/system/aurion.service etc/systemd/system/aurion-rollback.service etc/udev/rules.d/99-aurion-usb.rules)
+
+# The file is signed by one of the project keys installed with Aurion
+# (root-owned: the service cannot change them).
+signed_by_project() {
+  local f="$1" sig="$2" k
+  for k in "$KEYS_DIR"/*.pub; do
+    [[ -f "$k" ]] || continue
+    openssl pkeyutl -verify -pubin -inkey "$k" -rawin -in "$f" -sigfile "$sig" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# Signed update package (aurion-update.tar.gz): the application AND the
+# system files it needs (this helper, systemd units, udev rule, keys), put in
+# place by its own install.sh. The signature is checked again here, as root:
+# the service is never trusted. The previous files are saved first, and the
+# new version runs on trial (automatic rollback, see below). The service is
+# not restarted here: the application exits once this returns.
+cmd_app_update() {
+  [[ $# -eq 2 ]] || die "usage : app-update <paquet.tar.gz> <signature>"
+  local src="$1" sigsrc="$2" work="$STATE_DIR/update" prev="$STATE_DIR/prev" size version
+  [[ -f "$src" && ! -L "$src" && -f "$sigsrc" && ! -L "$sigsrc" ]] || die "paquet ou signature introuvable"
+  size=$(stat -c %s -- "$src")
+  (( size > 0 && size <= MAX_BUNDLE_BYTES )) || die "taille du paquet refusée ($size octets)"
+  [[ "$(stat -c %s -- "$sigsrc")" -eq 64 ]] || die "signature invalide (64 octets attendus)"
+  rm -rf "$work"
+  install -d -m 0700 "$work" "$work/new"
+  # Private copies first: the files handed over cannot change after the check
+  cp -- "$src" "$work/paquet.tar.gz"
+  cp -- "$sigsrc" "$work/paquet.sig"
+  if ! signed_by_project "$work/paquet.tar.gz" "$work/paquet.sig"; then
+    rm -rf "$work"
+    die "signature refusée : ce paquet n'a pas été publié par le projet"
+  fi
+  tar -xzf "$work/paquet.tar.gz" -C "$work/new" --no-same-owner || { rm -rf "$work"; die "paquet illisible"; }
+  local f
+  for f in aurion aurion-helper install.sh deploy/aurion.service deploy/99-aurion-usb.rules config/default.json; do
+    [[ -f "$work/new/$f" && ! -L "$work/new/$f" ]] || { rm -rf "$work"; die "paquet incomplet : $f manquant"; }
+  done
+  chmod 0755 "$work/new/aurion" "$work/new/install.sh"
+  version=$("$work/new/aurion" --version 2>/dev/null | head -n1 | tr -cd '[:print:]') || true
+  [[ "$version" =~ ^aurion\ [0-9A-Za-z.+-]{1,60}$ ]] || { rm -rf "$work"; die "le nouveau programme ne démarre pas sur ce Pi"; }
+
+  # Save what the update replaces
+  local rel list=()
+  rm -rf "$prev.tmp"
+  install -d -m 0700 "$prev.tmp"
+  for rel in "${SNAPSHOT_FILES[@]}"; do
+    [[ -e "$SYS_ROOT/$rel" ]] && list+=("$rel")
+  done
+  if (( ${#list[@]} )); then
+    tar -cpf "$prev.tmp/fichiers.tar" -C "$SYS_ROOT/" -- "${list[@]}"
+  fi
+  [[ -f "$SYS_ROOT/usr/local/sbin/aurion-helper" ]] && cp -p -- "$SYS_ROOT/usr/local/sbin/aurion-helper" "$prev.tmp/aurion-helper"
+  [[ -f "$APP_DIR/aurion" ]] && cp -p -- "$APP_DIR/aurion" "$prev.tmp/aurion"
+  printf '%s\n' "$version" >"$prev.tmp/pour-version"
+  rm -rf "$prev"
+  mv "$prev.tmp" "$prev"
+
+  if ! run bash "$work/new/install.sh" --update --user "$AURION_USER"; then
+    # Half-installed: everything back as it was
+    restore_snapshot
+    rm -rf "$work"
+    die "installation de $version en échec : version précédente remise en place"
+  fi
+  # On trial until the application confirms it (automatic rollback otherwise)
+  printf '%s' "$version" >"$APP_DIR/aurion.trial"
+  chmod 0644 "$APP_DIR/aurion.trial"
+  rm -rf "$work"
+  echo "$version"
+}
+
+# Put back the files saved by app-update (system files and application).
+restore_snapshot() {
+  local prev="$STATE_DIR/prev"
+  [[ -f "$prev/fichiers.tar" ]] && tar -xpf "$prev/fichiers.tar" -C "$SYS_ROOT/"
+  if [[ -f "$prev/aurion" ]]; then
+    [[ -f "$APP_DIR/aurion" ]] && mv -f "$APP_DIR/aurion" "$APP_DIR/aurion.failed"
+    cp -p -- "$prev/aurion" "$APP_DIR/aurion"
+  fi
+  rm -rf "$prev"
+  run systemctl daemon-reload || true
+  run udevadm control --reload-rules || true
+}
+
+# The saved files belong to this version (the one on trial or running).
+snapshot_for() {
+  local want="$1" prev="$STATE_DIR/prev"
+  [[ -f "$prev/pour-version" && -n "$want" ]] || return 1
+  [[ "$(head -c 200 "$prev/pour-version" | tr -cd '[:print:]')" == "$want" ]]
+}
 
 # aurion.service failed to (re)start several times (OnFailure): if the
 # running version is a trial one (aurion.trial, written by the update and
 # removed once it has run for a few minutes), put the previous one back and
 # start again. A camera in a closed box never stays on a broken version.
+# "manual" (Diagnostics button): put back the files of the previous version
+# without restarting (the application exits by itself); exit code 3 when
+# there is no such full copy (the application then swaps the binary only).
 cmd_app_rollback() {
   local bin="$APP_DIR/aurion" prev="$APP_DIR/aurion.prev" trial="$APP_DIR/aurion.trial"
+  if [[ "${1:-}" == "manual" ]]; then
+    local running
+    running=$("$bin" --version 2>/dev/null | head -n1 | tr -cd '[:print:]') || true
+    snapshot_for "$running" || { echo "pas de copie complète de la version précédente"; exit 3; }
+    rm -f "$trial"
+    restore_snapshot
+    echo "version précédente rétablie (programme et fichiers système)"
+    return 0
+  fi
+  [[ $# -eq 0 ]] || die "usage : app-rollback [manual]"
   if [[ ! -f "$trial" ]]; then
     # Confirmed version failing (hardware?): never give up on the service
     echo "aucune version à l'essai : pas de retour arrière, nouvel essai du service"
     restart_app
     return 0
   fi
-  if [[ ! -f "$prev" ]]; then
+  local failed
+  failed=$(head -c 200 "$trial" | tr -cd '[:print:]')
+  if snapshot_for "$failed"; then
+    rm -f "$trial"
+    restore_snapshot
+  elif [[ -f "$prev" ]]; then
+    mv -f "$bin" "$APP_DIR/aurion.failed"
+    mv -f "$prev" "$bin"
+    rm -f "$trial"
+  else
     rm -f "$trial"
     echo "version à l'essai sans version précédente : rien à rétablir"
     restart_app
     return 0
   fi
-  local failed
-  failed=$(head -c 200 "$trial" | tr -cd '[:print:]')
-  mv -f "$bin" "$APP_DIR/aurion.failed"
-  mv -f "$prev" "$bin"
-  rm -f "$trial"
   # Read by Aurion at startup: shown on the Diagnostics page
   printf '%s\n' "${failed:-inconnue}" >"$APP_DIR/aurion.rolled-back"
   chmod 0644 "$APP_DIR/aurion.rolled-back"
@@ -596,6 +718,7 @@ case "$cmd" in
   mount-usb)     cmd_mount_usb ;;
   umount-usb)    cmd_umount_usb ;;
   usb-format)    cmd_usb_format "$@" ;;
-  app-rollback)  cmd_app_rollback ;;
+  app-update)    cmd_app_update "$@" ;;
+  app-rollback)  cmd_app_rollback "$@" ;;
   *) die "commande inconnue: ${cmd:-<vide>}" ;;
 esac

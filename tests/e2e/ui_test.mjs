@@ -315,6 +315,29 @@ try {
     assert(await page.locator('#rollbackBtn').isHidden(), 'no previous version yet');
   });
 
+  await step('mise à jour : fenêtre de résultat au retour sur le Wi-Fi Aurion, une seule fois', async () => {
+    // As written by a validated update (outcome), with its journal
+    const log = '2026-10-01_214502_stable.log';
+    fs.mkdirSync(path.join(configDir, 'journaux-maj'), { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'journaux-maj', log),
+      '21:45:02 INFO Mise à jour demandée\n21:46:10 AVERTISSEMENT Téléchargement coupé, reprise\n21:52:00 OK 1.13.0 validée\n');
+    fs.writeFileSync(path.join(configDir, 'update_status.json'), JSON.stringify({
+      running: false, at: '01/10 21:52', ok: true, channel: 'stable', message: '1.13.0 validée',
+      log, outcome: 'validee', seen: false, from: '1.12.1', to: '1.13.0',
+    }));
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#aurionUpdateDialog', { timeout: 5000 });
+    const text = await page.locator('#aurionUpdateDialog').textContent();
+    assert(text.includes('validée') && text.includes('1 avertissement'), text);
+    assert(await page.locator('#aurionUpdateDialog a[href*="journal"]').count() === 1, 'journal link');
+    await page.click('#aurionUpdateOk');
+    await page.goto(base + '/gallery.html');
+    await page.waitForTimeout(800);
+    assert(await page.locator('#aurionUpdateDialog').count() === 0, 'shown once');
+    await page.goto(base + '/diagnostics.html');
+    await page.waitForFunction(() => document.querySelector('#updateJournals a') !== null);
+  });
+
   await step('portail captif : redirection vers l\'interface', async () => {
     const res = await fetch(base + '/generate_204', { redirect: 'manual' });
     assert(res.status === 307 && res.headers.get('location').startsWith('http://192.168.4.1:'), 'status ' + res.status);

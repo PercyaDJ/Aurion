@@ -20,6 +20,7 @@ pub mod security;
 pub mod static_files;
 pub mod signing;
 pub mod update;
+pub mod update_journal;
 
 /// Maximum size of a regular API request body.
 const API_BODY_LIMIT: usize = 1024 * 1024;
@@ -128,6 +129,9 @@ pub struct AppState {
     pub online_update_running: Arc<AtomicBool>,
     /// Seconds after power-on when the Aurion Wi-Fi was ready.
     pub hotspot_ready_at: Arc<std::sync::Mutex<Option<f64>>>,
+    /// Why the Aurion Wi-Fi did not start at boot (None: it did). A version on
+    /// trial is not confirmed then (update::startup_checks).
+    pub hotspot_error: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// Automatic start of the night (expedition mode), shown on the home screen.
@@ -178,6 +182,7 @@ impl AppState {
             auto_start: Arc::new(RwLock::new(AutoStart::Off)),
             online_update_running: Arc::new(AtomicBool::new(false)),
             hotspot_ready_at: Arc::new(std::sync::Mutex::new(None)),
+            hotspot_error: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -255,6 +260,9 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/system/shutdown", post(api::system_shutdown))
         .route("/api/system/update/online", post(update::start_online_update))
         .route("/api/system/update/status", get(update::get_update_status))
+        .route("/api/system/update/seen", post(update::mark_seen))
+        .route("/api/system/update/journal", get(update::list_journals))
+        .route("/api/system/update/journal/:name", get(update::get_journal))
         .route("/api/system/rollback", post(update::rollback))
         .route(
             "/api/system/update",
