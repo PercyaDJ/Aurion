@@ -1,6 +1,6 @@
 # Journal des versions
 
-## 1.10.6
+## 1.11.0
 
 Objectif : rappel des darks en fin de nuit, derniers points de sécurité fermés, et consommer le moins de minutes GitHub Actions possible
 sans perdre l'envoi à ARBOR.
@@ -32,7 +32,7 @@ sans perdre l'envoi à ARBOR.
 - Boucle de la nuit découpée en étapes (`orchestrator::run` passe de 620 lignes à une suite d'appels), décisions
   testées une à une : fenêtre de la nuit, extinction avant la nuit (Pi 5), arrêt sur clé pleine, confirmation
   d'aurore, pause après 5 échecs caméra, RAW gardé pendant une aurore, rythme de capture, journal des images
-  (15 tests de plus). Aucun changement de comportement : les 21 nuits simulées produisent exactement les mêmes
+  (15 tests de plus). Aucun changement de comportement : les 23 nuits simulées produisent exactement les mêmes
   journaux, fichiers, extinctions et réveils qu'avant. Prépare l'intervalle adaptatif et les rafales (Q4, Q5).
 
 ### Chaîne de publication

@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.10.6**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.11.0**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
@@ -105,7 +105,7 @@ Attente : en mode plage horaire, si la nuit est lancée avant l'heure de début,
 toutes les 60 s, `orchestrator::wait_for_night`, décision `before_night`). En mode minuteur, la durée part du
 lancement (`NightWindow`).
 
-Découpage de `orchestrator::run` (1.10.6) : `run` n'enchaîne plus que des étapes, chacune dans sa méthode
+Découpage de `orchestrator::run` (1.11.0) : `run` n'enchaîne plus que des étapes, chacune dans sa méthode
 (`disconnect`, `mark_night`, `wait_for_night`, `check_key_writable`, `open_night_files`, `calibrate`,
 `enter_first_phase`, `capture_loop`, `finish_night`). Les décisions de la boucle sont des fonctions pures testées
 seules : fenêtre de la nuit (`NightWindow`), attente ou extinction avant la nuit (`before_night`), arrêt sur clé
