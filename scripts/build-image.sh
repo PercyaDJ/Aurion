@@ -201,6 +201,16 @@ depuis la clé (fichier aurion-reglages.json), vos photos restent sur la clé.
 TXT
 boot_write "$WORK/AURION-LISEZMOI.txt" AURION-LISEZMOI.txt
 
+# config.txt is read by the firmware at boot: written now (same block as
+# install.sh), LEDs, Bluetooth, audio and the hardware watchdog are already
+# right on the first boot, which would otherwise only apply them at the next.
+if mcopy -n -i "$P1" ::/config.txt "$WORK/config.txt" 2>/dev/null; then
+  mkdir -p "$WORK/bootroot/boot/firmware"
+  cp "$WORK/config.txt" "$WORK/bootroot/boot/firmware/config.txt"
+  AURION_TEST_ROOT="$WORK/bootroot" bash "$HERE/scripts/install.sh" --boot-config-only
+  boot_write "$WORK/bootroot/boot/firmware/config.txt" config.txt
+fi
+
 # ─── 5. Finish ───────────────────────────────────────────────
 sync
 # Blocks freed by the package purge still hold old data, which xz cannot

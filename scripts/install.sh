@@ -14,6 +14,7 @@
 #   --no-packages        ne pas lancer apt (installation depuis le paquet .deb)
 #   --default-wifi-password  garder le mot de passe Wi-Fi d'usine (image SD grand public)
 #   --no-start           ne pas démarrer le service à la fin
+#   --boot-config-only   n'écrire que config.txt (fabrication de l'image carte SD)
 #
 # Réinstaller par-dessus une version existante conserve la configuration
 # et le mot de passe Wi-Fi. Aucune compilation n'est nécessaire.
@@ -39,6 +40,7 @@ PACKAGES=1
 RANDOM_PASSWORD=1
 START=1
 UNINSTALL=0
+BOOT_CONFIG_ONLY=0
 
 info() { printf '\n\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\n\033[1;33m[!]\033[0m %s\n' "$*"; }
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --default-wifi-password) RANDOM_PASSWORD=0; shift ;;
     --no-start) START=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --boot-config-only) BOOT_CONFIG_ONLY=1; shift ;;
     -y|--yes) shift ;;
     -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "Option inconnue : $1" ;;
@@ -283,13 +286,7 @@ harden_system() {
     echo 'tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev,size=200m 0 0' >>"$R/etc/fstab"
   fi
 
-  # Hardware watchdog: reboots the Pi if the system freezes
-  local boot_cfg="$R/boot/firmware/config.txt"
-  [[ -f "$boot_cfg" ]] || boot_cfg="$R/boot/config.txt"
-  if [[ -f "$boot_cfg" ]] && ! grep -q '^dtparam=watchdog=on' "$boot_cfg"; then
-    backup_file "$boot_cfg"
-    echo 'dtparam=watchdog=on' >>"$boot_cfg"
-  fi
+  boot_watchdog
   install -d "$R/etc/systemd/system.conf.d"
   printf '[Manager]\nRuntimeWatchdogSec=15s\nRebootWatchdogSec=5min\n' >"$R/etc/systemd/system.conf.d/aurion-watchdog.conf"
 
@@ -363,10 +360,40 @@ EOF
 POWER_BEGIN="# >>> Aurion : économie d'énergie (retiré par install.sh --uninstall)"
 POWER_END="# <<< Aurion"
 
+# config.txt of the boot partition (read by the firmware at the next boot)
+boot_cfg_path() {
+  if [[ -f "$R/boot/firmware/config.txt" ]]; then echo "$R/boot/firmware/config.txt"; else echo "$R/boot/config.txt"; fi
+}
+
+# Hardware watchdog: reboots the Pi if the system freezes
+boot_watchdog() {
+  local boot_cfg
+  boot_cfg=$(boot_cfg_path)
+  if [[ -f "$boot_cfg" ]] && ! grep -q '^dtparam=watchdog=on' "$boot_cfg"; then
+    backup_file "$boot_cfg"
+    echo 'dtparam=watchdog=on' >>"$boot_cfg"
+  fi
+}
+
 power_saving() {
   info "Économie d'énergie : Bluetooth, audio et LED désactivés"
-  local boot_cfg="$R/boot/firmware/config.txt"
-  [[ -f "$boot_cfg" ]] || boot_cfg="$R/boot/config.txt"
+  boot_power_block
+  local svc
+  for svc in bluetooth.service hciuart.service ModemManager.service triggerhappy.service triggerhappy.socket; do
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+  done
+  # Faster boot, fewer SD writes: nothing here needs internet at boot, no
+  # swap file on the SD card, no automatic apt runs on a field camera.
+  for svc in NetworkManager-wait-online.service systemd-networkd-wait-online.service dphys-swapfile.service \
+             apt-daily.timer apt-daily-upgrade.timer man-db.timer; do
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+  done
+}
+
+
+boot_power_block() {
+  local boot_cfg
+  boot_cfg=$(boot_cfg_path)
   if [[ -f "$boot_cfg" ]]; then
     backup_file "$boot_cfg"
     # Replace a previous block (idempotent)
@@ -389,16 +416,6 @@ CFG
   else
     warn "config.txt introuvable : économie d'énergie matérielle non appliquée"
   fi
-  local svc
-  for svc in bluetooth.service hciuart.service ModemManager.service triggerhappy.service triggerhappy.socket; do
-    systemctl disable --now "$svc" >/dev/null 2>&1 || true
-  done
-  # Faster boot, fewer SD writes: nothing here needs internet at boot, no
-  # swap file on the SD card, no automatic apt runs on a field camera.
-  for svc in NetworkManager-wait-online.service systemd-networkd-wait-online.service dphys-swapfile.service \
-             apt-daily.timer apt-daily-upgrade.timer man-db.timer; do
-    systemctl disable --now "$svc" >/dev/null 2>&1 || true
-  done
 }
 
 # ─── Uninstall ───────────────────────────────────────────────
@@ -425,6 +442,13 @@ uninstall() {
 
 main() {
   if [[ $UNINSTALL -eq 1 ]]; then uninstall; exit 0; fi
+  # SD image build: config.txt only (read at the very first boot, whereas
+  # the first-boot installation would only take effect at the next one)
+  if [[ $BOOT_CONFIG_ONLY -eq 1 ]]; then
+    [[ $HARDENING -eq 1 ]] && boot_watchdog
+    [[ $POWER_SAVING -eq 1 ]] && boot_power_block
+    exit 0
+  fi
 
   echo "════════════════════════════════════════════"
   echo "  Aurion — installation"

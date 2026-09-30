@@ -24,6 +24,7 @@ truncate -s 800M "$W/base.img"
 parted -s "$W/base.img" mklabel msdos mkpart primary fat32 4MiB 260MiB mkpart primary ext4 260MiB 772MiB
 P1=$(part "$W/base.img" 1); P2=$(part "$W/base.img" 2)
 mkfs.vfat -n bootfs "$P1" >/dev/null
+echo "arm_64bit=1" >"$W/config.txt"; mcopy -i "$P1" "$W/config.txt" ::/config.txt
 mkfs.ext4 -q -L rootfs "$P2"
 mkdir -p "$W/m"; mount "$P2" "$W/m"
 mkdir -p "$W/m/boot/firmware" "$W/m/etc/systemd/system/multi-user.target.wants" "$W/m/usr/lib"
@@ -45,6 +46,7 @@ check "système de fichiers sain" 'e2fsck -fn "$P2" >/dev/null 2>&1'
 mount "$P2" "$W/m"
 mtype -i "$P1" ::/userconf.txt >"$W/userconf.txt" 2>/dev/null
 mtype -i "$P1" ::/AURION-LISEZMOI.txt >"$W/lisezmoi.txt"
+mtype -i "$P1" ::/config.txt >"$W/configtxt.txt"
 mdir -b -i "$P1" ::/ >"$W/bootfiles.txt"
 # shellcheck disable=SC2034  # used inside check()
 R="$W/m"
@@ -54,6 +56,7 @@ check "installation au premier démarrage activée" '[[ -L "$R/etc/systemd/syste
 check "premier démarrage : mot de passe d'usine, sans apt" 'grep -q -- "--no-packages --default-wifi-password" "$R/usr/lib/aurion/aurion-firstboot.sh"'
 check "compte de maintenance (pas d'assistant bloquant)" 'grep -q "^pi:" "$W/userconf.txt" && cut -d: -f2 "$W/userconf.txt" | grep -q "^.6."'
 check "notice lisible depuis un PC" 'grep -q "aurora2024" "$W/lisezmoi.txt"'
+check "config.txt prêt dès le premier démarrage (LED, Bluetooth, chien de garde)" 'grep -q "^arm_64bit=1" "$W/configtxt.txt" && grep -q "^dtparam=watchdog=on" "$W/configtxt.txt" && grep -q "^dtparam=act_led_trigger=none" "$W/configtxt.txt" && grep -q "^dtoverlay=disable-bt" "$W/configtxt.txt"'
 check "SSH non activé" '! grep -qiE "/ssh(\.txt)?$" "$W/bootfiles.txt"'
 
 echo
