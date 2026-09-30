@@ -665,6 +665,7 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
         let data = make_thumbnail(&source)?;
         let _ = std::fs::create_dir_all(&cache_dir);
         let _ = std::fs::write(&cache_path, &data);
+        trim_thumb_cache(&cache_dir, THUMB_CACHE_MAX_FILES);
         Some(data)
     })
     .await;
@@ -672,6 +673,27 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
     match result {
         Ok(Some(data)) => jpeg(data),
         _ => (StatusCode::UNPROCESSABLE_ENTITY, "Image illisible").into_response(),
+    }
+}
+
+/// The cache lives in RAM (tmpfs of 200 MB shared with the capture files):
+/// ~15 kB per thumbnail, 2000 of them stay well below.
+const THUMB_CACHE_MAX_FILES: usize = 2000;
+
+/// Keep at most `max` thumbnails in the cache, the most recently written.
+fn trim_thumb_cache(dir: &FsPath, max: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if files.len() <= max {
+        return;
+    }
+    files.sort();
+    let excess = files.len() - max;
+    for (_, path) in files.into_iter().take(excess) {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -897,6 +919,22 @@ pub async fn download_gallery_session_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thumbnail_cache_keeps_the_most_recent_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            let p = dir.path().join(format!("aurora_{}.jpg", i));
+            std::fs::write(&p, b"t").unwrap();
+            let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + i);
+            std::fs::File::options().write(true).open(&p).unwrap().set_modified(t).unwrap();
+        }
+        trim_thumb_cache(dir.path(), 3);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left, ["aurora_2.jpg", "aurora_3.jpg", "aurora_4.jpg"]);
+    }
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
