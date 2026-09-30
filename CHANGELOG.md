@@ -1,5 +1,20 @@
 # Journal des versions
 
+## 1.12.0
+
+Objectif : n'installer que les versions publiées par le projet, première brique d'une caméra mise à jour boîtier
+fermé.
+
+- **Versions signées** : chaque binaire publié est signé (Ed25519) par le workflow Release, dans un environnement
+  GitHub qui attend l'approbation du propriétaire. La caméra refuse tout binaire non signé ou signé par une autre
+  clé, qu'il vienne de GitHub ou d'un envoi depuis le téléphone. Protège d'une release fabriquée par un tiers (compte
+  ou jeton GitHub compromis) et d'un binaire envoyé par quelqu'un connecté au Wi-Fi Aurion.
+- **Clé de secours** : une seconde clé publique, dont la partie privée reste hors ligne, permet de remplacer la clé
+  principale sans ouvrir le boîtier (procédure dans DEX.md § 5).
+- **Envoi par fichier** : choisir les deux fichiers de la release, `aurion-arm64` et `aurion-arm64.sig`.
+- Passage à la 1.12.0 : une caméra en 1.11.x l'installe normalement ; elle n'accepte ensuite que des versions
+  signées.
+
 ## 1.11.3
 
 Objectif : fermer les risques de sécurité qui ne demandent pas le matériel.

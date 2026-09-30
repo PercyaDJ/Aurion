@@ -105,6 +105,14 @@ pub fn checksum_url(release_json: &str, allowed_prefix: &str) -> Result<String, 
         .ok_or_else(|| format!("Empreinte {}.sha256 absente de la version : mise à jour refusée", ASSET))
 }
 
+/// URL of the signature published next to the binary (`aurion-arm64.sig`).
+pub fn signature_url(release_json: &str, allowed_prefix: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(release_json).map_err(|_| "Réponse GitHub illisible".to_string())?;
+    named_asset(&v, crate::web::signing::SIGNATURE_ASSET, allowed_prefix)?.ok_or_else(|| {
+        format!("Signature {} absente de la version (non signée) : mise à jour refusée", crate::web::signing::SIGNATURE_ASSET)
+    })
+}
+
 fn named_asset(release: &serde_json::Value, name: &str, allowed_prefix: &str) -> Result<Option<String>, String> {
     let Some(url) = release["assets"]
         .as_array()
@@ -294,6 +302,7 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
     .map_err(|e| format!("GitHub injoignable (internet disponible ?) : {}", first_line(&e)))?;
     let (tag, binary_url) = asset_url(&json, &state.update.download_prefix)?;
     let sum_url = checksum_url(&json, &state.update.download_prefix)?;
+    let sig_url = signature_url(&json, &state.update.download_prefix)?;
     let published_sum = crate::sys::run(
         "curl",
         &["-fsSL", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", &sum_url],
@@ -315,7 +324,18 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
     let _ = std::fs::remove_file(&tmp);
     let data = data.map_err(|e| format!("Téléchargement de {} interrompu : {}", tag, first_line(&e)))?;
     check_sha256(&data, &published_sum)?;
-    install_binary(state, &data).await
+    let sig_tmp = state.paths.tmp_dir.join(format!("aurion-download-{}.sig", std::process::id()));
+    let sig_tmp_str = sig_tmp.to_string_lossy().to_string();
+    let signature = crate::sys::run(
+        "curl",
+        &["-fsSL", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", "-o", &sig_tmp_str, &sig_url],
+        Duration::from_secs(70),
+    )
+    .await
+    .and_then(|_| std::fs::read(&sig_tmp).map_err(|e| e.to_string()));
+    let _ = std::fs::remove_file(&sig_tmp);
+    let signature = signature.map_err(|e| format!("Signature de {} introuvable : {}", tag, first_line(&e)))?;
+    install_binary(state, &data, &signature).await
 }
 
 fn first_line(s: &str) -> &str {

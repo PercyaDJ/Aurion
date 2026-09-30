@@ -207,9 +207,48 @@ async fn oversized_body_rejected() {
     res.assert_status(StatusCode::PAYLOAD_TOO_LARGE);
 }
 
+/// Upload form with a valid signature of `bytes` (the other checks still apply).
 fn multipart_with(bytes: Vec<u8>) -> axum_test::multipart::MultipartForm {
-    axum_test::multipart::MultipartForm::new()
-        .add_part("binary", axum_test::multipart::Part::bytes(bytes).file_name("aurion"))
+    let sig = common::sign(&bytes);
+    multipart_signed(bytes, Some(sig))
+}
+
+fn multipart_signed(bytes: Vec<u8>, signature: Option<Vec<u8>>) -> axum_test::multipart::MultipartForm {
+    let form = axum_test::multipart::MultipartForm::new()
+        .add_part("binary", axum_test::multipart::Part::bytes(bytes).file_name("aurion-arm64"));
+    match signature {
+        Some(s) => form.add_part("signature", axum_test::multipart::Part::bytes(s).file_name("aurion-arm64.sig")),
+        None => form,
+    }
+}
+
+#[tokio::test]
+async fn ota_update_needs_the_project_signature() {
+    let t = common::env();
+    let target = t.dir.path().join("bin/aurion");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, b"old version").unwrap();
+    let bin = std::fs::read("/bin/bash").unwrap(); // a real executable for this machine
+
+    // No signature: anyone on the Wi-Fi could otherwise install anything
+    let res = t.server.post("/api/system/update").multipart(multipart_signed(bin.clone(), None)).await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(res.text().contains("Signature absente"), "{}", res.text());
+    // Signed with someone else's key
+    let stranger = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
+    let res = t.server.post("/api/system/update")
+        .multipart(multipart_signed(bin.clone(), Some(stranger.sk.sign(&bin, None).to_vec()))).await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(res.text().contains("Signature invalide"), "{}", res.text());
+    // The project's signature of another binary
+    let res = t.server.post("/api/system/update")
+        .multipart(multipart_signed(bin.clone(), Some(common::sign(b"another binary")))).await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_eq!(std::fs::read(&target).unwrap(), b"old version", "nothing installed");
+    // Correctly signed: installed
+    let res = t.server.post("/api/system/update").multipart(multipart_with(bin.clone())).await;
+    assert_eq!(res.status_code(), StatusCode::OK, "{}", res.text());
+    assert_eq!(std::fs::read(&target).unwrap(), bin);
 }
 
 #[tokio::test]
