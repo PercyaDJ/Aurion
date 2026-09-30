@@ -1493,7 +1493,10 @@ mod tests {
     #[test]
     fn update_binary_validation() {
         assert!(validate_update_binary(b"not an elf at all").is_err());
-        let own = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        // Only the ELF header is checked: the first MB of the running test
+        // binary (a debug build can exceed the 64 MB limit)
+        let mut own = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        own.truncate(1 << 20);
         assert!(validate_update_binary(&own).is_ok(), "the running test binary must be accepted");
         // Same file with a foreign architecture
         let mut foreign = own.clone();

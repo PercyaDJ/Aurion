@@ -1,5 +1,38 @@
 # Journal des versions
 
+## 1.11.2
+
+Objectif : un Pi plus réactif et plus sobre, sans rien changer à ce que fait la nuit (les 23 nuits simulées donnent
+exactement les mêmes journaux et fichiers qu'en 1.11.1).
+
+### Réactivité
+- La boucle de nuit tourne dans sa propre tâche. Avant, elle partageait la même tâche que le serveur web et le chien
+  de garde systemd : pendant l'écriture d'un DNG de 20 Mo sur une clé lente, l'interface ne répondait plus et le chien
+  de garde se taisait (systemd tue le service au bout de 180 s).
+- Écritures et suppressions lourdes sur la clé (images de la nuit, darks, suppression depuis la galerie) faites hors
+  des deux fils du serveur web.
+- Aperçu : l'auto-exposition analyse la vignette EXIF (320×240) au lieu de décoder l'image 12 MP complète, jusqu'à
+  4 fois par aperçu.
+- Accueil : l'estimation d'autonomie ne relit plus la dernière nuit sur la clé toutes les 10 s (mise en cache 2 min,
+  vidée à chaque suppression).
+
+### Mémoire
+- Réglages par défaut : le JPEG de chaque image (environ 5 Mo) et ses pixels ne sont plus copiés avant d'être
+  enregistrés.
+- Mise à jour envoyée depuis le téléphone : le fichier n'est plus copié une seconde fois (pic d'environ 256 Mo sur un Pi
+  qui peut n'avoir que 1 Go), et la limite est la même partout (64 Mo).
+- Cache des vignettes (disque en RAM partagé avec les captures) plafonné à 2000 fichiers.
+
+### Photo
+- Aperçu et darks utilisent exactement le même gain que la nuit (ils l'arrondissaient à 2 décimales, la nuit à 1) :
+  les darks correspondent aux images.
+- Darks refusés sans clé USB (ils remplissaient la carte SD).
+
+### Premier démarrage
+- LED, Bluetooth, audio et chien de garde matériel sont écrits dans `config.txt` dès la fabrication de l'image : ils
+  ne prenaient effet qu'au deuxième démarrage, la première nuit tournait LED allumées près de l'objectif.
+- Le premier démarrage n'attend plus `systemd-udev-settle` (obsolète et lent).
+
 ## 1.11.1
 
 Objectif : corriger les défauts trouvés à la relecture complète du dépôt (30/09/2026), chacun avec son test.
@@ -48,6 +81,8 @@ Objectif : corriger les défauts trouvés à la relecture complète du dépôt (
   recompilait tout) ; les PR Dependabot ne lancent plus la compilation arm64 ni le test d'image.
 
 ## 1.11.0
+
+Non publiée séparément : son contenu est sorti avec la 1.11.1 (tag refusé par GitHub, voir DAT.md § 10).
 
 Objectif : rappel des darks en fin de nuit, derniers points de sécurité fermés, et consommer le moins de minutes GitHub Actions possible
 sans perdre l'envoi à ARBOR.
