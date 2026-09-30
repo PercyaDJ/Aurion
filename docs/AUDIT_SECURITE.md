@@ -154,6 +154,14 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   deb13u2). L'image porte donc déjà le correctif ; ARBOR s'appuie sur un état antérieur de la base. À relancer (renvoi
   du SBOM) puis, si l'alerte persiste, à classer en « non affecté » avec cette justification. La fabrication échoue
   désormais si libssl3t64, openssl ou openssl-provider-legacy restent sous 3.5.7-1~deb13u3.
+- Plan ARBOR du 30/09/2026 à 15:56 UTC, après envoi du SBOM de l'image 1.13.0 (15:13 UTC) : mêmes 13 alertes.
+  Le SBOM est juste : `libssl3t64`, `openssl` et `openssl-provider-legacy` en 3.5.7-1~deb13u3, `distro=debian-13`.
+  OSV interrogé avec ces purl exactes : 0 vulnérabilité. Il n'en renvoie 50 que si l'on omet la version de Debian
+  (écosystème `Debian` seul), qui mélange Debian 12 et 14, où ces CVE n'ont pas encore de correctif. L'erreur est
+  donc côté ARBOR (base non rafraîchie depuis l'ajout du correctif, ou mauvaise lecture de la version corrigée) ;
+  aucune action possible dans l'image. Décision : les 13 CVE sont tracées dans ARBOR comme faux positif (non
+  affecté, correctif présent), et l'anomalie est signalée à l'éditeur. À réexaminer si une alerte subsiste après
+  correction côté ARBOR.
 
 #### Registre des risques acceptés (image carte SD)
 
@@ -166,7 +174,7 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 | network-manager | gère le point d'accès Wi-Fi | oui, indirectement | accepté (1.11.0) : les deux failles demandent un compte local sur le Pi (AV:L). CVE-2026-10805 (CVSS 3.1 `AV:L/AC:H/PR:L/UI:R`) touche le moteur DHCP dhclient, CVE-2025-9615 (`AV:L/AC:L/PR:L`) la lecture de fichiers d'un autre utilisateur ; aucune n'est déclenchable depuis le Wi-Fi |
 | sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | accepté (1.11.0) : CVE-2026-82474 (CVSS 4.0 `AV:L/PR:L`) ne contourne que le mode `intercept` de sudo, jamais activé ici ; la règle n'autorise que `aurion-helper`, qui revalide chaque argument |
 | rsync | copie du noyau et du micrologiciel vers `/boot/firmware` (dépendance de `raspi-firmware`) | non | gardé à jour (3.5.0+ds1-0+deb13u1 minimum, contrôlé à la fabrication) ; retrait impossible : `raspi-firmware`, indispensable au démarrage, en dépend |
-| openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | gardé à jour (3.5.7-1~deb13u3 minimum, contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
+| openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | non affecté (30/09/2026) : les 13 CVE ARBOR du 30/09/2026 sont corrigées en 3.5.7-1~deb13u3, version installée (faux positif ARBOR) ; gardé à jour (minimum contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
 | libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
 | systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
 | busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |
