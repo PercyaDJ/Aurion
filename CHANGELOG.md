@@ -20,6 +20,12 @@ Objectif : corriger les défauts trouvés à la relecture complète du dépôt (
 - Une plage horaire dont le début égale la fin est refusée à l'enregistrement : la nuit n'aurait jamais démarré,
   avec le Wi-Fi déjà coupé. Une configuration déjà enregistrée reste chargée au démarrage.
 
+### Mise à jour depuis le téléphone
+- Une mise à jour pouvait échouer au hasard (« le nouveau binaire ne démarre pas : Text file busy ») quand le
+  serveur lançait un autre programme au même instant, ce qu'il fait en permanence (helper, vcgencmd). L'essai du
+  nouveau binaire réessaie maintenant pendant 1 s. Reproduit en test (1 échec sur 65 à 150 passages chargés,
+  0 sur 400 après correction).
+
 ### Clé USB (helper root)
 - Pi démarrant sur un SSD USB : sa partition de démarrage n'est plus montée comme clé photo, et « Préparer la clé »
   ne le compte plus comme une seconde clé.

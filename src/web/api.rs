@@ -1347,11 +1347,22 @@ pub(crate) async fn install_binary(state: &AppState, data: &[u8]) -> Result<Stri
 
     // Refuse a binary that does not even start.
     let staged_str = staged.to_string_lossy().to_string();
-    let version = match crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
-        Ok(v) => v.trim().to_string(),
-        Err(e) => {
-            let _ = std::fs::remove_file(&staged);
-            return Err(format!("Le nouveau binaire ne démarre pas: {}", e));
+    let mut busy_retries = 0;
+    let version = loop {
+        match crate::sys::run(&staged_str, &["--version"], Duration::from_secs(15)).await {
+            Ok(v) => break v.trim().to_string(),
+            // A process started by another thread while the file was open for
+            // writing keeps a copy of that descriptor until its own exec: for
+            // that instant Linux refuses to run the file (ETXTBSY). The server
+            // starts processes all the time (helper, vcgencmd): wait and retry.
+            Err(e) if e.contains("os error 26") && busy_retries < 20 => {
+                busy_retries += 1;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&staged);
+                return Err(format!("Le nouveau binaire ne démarre pas: {}", e));
+            }
         }
     };
 
