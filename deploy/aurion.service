@@ -20,6 +20,18 @@ TimeoutStartSec=120
 TimeoutStopSec=45
 WatchdogSec=180
 PrivateTmp=yes
+# Hardening. The root helper started through sudo inherits these limits:
+# only those that never get in its way (key mount, network, clock, camera,
+# power) are set. NoNewPrivileges (blocks sudo), ProtectSystem, ProtectClock,
+# ProtectKernelTunables and PrivateDevices would break it.
+ProtectHome=read-only
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+UMask=0027
 StandardOutput=journal
 StandardError=journal
 
