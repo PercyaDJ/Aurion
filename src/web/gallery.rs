@@ -671,21 +671,27 @@ pub async fn delete_gallery_images(
     Json(req): Json<GalleryDeleteRequest>,
 ) -> Json<GalleryDeleteResponse> {
     let mount = mount_point(&state).await;
-    let mut deleted = 0;
-    let mut errors = Vec::new();
-
-    for filename in &req.filenames {
-        if !validate::is_safe_image_name(filename) {
-            tracing::warn!("Delete rejected: invalid filename {:?}", filename);
-            errors.push(format!("{}: nom de fichier invalide", filename));
-            continue;
+    let cache_dir = state.paths.thumb_cache_dir.clone();
+    // Hundreds of files on an exFAT key: off the async workers
+    let (deleted, errors) = tokio::task::spawn_blocking(move || {
+        let mut deleted = 0;
+        let mut errors = Vec::new();
+        for filename in &req.filenames {
+            if !validate::is_safe_image_name(filename) {
+                tracing::warn!("Delete rejected: invalid filename {:?}", filename);
+                errors.push(format!("{}: nom de fichier invalide", filename));
+                continue;
+            }
+            match remove_image(&mount, &cache_dir, filename) {
+                Ok(true) => deleted += 1,
+                Ok(false) => errors.push(format!("{}: fichier introuvable", filename)),
+                Err(e) => errors.push(format!("{}: {}", filename, e)),
+            }
         }
-        match remove_image(&mount, &state.paths.thumb_cache_dir, filename) {
-            Ok(true) => deleted += 1,
-            Ok(false) => errors.push(format!("{}: fichier introuvable", filename)),
-            Err(e) => errors.push(format!("{}: {}", filename, e)),
-        }
-    }
+        (deleted, errors)
+    })
+    .await
+    .unwrap_or_else(|e| (0, vec![e.to_string()]));
 
     state.add_log(format!("{} image(s) supprimée(s)", deleted)).await;
     Json(GalleryDeleteResponse { deleted, errors })
@@ -701,15 +707,23 @@ pub async fn delete_gallery_session(State(state): State<AppState>, Path(session)
         return (StatusCode::NOT_FOUND, "Session introuvable").into_response();
     }
 
-    let mut deleted = 0;
-    for image in session_images(&mount, &session) {
-        if std::fs::remove_file(&image.path).is_ok() {
-            let _ = std::fs::remove_file(thumb_path(&mount, &image));
-            let _ = std::fs::remove_file(state.paths.thumb_cache_dir.join(&image.info.filename));
-            deleted += 1;
+    let cache_dir = state.paths.thumb_cache_dir.clone();
+    let name = session.clone();
+    // A whole night (up to thousands of files): off the async workers
+    let (deleted, removed) = tokio::task::spawn_blocking(move || {
+        let mut deleted = 0;
+        for image in session_images(&mount, &name) {
+            if std::fs::remove_file(&image.path).is_ok() {
+                let _ = std::fs::remove_file(thumb_path(&mount, &image));
+                let _ = std::fs::remove_file(cache_dir.join(&image.info.filename));
+                deleted += 1;
+            }
         }
-    }
-    if let Err(e) = std::fs::remove_dir_all(&session_dir) {
+        (deleted, std::fs::remove_dir_all(&session_dir))
+    })
+    .await
+    .unwrap_or_else(|e| (0, Err(std::io::Error::other(e.to_string()))));
+    if let Err(e) = removed {
         state.add_log(format!("Suppression du dossier de session impossible: {}", e)).await;
     }
     state.add_log(format!("Session {} et {} image(s) supprimées", session, deleted)).await;

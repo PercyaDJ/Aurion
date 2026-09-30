@@ -771,6 +771,13 @@ pub async fn capture_darks(
     if state.darks.read().await.as_ref().map(|d| d.running).unwrap_or(false) {
         return Err(err(StatusCode::CONFLICT, "Une série de darks est déjà en cours"));
     }
+    // The DNGs go to the key: without it they would fill the SD card
+    if cfg!(feature = "rpi") {
+        let mount = state.config.read().await.storage.mount_point.clone();
+        if !crate::sys::storage_health(FsPath::new(&mount)).is_mountpoint {
+            return Err(err(StatusCode::CONFLICT, "Clé USB absente : les darks sont enregistrés sur la clé"));
+        }
+    }
     let camera = state.camera_lock.clone().try_lock_owned()
         .map_err(|_| err(StatusCode::CONFLICT, "Caméra occupée (preview en cours)"))?;
 
@@ -798,13 +805,22 @@ pub async fn capture_darks(
                   "--awb", "daylight", "--denoise", "off", "--thumb", "none"],
                 timeout,
             )
-            .await
-            .and_then(|_| std::fs::read(&tmp_dng).map_err(|e| format!("DNG absent: {}", e)))
-            .and_then(|dng| {
-                let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
-                std::fs::create_dir_all(&mount).map_err(|e| e.to_string())?;
-                crate::core::config::write_atomic(&mount.join(name), &dng, 0o644).map_err(|e| e.to_string())
-            });
+            .await;
+            // ~20 MB DNG read and written to the key off the async workers
+            let res = match res {
+                Ok(_) => {
+                    let (src, dir) = (tmp_dng.clone(), mount.clone());
+                    let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
+                    tokio::task::spawn_blocking(move || {
+                        let dng = std::fs::read(&src).map_err(|e| format!("DNG absent: {}", e))?;
+                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                        crate::core::config::write_atomic(&dir.join(name), &dng, 0o644).map_err(|e| e.to_string())
+                    })
+                    .await
+                    .unwrap_or_else(|e| Err(e.to_string()))
+                }
+                Err(e) => Err(e),
+            };
             if let Err(e) = res {
                 error = Some(e);
                 break;
