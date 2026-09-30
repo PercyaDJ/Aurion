@@ -25,6 +25,13 @@ système de la caméra.
 - **Passage à la 1.13.0** : une caméra en 1.12 (helper version 4) reçoit le programme seul ; il faut regraver une fois
   la carte SD avec l'image 1.13.0 pour que les mises à jour suivantes installent le paquet complet.
 
+### Sécurité de l'image
+- Plan ARBOR du 30/09/2026 (image 1.12.1) : les 13 CVE openssl signalées sans correctif (dont CVE-2026-84782,
+  CVSS 8.2) sont corrigées par Debian en 3.5.7-1~deb13u3, la version déjà présente dans l'image (avis OSV mis à
+  jour le 30/09/2026). Aucune montée de version nécessaire : faux positif ARBOR, à relancer.
+- La fabrication de l'image échoue si libssl3t64, openssl ou openssl-provider-legacy restent sous
+  3.5.7-1~deb13u3 : une image publiée ne peut plus revenir sur une version vulnérable.
+
 ## 1.12.1
 
 Objectif : une mise à jour ratée ne rend jamais la caméra inutilisable, boîtier fermé.

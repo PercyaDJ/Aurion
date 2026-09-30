@@ -148,6 +148,12 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - Plan ARBOR du 29/09/2026 (image 1.10.4) : 33 vulnérabilités ouvertes, toutes sur rsync 3.4.1+ds1-5+deb13u4,
   corrigées par Debian en 3.5.0+ds1-0+deb13u1 (trixie-security). Image 1.10.5 : correctif installé par la mise à jour
   de sécurité à la fabrication, qui échoue désormais si rsync reste sous cette version.
+- Plan ARBOR du 30/09/2026 (image 1.12.1) : 13 vulnérabilités sur openssl 3.5.7-1~deb13u3, annoncées « sans
+  version corrective ». Faux positif : les 13 avis Debian (OSV, mis à jour le 30/09/2026 à 08:00 UTC) donnent
+  3.5.7-1~deb13u3 comme version corrigée, et une requête OSV sur cette version ne renvoie aucune vulnérabilité (13 sur
+  deb13u2). L'image porte donc déjà le correctif ; ARBOR s'appuie sur un état antérieur de la base. À relancer (renvoi
+  du SBOM) puis, si l'alerte persiste, à classer en « non affecté » avec cette justification. La fabrication échoue
+  désormais si libssl3t64, openssl ou openssl-provider-legacy restent sous 3.5.7-1~deb13u3.
 
 #### Registre des risques acceptés (image carte SD)
 
@@ -160,6 +166,7 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 | network-manager | gère le point d'accès Wi-Fi | oui, indirectement | accepté (1.11.0) : les deux failles demandent un compte local sur le Pi (AV:L). CVE-2026-10805 (CVSS 3.1 `AV:L/AC:H/PR:L/UI:R`) touche le moteur DHCP dhclient, CVE-2025-9615 (`AV:L/AC:L/PR:L`) la lecture de fichiers d'un autre utilisateur ; aucune n'est déclenchable depuis le Wi-Fi |
 | sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | accepté (1.11.0) : CVE-2026-82474 (CVSS 4.0 `AV:L/PR:L`) ne contourne que le mode `intercept` de sudo, jamais activé ici ; la règle n'autorise que `aurion-helper`, qui revalide chaque argument |
 | rsync | copie du noyau et du micrologiciel vers `/boot/firmware` (dépendance de `raspi-firmware`) | non | gardé à jour (3.5.0+ds1-0+deb13u1 minimum, contrôlé à la fabrication) ; retrait impossible : `raspi-firmware`, indispensable au démarrage, en dépend |
+| openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | gardé à jour (3.5.7-1~deb13u3 minimum, contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
 | libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
 | systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
 | busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |

@@ -151,7 +151,9 @@ if [[ $APT -eq 1 ]]; then
     done
     # Lowest version carrying the security fixes (ARBOR plans): an older one means
     # the Debian security archive was not reached during the upgrade.
-    for pv in "rsync 3.5.0+ds1-0+deb13u1"; do
+    # openssl: binary packages of the source package ARBOR reports (13 CVE fixed in deb13u3).
+    for pv in "rsync 3.5.0+ds1-0+deb13u1" "libssl3t64 3.5.7-1~deb13u3" "openssl 3.5.7-1~deb13u3" \
+              "openssl-provider-legacy 3.5.7-1~deb13u3"; do
       p=${pv% *}; min=${pv#* }
       v=$(dpkg-query -W -f="\${db:Status-Status} \${Version}" "$p" 2>/dev/null || true)
       case "$v" in
