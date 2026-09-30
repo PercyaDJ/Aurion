@@ -14,6 +14,9 @@ Objectif : fermer les risques de sécurité qui ne demandent pas le matériel.
   `RestrictNamespaces`…), exposition mesurée par `systemd-analyze security` de 8,8 à 7,5.
 - **Image de base figée** : Raspberry Pi OS Lite du 15/09/2026, vérifiée par son empreinte SHA-256 à chaque
   fabrication (avant : « la dernière », sans contrôle). Les mises à jour de sécurité Debian restent appliquées.
+- Fin d'une mise à jour depuis GitHub : le résultat est enregistré avant de lever le drapeau « en cours ». Dans
+  l'intervalle, la page Diagnostics pouvait lire « interrompue » et cesser de suivre une mise à jour réussie (la
+  première fabrication de la 1.11.3 s'est arrêtée sur ce test).
 - **10 paquets inutiles retirés de l'image** : outils Python d'installation, strace, htop, v4l-utils,
   wireless-tools, traductions de NetworkManager, man-db, ntfs-3g (les clés NTFS passent par le pilote du noyau).
 
