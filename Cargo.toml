@@ -1,6 +1,6 @@
 [package]
 name = "aurion"
-version = "1.11.2"
+version = "1.11.3"
 edition = "2021"
 description = "Aurion — Autonomous aurora camera for Raspberry Pi"
 authors = ["Aurion"]
@@ -28,6 +28,8 @@ async_zip = { version = "0.0.18", features = ["tokio", "deflate"] }
 tokio-util = { version = "0.7.18", features = ["io", "compat"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
 libc = "0.2"
+# Checksum of the binaries downloaded by the online update
+sha2 = "0.11"
 
 [dev-dependencies]
 axum-test = "15"

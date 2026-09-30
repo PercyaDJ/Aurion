@@ -57,6 +57,7 @@ check "sudoers sans cp/mount/dnsmasq" '! grep -v "^#" "$R/etc/sudoers.d/aurion" 
 check "sudoers en 0440" '[[ $(stat -c %a "$R/etc/sudoers.d/aurion") == 440 ]]'
 check "unité systemd pour nobody" 'grep -q "^User=nobody$" "$R/etc/systemd/system/aurion.service" && ! grep -q "@AURION_USER@" "$R/etc/systemd/system/aurion.service"'
 check "service de type notify + watchdog" 'grep -q "^Type=notify" "$R/etc/systemd/system/aurion.service" && grep -q "^WatchdogSec=" "$R/etc/systemd/system/aurion.service"'
+check "service durci sans bloquer sudo" 'grep -q "^ProtectHome=read-only" "$R/etc/systemd/system/aurion.service" && grep -q "^RestrictNamespaces=yes" "$R/etc/systemd/system/aurion.service" && ! grep -qE "^(NoNewPrivileges|ProtectSystem)=" "$R/etc/systemd/system/aurion.service"'
 check "pas de dépendance dure à la clé USB" '! grep -q RequiresMountsFor "$R/etc/systemd/system/aurion.service"'
 check "règle udev de montage USB" 'grep -q "aurion-helper usb-add" "$R/etc/udev/rules.d/99-aurion-usb.rules"'
 check "ancienne ligne fstab liée à une clé supprimée" '! grep -q "/mnt/capture" "$R/etc/fstab"'

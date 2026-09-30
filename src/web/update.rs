@@ -93,17 +93,47 @@ pub fn release_url(api: &str, channel: &str) -> Option<String> {
 pub fn asset_url(release_json: &str, allowed_prefix: &str) -> Result<(String, String), String> {
     let v: serde_json::Value = serde_json::from_str(release_json).map_err(|_| "Réponse GitHub illisible".to_string())?;
     let tag = v["tag_name"].as_str().unwrap_or("?").to_string();
-    let url = v["assets"]
+    let url = named_asset(&v, ASSET, allowed_prefix)?
+        .ok_or_else(|| format!("La version {} ne contient pas le fichier {}", tag, ASSET))?;
+    Ok((tag, url))
+}
+
+/// URL of the checksum published next to the binary (`aurion-arm64.sha256`).
+pub fn checksum_url(release_json: &str, allowed_prefix: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(release_json).map_err(|_| "Réponse GitHub illisible".to_string())?;
+    named_asset(&v, &format!("{}.sha256", ASSET), allowed_prefix)?
+        .ok_or_else(|| format!("Empreinte {}.sha256 absente de la version : mise à jour refusée", ASSET))
+}
+
+fn named_asset(release: &serde_json::Value, name: &str, allowed_prefix: &str) -> Result<Option<String>, String> {
+    let Some(url) = release["assets"]
         .as_array()
         .into_iter()
         .flatten()
-        .find(|a| a["name"] == ASSET)
+        .find(|a| a["name"] == name)
         .and_then(|a| a["browser_download_url"].as_str())
-        .ok_or_else(|| format!("La version {} ne contient pas le fichier {}", tag, ASSET))?;
+    else {
+        return Ok(None);
+    };
     if !url.starts_with(allowed_prefix) || url.contains("..") || url.chars().any(|c| c.is_whitespace()) {
         return Err("Adresse de téléchargement inattendue : refusée".into());
     }
-    Ok((tag, url.to_string()))
+    Ok(Some(url.to_string()))
+}
+
+/// The downloaded file matches the published SHA-256 (`<hex>  <name>`): a
+/// truncated or altered download is never installed.
+pub fn check_sha256(data: &[u8], sha256_file: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let expected = sha256_file.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Empreinte publiée illisible : mise à jour refusée".into());
+    }
+    let actual: String = Sha256::digest(data).iter().map(|b| format!("{:02x}", b)).collect();
+    if actual != expected {
+        return Err("Empreinte SHA-256 différente de celle publiée (téléchargement incomplet ou modifié) : mise à jour refusée".into());
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -260,6 +290,14 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
     .await
     .map_err(|e| format!("GitHub injoignable (internet disponible ?) : {}", first_line(&e)))?;
     let (tag, binary_url) = asset_url(&json, &state.update.download_prefix)?;
+    let sum_url = checksum_url(&json, &state.update.download_prefix)?;
+    let published_sum = crate::sys::run(
+        "curl",
+        &["-fsSL", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", &sum_url],
+        Duration::from_secs(70),
+    )
+    .await
+    .map_err(|e| format!("Empreinte de {} introuvable : {}", tag, first_line(&e)))?;
 
     let tmp = state.paths.tmp_dir.join(format!("aurion-download-{}", std::process::id()));
     let tmp_str = tmp.to_string_lossy().to_string();
@@ -273,6 +311,7 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
     let data = downloaded.and_then(|_| std::fs::read(&tmp).map_err(|e| e.to_string()));
     let _ = std::fs::remove_file(&tmp);
     let data = data.map_err(|e| format!("Téléchargement de {} interrompu : {}", tag, first_line(&e)))?;
+    check_sha256(&data, &published_sum)?;
     install_binary(state, &data).await
 }
 
@@ -326,6 +365,17 @@ pub async fn rollback(State(state): State<AppState>) -> Result<String, ApiError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checksum_must_match_the_published_one() {
+        // sha256("abc")
+        let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(check_sha256(b"abc", &format!("{}  aurion-arm64\n", abc)).is_ok());
+        assert!(check_sha256(b"abc", &abc.to_uppercase()).is_ok(), "hex case does not matter");
+        assert!(check_sha256(b"abd", abc).is_err(), "altered file");
+        assert!(check_sha256(b"abc", "").is_err(), "empty checksum file");
+        assert!(check_sha256(b"abc", "<html>Not Found</html>").is_err(), "error page instead of a checksum");
+    }
 
     const PREFIX: &str = "https://github.com/PercyaDJ/Aurion/releases/download/";
 

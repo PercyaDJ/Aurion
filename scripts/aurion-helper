@@ -43,6 +43,7 @@ RUN_DIR=/run/aurion
 # Dry-run (tests): never write into the real /run
 [[ "$DRYRUN" == "1" ]] && RUN_DIR="${AURION_RUN_DIR:-${TMPDIR:-/tmp}/aurion-helper-dryrun.$$}"
 AP_CON=aurion-ap
+CLIENT_CON=aurion-client
 NM_CON_DIR=/etc/NetworkManager/system-connections
 [[ "$DRYRUN" == "1" ]] && NM_CON_DIR="$RUN_DIR"
 # Bumped when commands change: the application checks it (Diagnostics).
@@ -128,55 +129,68 @@ kf_escape() { local v="${1//\\/\\\\}"; printf '%s' "${v// /\\s}"; }
 # SSID as a byte list ("65;117;"): read back exactly, whatever the characters
 kf_bytes() { printf '%s' "$1" | od -An -tu1 | tr -s ' \n' ' ' | sed 's/^ //; s/ $//; s/ /;/g; s/$/;/'; }
 
-ap_start_nm() {
-  local ssid="$1" channel="$2" psk="$3" file="$NM_CON_DIR/$AP_CON.nmconnection" uuid
-  run nmcli radio wifi on
-  run nmcli connection delete "$AP_CON" >/dev/null 2>&1 || true
-  # The password goes into a root-only keyfile (0600, where nmcli would store it
-  # anyway), never on a command line where any process could read it.
+# Write a NetworkManager connection as a root-only keyfile (0600, where
+# nmcli would store it anyway), load it and bring it up: the Wi-Fi password
+# never goes on a command line where any process could read it.
+#   nm_keyfile_up <connection> <mode> <wait s> <ssid> <psk> <extra [wifi] lines>
+#                 <extra [wifi-security] lines> <[ipv4]+[ipv6] sections>
+nm_keyfile_up() {
+  local con="$1" mode="$2" wait="$3" ssid="$4" psk="$5" wifi_extra="$6" sec_extra="$7" ip_sections="$8"
+  local file="$NM_CON_DIR/$con.nmconnection" uuid
   mkdir -p "$NM_CON_DIR"
   uuid=$(cat /proc/sys/kernel/random/uuid)
   cat >"$file.tmp" <<EOF
 [connection]
-id=$AP_CON
+id=$con
 uuid=$uuid
 type=wifi
 interface-name=$WLAN
 autoconnect=false
 
 [wifi]
-mode=ap
-band=bg
-channel=$channel
-ssid=$(kf_bytes "$ssid")
+mode=$mode
+${wifi_extra}ssid=$(kf_bytes "$ssid")
 
 [wifi-security]
 key-mgmt=wpa-psk
 psk=$(kf_escape "$psk")
-proto=rsn;
-pairwise=ccmp;
-group=ccmp;
-
-[ipv4]
-method=shared
-address1=$AP_IP/24
-
-[ipv6]
-method=disabled
+$sec_extra
+$ip_sections
 EOF
   chmod 600 "$file.tmp"
   mv -f "$file.tmp" "$file"
   if [[ "$DRYRUN" == "1" ]]; then
-    echo "DRY: keyfile $file (mode=ap, 0600)" >&2
+    echo "DRY: keyfile $file (mode=$mode, 0600)" >&2
     rm -f "$file"
   fi
-  if run nmcli connection load "$file" && run nmcli --wait 30 connection up "$AP_CON" >/dev/null; then
+  if run nmcli connection load "$file" && run nmcli --wait "$wait" connection up "$con" >/dev/null; then
+    return 0
+  fi
+  echo "aurion-helper: fichier de connexion refusé par NetworkManager, création par nmcli" >&2
+  rm -f "$file"
+  run nmcli connection delete "$con" >/dev/null 2>&1 || true
+  return 1
+}
+
+ap_start_nm() {
+  local ssid="$1" channel="$2" psk="$3"
+  run nmcli radio wifi on
+  run nmcli connection delete "$AP_CON" >/dev/null 2>&1 || true
+  # WPA2 only (rsn/ccmp): every phone joins it
+  if nm_keyfile_up "$AP_CON" ap 30 "$ssid" "$psk" "band=bg
+channel=$channel
+" "proto=rsn;
+pairwise=ccmp;
+group=ccmp;
+" "[ipv4]
+method=shared
+address1=$AP_IP/24
+
+[ipv6]
+method=disabled"; then
     return 0
   fi
   # Never leave the camera unreachable: previous method as a fallback
-  echo "aurion-helper: fichier de connexion refusé par NetworkManager, création par nmcli" >&2
-  rm -f "$file"
-  run nmcli connection delete "$AP_CON" >/dev/null 2>&1 || true
   run nmcli connection add type wifi ifname "$WLAN" con-name "$AP_CON" autoconnect no ssid "$ssid" \
     802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel "$channel" \
     ipv4.method shared ipv4.addresses "$AP_IP/24" ipv6.method disabled \
@@ -287,7 +301,16 @@ cmd_wifi_connect() {
   if nm_manages_wlan; then
     run nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
     run nmcli radio wifi on
-    run nmcli --wait 45 device wifi connect "$ssid" password "$psk" ifname "$WLAN" >/dev/null
+    run nmcli connection delete "$CLIENT_CON" >/dev/null 2>&1 || true
+    # Phone hotspot joined through a root-only keyfile (WPA2 / WPA2-WPA3). A
+    # WPA3-only hotspot needs SAE: the previous method detects it by itself.
+    if ! nm_keyfile_up "$CLIENT_CON" infrastructure 45 "$ssid" "$psk" "" "" "[ipv4]
+method=auto
+
+[ipv6]
+method=ignore"; then
+      run nmcli --wait 45 device wifi connect "$ssid" password "$psk" ifname "$WLAN" >/dev/null
+    fi
   else
     ap_stop_legacy
     mkdir -p "$RUN_DIR"

@@ -1,6 +1,6 @@
 # Dossier d'Architecture Technique (DAT)
 
-Version couverte : **1.11.2**. Public : développeurs, relecteurs, mainteneurs.
+Version couverte : **1.11.3**. Public : développeurs, relecteurs, mainteneurs.
 
 ## 1. Objet et contexte
 
