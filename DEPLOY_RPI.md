@@ -74,4 +74,4 @@ sudo ./install.sh --uninstall            # depuis le dossier de l'archive : dés
 
 ## Compiler sur le Pi (secours)
 
-Sans archive : `git clone` du dépôt puis `bash scripts/setup.sh` (installe Rust, compile 15 à 30 min, puis installe).
+Sans archive : `git clone` du dépôt puis `bash scripts/setup.sh` en utilisateur normal (installe gcc et Rust, compile 15 à 30 min, puis installe ; options de `scripts/install.sh` acceptées).
