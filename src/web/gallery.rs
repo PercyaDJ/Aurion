@@ -154,6 +154,39 @@ pub fn recent_image_sizes(mount: &FsPath, max: usize) -> Vec<(String, u64)> {
     sample(scan_images(mount, None))
 }
 
+/// What the capacity estimate of the home page needs: sizes of the latest
+/// images and the throughput of the last night.
+pub type CapacityInputs = (Vec<(String, u64)>, Option<f64>);
+
+type CapacityCache = Option<(std::time::Instant, PathBuf, CapacityInputs)>;
+static CAPACITY_CACHE: std::sync::Mutex<CapacityCache> = std::sync::Mutex::new(None);
+const CAPACITY_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// [`recent_image_sizes`] and [`recent_night_rate`] of a key, scanned at most
+/// every 2 min: the home page asks every 10 s, and between two nights the
+/// key does not change (deletions from the gallery clear the cache).
+pub fn capacity_inputs(mount: &FsPath) -> CapacityInputs {
+    if let Ok(cache) = CAPACITY_CACHE.lock() {
+        if let Some((at, path, inputs)) = cache.as_ref() {
+            if path == mount && at.elapsed() < CAPACITY_TTL {
+                return inputs.clone();
+            }
+        }
+    }
+    let inputs = (recent_image_sizes(mount, 60), recent_night_rate(mount));
+    if let Ok(mut cache) = CAPACITY_CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), mount.to_path_buf(), inputs.clone()));
+    }
+    inputs
+}
+
+/// Images were deleted or written: the next estimate scans the key again.
+pub fn clear_capacity_cache() {
+    if let Ok(mut cache) = CAPACITY_CACHE.lock() {
+        *cache = None;
+    }
+}
+
 /// Bytes written per hour during the most recent night that lasted at least
 /// 15 min with 20 images or more: the most honest capacity estimate, since
 /// it includes the real exposure times, pauses and file sizes.
@@ -692,6 +725,7 @@ pub async fn delete_gallery_images(
     })
     .await
     .unwrap_or_else(|e| (0, vec![e.to_string()]));
+    clear_capacity_cache();
 
     state.add_log(format!("{} image(s) supprimée(s)", deleted)).await;
     Json(GalleryDeleteResponse { deleted, errors })
@@ -723,6 +757,7 @@ pub async fn delete_gallery_session(State(state): State<AppState>, Path(session)
     })
     .await
     .unwrap_or_else(|e| (0, Err(std::io::Error::other(e.to_string()))));
+    clear_capacity_cache();
     if let Err(e) = removed {
         state.add_log(format!("Suppression du dossier de session impossible: {}", e)).await;
     }

@@ -329,14 +329,10 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         }
     } else if let Some((_, free)) = crate::sys::disk_usage(&mount) {
         let m = mount.clone();
-        let images: Vec<(String, u64)> = tokio::task::spawn_blocking(move || {
-            crate::web::gallery::recent_image_sizes(&m, 60)
-        })
-        .await
-        .unwrap_or_default();
+        let (images, rate) = tokio::task::spawn_blocking(move || crate::web::gallery::capacity_inputs(&m))
+            .await
+            .unwrap_or_default();
         // Measured throughput of the last night first, model otherwise
-        let m2 = mount.clone();
-        let rate = tokio::task::spawn_blocking(move || crate::web::gallery::recent_night_rate(&m2)).await.ok().flatten();
         let hours = match rate {
             Some(bytes_per_hour) if bytes_per_hour > 0.0 => round1(free as f64 / bytes_per_hour),
             _ => capacity_hours(&config, free, bytes_per_capture(&config, &images)),

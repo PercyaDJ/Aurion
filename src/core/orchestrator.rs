@@ -806,13 +806,15 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// Prepare the JPEG to save: the original bytes when no treatment is
     /// enabled (no decode at all, lowest CPU use), otherwise decode the full
     /// image, remove hot pixels, re-encode (quality 92) and keep the EXIF.
-    async fn process_jpeg(&self, frame: &CaptureFrame, denoise: &DenoiseConfig) -> Option<ProcessedJpeg> {
+    async fn process_jpeg<'a>(&self, frame: &'a CaptureFrame, denoise: &DenoiseConfig) -> Option<ProcessedJpeg<'a>> {
+        // Default settings: the capture is saved as is, borrowed (no copy of
+        // the ~5 MB JPEG nor of the pixels for every frame)
+        if !frame.raw_bytes.is_empty() && !denoise.needs_full_decode() {
+            return Some(ProcessedJpeg { jpeg: std::borrow::Cow::Borrowed(&frame.raw_bytes), full: None, hot_pixels_fixed: 0 });
+        }
         let original = frame.raw_bytes.clone();
         let fallback_rgb = (frame.data.clone(), frame.width, frame.height);
         let denoise = denoise.clone();
-        if !original.is_empty() && !denoise.needs_full_decode() {
-            return Some(ProcessedJpeg { jpeg: original, full: None, hot_pixels_fixed: 0 });
-        }
         tokio::task::spawn_blocking(move || {
             // Mock / test frames have no original JPEG: use the RGB pixels.
             let (mut rgb, w, h) = if original.is_empty() {
@@ -825,7 +827,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                         (rgb.into_raw(), w, h)
                     }
                     // Undecodable: keep the original file untouched
-                    Err(_) => return Some(ProcessedJpeg { jpeg: original, full: None, hot_pixels_fixed: 0 }),
+                    Err(_) => return Some(ProcessedJpeg { jpeg: original.into(), full: None, hot_pixels_fixed: 0 }),
                 }
             };
             let fixed = if denoise.hot_pixels {
@@ -840,7 +842,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 original
             };
             let full = (denoise.stack_frames >= 2).then_some((w, h, rgb));
-            Some(ProcessedJpeg { jpeg, full, hot_pixels_fixed: fixed })
+            Some(ProcessedJpeg { jpeg: jpeg.into(), full, hot_pixels_fixed: fixed })
         })
         .await
         .ok()
@@ -857,7 +859,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             return;
         }
         use image::{ImageBuffer, Rgb};
-        if let Some(img) = ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(frame.width, frame.height, frame.data.clone()) {
+        if let Some(img) = ImageBuffer::<Rgb<u8>, &[u8]>::from_raw(frame.width, frame.height, &frame.data[..]) {
             let thumb = image::imageops::resize(&img, 320, 240, image::imageops::FilterType::Triangle);
             if let Some(buf) = encode_jpeg(thumb.as_raw(), 320, 240) {
                 let _ = self.storage.save_file(&thumb_name, &buf).await;
@@ -1281,8 +1283,9 @@ fn night_event(i: NightEventInput) -> SessionEvent {
 }
 
 /// Result of [`Orchestrator::process_jpeg`].
-struct ProcessedJpeg {
-    jpeg: Vec<u8>,
+struct ProcessedJpeg<'a> {
+    /// Borrowed from the capture when saved untouched.
+    jpeg: std::borrow::Cow<'a, [u8]>,
     /// Full-resolution pixels `(w, h, rgb)`, kept only for stacking.
     full: Option<(u32, u32, Vec<u8>)>,
     hot_pixels_fixed: usize,
