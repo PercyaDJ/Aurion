@@ -110,58 +110,58 @@ n'écrit plus rien dans `/run`.
 
 Aucune vulnérabilité (« vulnerability ») connue ; aucun avis ne concerne le binaire livré sur le Pi.
 
-### Suivi continu avec ARBOR (workflows `release.yml` et `arbor.yml`, script `scripts/arbor-scan.sh`)
+### Suivi continu avec Lysbor (workflows `release.yml` et `lysbor.yml`, script `scripts/lysbor-scan.sh`)
 
-Le contrôle ci-dessus est une photo à une date. Le suivi continu passe par ARBOR, sur deux projets, car chaque envoi
+Le contrôle ci-dessus est une photo à une date. Le suivi continu passe par Lysbor, sur deux projets, car chaque envoi
 remplace l'inventaire du projet :
 
-| Projet ARBOR | Quand | Contenu |
+| Projet Lysbor | Quand | Contenu |
 |---|---|---|
-| Aurion_Application (`46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1`, secret `ARBOR_API_KEY`) | chaque release ; à la demande (workflow ARBOR) | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
-| Aurion_Image (`7d095ce7-6d86-4c48-92ef-b9df2fbd3327`, secret `ARBOR_IMAGE_API_KEY`) | dans le job de la release, juste après la publication ; à la demande, SBOM publié avec la dernière release (sans retélécharger l'image) | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
+| Aurion_Application (`46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1`, secret `LYSBOR_API_KEY`) | chaque release ; à la demande (workflow Lysbor) | SBOM Syft du dépôt (233 crates, actions GitHub, dépendances du test navigateur) ; Semgrep (code) ; Trivy (secrets, configuration) |
+| Aurion_Image (`7d095ce7-6d86-4c48-92ef-b9df2fbd3327`, secret `LYSBOR_IMAGE_API_KEY`) | dans le job de la release, juste après la publication ; à la demande, SBOM publié avec la dernière release (sans retélécharger l'image) | SBOM des paquets du système de l'image publiée : 633 paquets Debian (noyau, OpenSSL, dnsmasq, hostapd…), 220 Python, 98 Go |
 
 Pourquoi l'image compte autant que l'application : sur le terrain, le Wi-Fi du Pi est joignable par toute personne à
 portée. Le point d'accès, le serveur DHCP et DNS et le noyau font partie de la surface d'attaque au même titre que
 l'interface web. Et c'est l'image entière qui est distribuée.
 
-- Envoi direct par l'API documentée (`scripts/arbor-upload.sh`) : aucun script distant n'est exécuté dans la CI.
+- Envoi direct par l'API documentée (`scripts/lysbor-upload.sh`) : aucun script distant n'est exécuté dans la CI.
   La clé passe par l'entrée standard de curl, jamais par la ligne de commande ; en cas de refus, le code HTTP et
-  l'en-tête `Server` sont affichés (jamais la clé) pour distinguer ARBOR d'un pare-feu placé devant.
+  l'en-tête `Server` sont affichés (jamais la clé) pour distinguer Lysbor d'un pare-feu placé devant.
 - SBOM de l'image (`scripts/image-sbom.sh`) : partition système montée en lecture seule, empreinte de l'image
-  vérifiée avant, liste des fichiers exclue (sinon 18 Mo pour 2 Mo utiles, limite ARBOR 25 Mo).
+  vérifiée avant, liste des fichiers exclue (sinon 18 Mo pour 2 Mo utiles, limite Lysbor 25 Mo).
 - Outils en versions figées (Syft 1.20.0, Trivy 0.70.0, Semgrep 1.177.0), scripts d'installation pris sur le tag.
-- Une clé API par projet, en secrets du dépôt : `ARBOR_API_KEY` (application) et `ARBOR_IMAGE_API_KEY` (image).
+- Une clé API par projet, en secrets du dépôt : `LYSBOR_API_KEY` (application) et `LYSBOR_IMAGE_API_KEY` (image).
   Une clé divulguée n'expose qu'un projet. Sans clé, les SBOM sont produits en artefacts et rien n'est envoyé.
 - Chaque release porte `aurion-sbom.cdx.json` et `aurion-image-sbom.cdx.json`.
 - Réduction de la surface d'attaque (1.10.1) : mises à jour de sécurité Debian à la fabrication, puis retrait de
   92 paquets inutiles (rpi-connect, cloud-init, compilateurs, gdb, Bluetooth, SMB, archiveurs et leurs dépendances
-  Python et Go). Premier relevé ARBOR sur l'image 1.10.0 : 9 mises à jour possibles, 37 composants sans correctif ;
+  Python et Go). Premier relevé Lysbor sur l'image 1.10.0 : 9 mises à jour possibles, 37 composants sans correctif ;
   une partie disparaît avec ces paquets. Les autres (binutils, rsync, curl…) sont des outils locaux, non joignables
-  depuis le Wi-Fi : à trier dans ARBOR en « risque accepté » avec cette justification.
+  depuis le Wi-Fi : à trier dans Lysbor en « risque accepté » avec cette justification.
 - 1.10.2 : 47 paquets de plus retirés (en-têtes et compilateur, micrologiciels Wi-Fi inutiles, PPP, rpi-update,
-  pastebinit, wget, rich et pygments), documentation et traductions retirées. Plan ARBOR du 24/09/2026 :
+  pastebinit, wget, rich et pygments), documentation et traductions retirées. Plan Lysbor du 24/09/2026 :
   pygments 2.18.0 (CVE-2026-4539) traité par retrait du paquet, la mise à jour par pip ne s'appliquant pas à un
   paquet Debian. Composants restants sans correctif : outils locaux (binutils, rsync, curl en client, perl…),
   non joignables depuis le Wi-Fi, à classer en risque accepté.
-- Relevé ARBOR du 24/09/2026 (image 1.10.3) : 88 vulnérabilités ouvertes (230 en 1.10.0), aucune mise à jour
+- Relevé Lysbor du 24/09/2026 (image 1.10.3) : 88 vulnérabilités ouvertes (230 en 1.10.0), aucune mise à jour
   disponible, 22 paquets sans correctif. Registre des décisions ci-dessous.
-- Plan ARBOR du 29/09/2026 (image 1.10.4) : 33 vulnérabilités ouvertes, toutes sur rsync 3.4.1+ds1-5+deb13u4,
+- Plan Lysbor du 29/09/2026 (image 1.10.4) : 33 vulnérabilités ouvertes, toutes sur rsync 3.4.1+ds1-5+deb13u4,
   corrigées par Debian en 3.5.0+ds1-0+deb13u1 (trixie-security). Image 1.10.5 : correctif installé par la mise à jour
   de sécurité à la fabrication, qui échoue désormais si rsync reste sous cette version.
-- Plan ARBOR du 30/09/2026 (image 1.12.1) : 13 vulnérabilités sur openssl 3.5.7-1~deb13u3, annoncées « sans
+- Plan Lysbor du 30/09/2026 (image 1.12.1) : 13 vulnérabilités sur openssl 3.5.7-1~deb13u3, annoncées « sans
   version corrective ». Faux positif : les 13 avis Debian (OSV, mis à jour le 30/09/2026 à 08:00 UTC) donnent
   3.5.7-1~deb13u3 comme version corrigée, et une requête OSV sur cette version ne renvoie aucune vulnérabilité (13 sur
-  deb13u2). L'image porte donc déjà le correctif ; ARBOR s'appuie sur un état antérieur de la base. À relancer (renvoi
+  deb13u2). L'image porte donc déjà le correctif ; Lysbor s'appuie sur un état antérieur de la base. À relancer (renvoi
   du SBOM) puis, si l'alerte persiste, à classer en « non affecté » avec cette justification. La fabrication échoue
   désormais si libssl3t64, openssl ou openssl-provider-legacy restent sous 3.5.7-1~deb13u3.
-- Plan ARBOR du 30/09/2026 à 15:56 UTC, après envoi du SBOM de l'image 1.13.0 (15:13 UTC) : mêmes 13 alertes.
+- Plan Lysbor du 30/09/2026 à 15:56 UTC, après envoi du SBOM de l'image 1.13.0 (15:13 UTC) : mêmes 13 alertes.
   Le SBOM est juste : `libssl3t64`, `openssl` et `openssl-provider-legacy` en 3.5.7-1~deb13u3, `distro=debian-13`.
   OSV interrogé avec ces purl exactes : 0 vulnérabilité. Il n'en renvoie 50 que si l'on omet la version de Debian
   (écosystème `Debian` seul), qui mélange Debian 12 et 14, où ces CVE n'ont pas encore de correctif. L'erreur est
-  donc côté ARBOR (base non rafraîchie depuis l'ajout du correctif, ou mauvaise lecture de la version corrigée) ;
-  aucune action possible dans l'image. Décision : les 13 CVE sont tracées dans ARBOR comme faux positif (non
+  donc côté Lysbor (base non rafraîchie depuis l'ajout du correctif, ou mauvaise lecture de la version corrigée) ;
+  aucune action possible dans l'image. Décision : les 13 CVE sont tracées dans Lysbor comme faux positif (non
   affecté, correctif présent), et l'anomalie est signalée à l'éditeur. À réexaminer si une alerte subsiste après
-  correction côté ARBOR.
+  correction côté Lysbor.
 
 #### Registre des risques acceptés (image carte SD)
 
@@ -174,7 +174,7 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 | network-manager | gère le point d'accès Wi-Fi | oui, indirectement | accepté (1.11.0) : les deux failles demandent un compte local sur le Pi (AV:L). CVE-2026-10805 (CVSS 3.1 `AV:L/AC:H/PR:L/UI:R`) touche le moteur DHCP dhclient, CVE-2025-9615 (`AV:L/AC:L/PR:L`) la lecture de fichiers d'un autre utilisateur ; aucune n'est déclenchable depuis le Wi-Fi |
 | sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | accepté (1.11.0) : CVE-2026-82474 (CVSS 4.0 `AV:L/PR:L`) ne contourne que le mode `intercept` de sudo, jamais activé ici ; la règle n'autorise que `aurion-helper`, qui revalide chaque argument |
 | rsync | copie du noyau et du micrologiciel vers `/boot/firmware` (dépendance de `raspi-firmware`) | non | gardé à jour (3.5.0+ds1-0+deb13u1 minimum, contrôlé à la fabrication) ; retrait impossible : `raspi-firmware`, indispensable au démarrage, en dépend |
-| openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | non affecté (30/09/2026) : les 13 CVE ARBOR du 30/09/2026 sont corrigées en 3.5.7-1~deb13u3, version installée (faux positif ARBOR) ; gardé à jour (minimum contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
+| openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | non affecté (30/09/2026) : les 13 CVE Lysbor du 30/09/2026 sont corrigées en 3.5.7-1~deb13u3, version installée (faux positif Lysbor) ; gardé à jour (minimum contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
 | libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
 | systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
 | busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |
@@ -185,20 +185,20 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 
 **Décision du 30/09/2026 (1.13.0) : paquets du système non mis à jour boîtier fermé.** La caméra ne rejoint jamais
 Internet d'elle-même : elle émet son propre Wi-Fi, ou rejoint le partage de connexion du téléphone de son propriétaire
-le temps d'une mise à jour d'Aurion. Les failles des paquets Debian relevées par ARBOR après la gravure de la carte
+le temps d'une mise à jour d'Aurion. Les failles des paquets Debian relevées par Lysbor après la gravure de la carte
 restent donc en risque accepté sur les caméras déployées : la mise à jour depuis le téléphone ne porte que sur
 l'application et ses fichiers système. Chaque nouvelle image les corrige (mise à jour de sécurité à la fabrication) :
 elle s'applique en regravant la carte. Une mise à jour complète du système boîtier fermé (deux systèmes A/B) est
 étudiée dans `docs/CONCEPTION_AB.md`, reportée.
 
-Réévaluation : à chaque relevé ARBOR (release ou renvoi manuel) ; tout correctif Debian publié entre dans l'image suivante
+Réévaluation : à chaque relevé Lysbor (release ou renvoi manuel) ; tout correctif Debian publié entre dans l'image suivante
 (mise à jour de sécurité à la fabrication).
 - Actions GitHub figées par empreinte de commit (40 caractères) et non par étiquette (`@v4`), qu'un propriétaire
   peut déplacer vers un autre code (cas trivy-action). Dependabot (`.github/dependabot.yml`) propose chaque semaine
   une pull request qui met à jour empreinte et version ensemble. Réponse aux 20 alertes Semgrep
   `github-actions-mutable-action-tag` (CWE-1357).
-- Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `arbor-scan`. Le job ne devient
-  pas rouge sur une faille ; l'alerte vient d'ARBOR.
+- Limite actuelle : l'envoi direct n'applique pas le seuil `--fail-on` de l'agent `lysbor-scan`. Le job ne devient
+  pas rouge sur une faille ; l'alerte vient de Lysbor.
 
 ## 6. Risques résiduels
 

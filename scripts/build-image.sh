@@ -149,9 +149,9 @@ if [[ $APT -eq 1 ]]; then
       dpkg-query -W -f="\${db:Status-Status}" "$p" 2>/dev/null | grep -qx installed \
         || { echo "Paquet indispensable retiré : $p"; exit 1; }
     done
-    # Lowest version carrying the security fixes (ARBOR plans): an older one means
+    # Lowest version carrying the security fixes (Lysbor plans): an older one means
     # the Debian security archive was not reached during the upgrade.
-    # openssl: binary packages of the source package ARBOR reports (13 CVE fixed in deb13u3).
+    # openssl: binary packages of the source package Lysbor reports (13 CVE fixed in deb13u3).
     for pv in "rsync 3.5.0+ds1-0+deb13u1" "libssl3t64 3.5.7-1~deb13u3" "openssl 3.5.7-1~deb13u3" \
               "openssl-provider-legacy 3.5.7-1~deb13u3"; do
       p=${pv% *}; min=${pv#* }

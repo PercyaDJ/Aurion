@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A change that ships (code, scripts, image) with a version already
       # published is merged without any release: nothing new for the cameras,
-      # no ARBOR scan. Said here, in the PR, before the merge.
+      # no Lysbor scan. Said here, in the PR, before the merge.
       - name: Version à publier ?
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,12 +41,12 @@ jobs:
           if [ -n "$BASE" ] && gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             git fetch -q --depth=1 origin "$BASE"
             if git diff --name-only "$BASE" HEAD | grep -qE '^(src/|Cargo\.|scripts/|deploy/|config/|keys/)'; then
-              msg="La version $v est déjà publiée : à la fusion, rien ne sera publié ni envoyé à ARBOR. Montez la version dans Cargo.toml pour livrer ce changement."
+              msg="La version $v est déjà publiée : à la fusion, rien ne sera publié ni envoyé à Lysbor. Montez la version dans Cargo.toml pour livrer ce changement."
               echo "::warning::$msg"
               echo "$msg" >> "$GITHUB_STEP_SUMMARY"
             fi
           else
-            echo "Version $v : publiée à la fusion (release, image, ARBOR)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Version $v : publiée à la fusion (release, image, Lysbor)." >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
