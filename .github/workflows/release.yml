@@ -4,7 +4,7 @@ name: Release
 # - toujours : binaire Raspberry Pi publié dans la pré-release "edge" (canal Développement,
 #   installable depuis le téléphone en quelques minutes) ;
 # - si la release de la version de Cargo.toml n'existe pas encore : tests, image carte SD,
-#   paquet .deb, archive, SBOM, release GitHub (tag créé ici), puis envoi des SBOM à ARBOR.
+#   paquet .deb, archive, SBOM, release GitHub (tag créé ici), puis envoi des SBOM à Lysbor.
 # Une release compile une seule fois : son binaire sert aussi de binaire edge.
 on:
   push:
@@ -197,13 +197,13 @@ jobs:
             dist/*.cdx.json
 
       # Straight after the release: the image just published and the code it was built from
-      - name: Envoi à ARBOR (Aurion_Image, puis Aurion_Application)
+      - name: Envoi à Lysbor (Aurion_Image, puis Aurion_Application)
         if: steps.version.outputs.skip == 'false'
         env:
-          ARBOR_API_KEY: ${{ secrets.ARBOR_API_KEY }}
-          ARBOR_IMAGE_API_KEY: ${{ secrets.ARBOR_IMAGE_API_KEY }}
+          LYSBOR_API_KEY: ${{ secrets.LYSBOR_API_KEY || secrets.ARBOR_API_KEY }}
+          LYSBOR_IMAGE_API_KEY: ${{ secrets.LYSBOR_IMAGE_API_KEY || secrets.ARBOR_IMAGE_API_KEY }}
           # A missing key fails the job (red) instead of a warning nobody reads
-          ARBOR_REQUIRED: "1"
+          LYSBOR_REQUIRED: "1"
         run: |
-          bash scripts/arbor-scan.sh image dist/aurion-image-sbom.cdx.json
-          bash scripts/arbor-scan.sh app dist/aurion-sbom.cdx.json
+          bash scripts/lysbor-scan.sh image dist/aurion-image-sbom.cdx.json
+          bash scripts/lysbor-scan.sh app dist/aurion-sbom.cdx.json

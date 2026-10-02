@@ -5,7 +5,7 @@ Statut : **reportée** le 30/09/2026. Décision : boîtier fermé, seule l'appli
 ## 1. Objectif
 
 Une caméra en boîtier fermé doit pouvoir mettre à jour **tout son système** (Raspberry Pi OS, noyau, paquets
-corrigés des CVE signalées par ARBOR, et Aurion) depuis le téléphone, sans jamais devenir inutilisable, même si la
+corrigés des CVE signalées par Lysbor, et Aurion) depuis le téléphone, sans jamais devenir inutilisable, même si la
 nouvelle version ne démarre pas ou si le courant est coupé au mauvais moment.
 
 Aujourd'hui (1.12.1) :
@@ -88,7 +88,7 @@ Une seule action depuis le téléphone met tout à jour :
 
 | Élément | Où il vit | Mis à jour par |
 |---|---|---|
-| Raspberry Pi OS et tous ses paquets (correctifs CVE signalés par ARBOR) | racine du système inactif | écriture de la racine (§ 7, étape 4) |
+| Raspberry Pi OS et tous ses paquets (correctifs CVE signalés par Lysbor) | racine du système inactif | écriture de la racine (§ 7, étape 4) |
 | Noyau, firmware de démarrage (`start*.elf`, `fixup*.dat`), overlays, `config.txt` | partition de démarrage du système inactif | écriture de la partition de démarrage (étape 5) |
 | Pilote de la caméra, `libcamera`, fichiers de réglage du capteur IMX477 | racine | écriture de la racine |
 | Application Aurion et `aurion-helper` | racine | écriture de la racine |
