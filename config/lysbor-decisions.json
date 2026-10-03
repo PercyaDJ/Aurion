@@ -1,0 +1,228 @@
+{
+  "_comment": "Décisions de risque de l'image carte SD (projet Lysbor « AURION Image »), par paquet source Debian. Appliquées par scripts/lysbor-decisions.py. until_fix : un correctif publié rouvre les vulnérabilités et les fait entrer dans le plan (la fabrication de l'image l'installe déjà par la mise à jour de sécurité). Analyse : docs/AUDIT_SECURITE.md, relevé Lysbor du 03/10/2026.",
+  "reviewed": "2026-10-03",
+  "until_fix": true,
+  "decisions": {
+    "linux": {
+      "state": "accepted",
+      "reason": "Noyau Raspberry Pi (raspberrypi/linux 6.18, archive archive.raspberrypi.com), pas le paquet linux de Debian : les avis Debian « sans correctif » décrivent le noyau 6.12 de trixie ; leur état dans la branche 6.18 suivie par Raspberry Pi n'est pas établi par ces avis. Surface : Wi-Fi en point d'accès WPA2 (pilote brcmfmac), USB (accès physique), aucun service réseau en dehors d'Aurion, dnsmasq, NetworkManager et avahi ; Bluetooth coupé (dtoverlay=disable-bt), pas de modules compilés sur place. Mises à jour du noyau Raspberry Pi installées à chaque fabrication d'image (full-upgrade)."
+    },
+    "binutils": {
+      "state": "accepted",
+      "reason": "Outils de manipulation de fichiers objets, requis par rpi-eeprom (mise à jour du chargeur de démarrage du Pi) : retrait impossible. Toutes les failles sont classées « unimportant » par Debian et demandent de faire traiter un fichier objet piégé par binutils ; Aurion ne l'appelle jamais et aucune donnée venue du Wi-Fi ne l'atteint."
+    },
+    "vim": {
+      "state": "accepted",
+      "reason": "vim-tiny, éditeur de maintenance au clavier (compte pi, SSH coupé par défaut). Les failles demandent d'ouvrir un fichier piégé ou d'utiliser des greffons absents de vim-tiny (netrw, vimball, terminal, netbeans). Jamais lancé par Aurion, aucune donnée réseau."
+    },
+    "curl": {
+      "state": "accepted",
+      "reason": "curl sert uniquement aux mises à jour d'Aurion : requêtes HTTPS sans authentification vers api.github.com et github.com (src/web/update.rs), taille plafonnée, puis vérification de la signature Ed25519 avant toute installation. Les failles portent sur des fonctions inutilisées : authentification Digest, Negotiate ou par proxy, cookies, .netrc, STARTTLS, LDAP, SFTP/SCP, HTTP/2 Server Push, mTLS. libcurl3t64-gnutls sert au contrôle de connectivité de NetworkManager, requête simple sans authentification."
+    },
+    "glibc": {
+      "state": "accepted",
+      "reason": "Bibliothèque C du système, indispensable. Les failles touchent des fonctions qu'Aurion (Rust) et les services exposés n'appellent pas avec des données réseau (strfmon, ns_printrr, conversions iconv SHIFT_JISX0213 et EUC_JISX0213, tdelete, wordexp, nscd absent) ou demandent un compte local (ld.so, fopen ccs=). 7 sont classées « unimportant » par Debian (contournements de protections génériques). Correctifs Debian installés à chaque fabrication."
+    },
+    "bluez": {
+      "state": "not_affected",
+      "justification": "code_not_present",
+      "reason": "Seule la bibliothèque libbluetooth3 est installée (dépendance de NetworkManager) : bluetoothd, les profils audio (AVRCP, A2DP, PBAP, OBEX) et les outils hcidump et btmon visés par ces failles sont absents de l'image (paquet bluez retiré à la fabrication), et le Bluetooth est coupé au niveau matériel (dtoverlay=disable-bt)."
+    },
+    "openssh": {
+      "state": "accepted",
+      "reason": "Serveur SSH désactivé dans l'image : il ne démarre que si l'on crée un fichier ssh sur la partition de démarrage, donc avec la carte SD en main (mode maintenance, docs/DEX.md). Le client ssh, scp et sftp n'est jamais utilisé par Aurion. Les failles du serveur (GSSAPI, transfert de tunnels, sftp interne) ne sont joignables que dans ce mode volontaire."
+    },
+    "python3.13": {
+      "state": "accepted",
+      "reason": "Interpréteur utilisé par netplan (configuration de NetworkManager) et les outils apt, sur des fichiers locaux. Aucun service Python n'écoute sur le réseau : les failles (serveur TLS, tarfile, html.parser, imaplib, poplib, zipfile) ne sont pas atteintes. Aurion est en Rust."
+    },
+    "tiff": {
+      "state": "accepted",
+      "reason": "libtiff6 est utilisé par rpicam-apps pour écrire les DNG de la caméra, à partir de données du capteur : aucun fichier TIFF externe n'est lu. La plupart des failles visent les utilitaires tiffcrop, thumbnail, tiff2pdf, tiff2ps, tiffmedian, rgb2ycbcr, absents de l'image (libtiff-tools non installé) ; 11 sont classées « unimportant » par Debian."
+    },
+    "avahi": {
+      "state": "accepted",
+      "reason": "avahi-daemon annonce aurion.local sur le Wi-Fi Aurion (WPA2, clients connus du propriétaire). Trois failles permettent à un client connecté de le faire planter (déni de service, aucune exécution de code) : relance automatique en 2 s (systemd), l'interface reste joignable par http://192.168.4.1. Le DNS-SD étendu (CVE-2024-52615, CVE-2024-52616) est désactivé dans l'image. Les autres failles demandent un compte local."
+    },
+    "elfutils": {
+      "state": "accepted",
+      "reason": "libelf et libdw, utilisées par iproute2 et libcamera pour lire des binaires locaux. Les failles visent eu-readelf et eu-strip (absents) sur des fichiers ELF piégés, toutes « unimportant » pour Debian. Aucune donnée réseau."
+    },
+    "systemd": {
+      "state": "accepted",
+      "reason": "Socle du système. Les failles visent systemd-homed et systemd-oomd (non installés), le scellement du journal (non utilisé, « unimportant ») ou demandent un compte local (journald ForwardToWall). Aucun port systemd ouvert sur le réseau."
+    },
+    "util-linux": {
+      "state": "accepted",
+      "reason": "Outils de base (mount, fdisk, login). Les failles demandent un compte local (nsenter, montages restreints, chfn/chsh) ou login -h depuis un service distant (aucun : SSH coupé, pas de telnet). Aurion n'appelle que blkid, findmnt, wipefs, sfdisk et hwclock via aurion-helper, avec des arguments revalidés."
+    },
+    "expat": {
+      "state": "accepted",
+      "reason": "Analyseur XML utilisé par dbus, polkit, avahi et Python pour leurs fichiers de configuration locaux, écrits par root. Aucune donnée XML venue du réseau n'est analysée."
+    },
+    "sqlite3": {
+      "state": "accepted",
+      "reason": "Bibliothèque de base de données locale (gpg, nss, Python, journaux de connexion). Les failles demandent de faire ouvrir une base ou une requête piégée, ou visent les extensions zipfile et session, non utilisées. Aurion n'utilise pas SQLite."
+    },
+    "perl": {
+      "state": "accepted",
+      "reason": "Perl sert aux scripts des paquets Debian et à la gestion de la mémoire d'échange (rpi-swap), sur des données locales. Les failles (Pod::Text, Archive::Tar, expressions régulières) demandent une entrée contrôlée par l'attaquant. Jamais exposé au réseau."
+    },
+    "openldap": {
+      "state": "accepted",
+      "reason": "Seule la bibliothèque client libldap est installée (dépendance de curl et dirmngr) ; aucun annuaire n'est contacté. Les failles visent slapd, ses modules ou LMDB (absents) ou des configurations TLS non utilisées ; 4 sont « unimportant » pour Debian."
+    },
+    "firmware-nonfree": {
+      "state": "not_affected",
+      "justification": "code_not_present",
+      "reason": "Seul firmware-brcm80211 (Wi-Fi du Pi) est installé. Les cinq failles concernent les pilotes et micrologiciels Intel NPU, absents de l'image et sans objet sur un Raspberry Pi."
+    },
+    "nss": {
+      "state": "accepted",
+      "reason": "libnss3 n'est utilisée que localement. Les quatre failles visent l'ancien format de base dbm (lib/dbm), classées « unimportant » par Debian et demandant un fichier de base piégé."
+    },
+    "libx11": {
+      "state": "accepted",
+      "reason": "libX11 n'est installée que pour xauth (dépendance d'OpenSSH, transfert X11). Il n'y a pas de serveur graphique et aucun client X ne se connecte : les failles, déclenchées par un serveur X malveillant, ne sont pas atteintes."
+    },
+    "krb5": {
+      "state": "accepted",
+      "reason": "Bibliothèques Kerberos client, chargées par curl et OpenSSH ; aucun royaume Kerberos n'est configuré. Les failles visent kadmin, le module LDAP du KDC (absents) ou des fuites mémoire, toutes « unimportant » pour Debian."
+    },
+    "gnupg2": {
+      "state": "accepted",
+      "reason": "Outils GnuPG présents par dépendance. Les failles demandent de faire traiter un message ou une clé piégés en local (tpm2daemon, gpgsm, signatures en texte clair) ; Aurion vérifie ses mises à jour en Ed25519 sans GnuPG et apt utilise ses propres vérifications."
+    },
+    "alsa-lib": {
+      "state": "accepted",
+      "reason": "Bibliothèque audio ; l'audio est coupé dans l'image (dtparam=audio=off) et aucun programme Aurion ne l'utilise. Les failles demandent un fichier de configuration ALSA ou de topologie piégé, local."
+    },
+    "wpa": {
+      "state": "accepted",
+      "reason": "wpa_supplicant fait le point d'accès WPA2-PSK du Wi-Fi Aurion. CVE-2026-78807 demande un accès local ; CVE-2017-13084 (PeerKey) et CVE-2019-5062 (802.11w) sont classées « unimportant » par Debian et visent des fonctions non utilisées par ce point d'accès. Correctifs installés à chaque fabrication."
+    },
+    "popt": {
+      "state": "accepted",
+      "reason": "Bibliothèque d'analyse d'options de ligne de commande, utilisée par des outils locaux. Les failles demandent un accès local et des options ou une configuration contrôlées par l'attaquant."
+    },
+    "dracut": {
+      "state": "not_affected",
+      "justification": "code_not_present",
+      "reason": "Seul dracut-install est présent ; l'initramfs du Pi est fabriqué par initramfs-tools. Les failles visent les modules réseau de dracut (DHCP au démarrage, gestion d'erreur), absents de l'image."
+    },
+    "zlib": {
+      "state": "accepted",
+      "reason": "Bibliothèque de compression du système. Les failles visent gzwrite en mode non bloquant et crc32_combine64, des usages absents des services exposés ; aucune donnée compressée venue du réseau n'est traitée en dehors du TLS."
+    },
+    "slang2": {
+      "state": "accepted",
+      "reason": "libslang2, utilisée par whiptail pour les menus de raspi-config au clavier. Les failles (tt_sprintf, fixup_tgetstr) demandent une base terminfo piégée ; classées « unimportant » par Debian. Aucune donnée réseau."
+    },
+    "shadow": {
+      "state": "accepted",
+      "reason": "Gestion des comptes (passwd). Les failles concernent la plage subuid par défaut et des permissions de journaux, exploitables seulement avec un compte local. Un seul compte de maintenance, SSH coupé."
+    },
+    "policykit-1": {
+      "state": "accepted",
+      "reason": "polkitd, utilisé par NetworkManager. Les failles demandent un compte local (politique XML piégée, polkit-agent-helper-1). Aurion passe par aurion-helper via une règle sudo limitée, pas par polkit."
+    },
+    "parted": {
+      "state": "accepted",
+      "reason": "Agrandissement de la partition au premier démarrage, sur la carte SD elle-même. Aucune donnée externe ; les avis Debian n'indiquent ni gravité ni vecteur."
+    },
+    "pam": {
+      "state": "accepted",
+      "reason": "Modules d'authentification. Les failles visent pam_namespace et pam_userdb, non configurés dans l'image, et demandent un compte local."
+    },
+    "p11-kit": {
+      "state": "accepted",
+      "reason": "Chargement des modules PKCS#11 et des certificats. Les failles visent le canal RPC de p11-kit, non exposé, et demandent un accès local."
+    },
+    "network-manager": {
+      "state": "accepted",
+      "reason": "Gère le point d'accès Wi-Fi. CVE-2026-10805 (moteur dhclient : isc-dhcp-client n'est pas installé) et CVE-2025-9615 demandent un compte local sur le Pi (AV:L) ; aucune n'est déclenchable depuis le Wi-Fi. Décision déjà inscrite au registre (1.11.0)."
+    },
+    "ncurses": {
+      "state": "accepted",
+      "reason": "Bibliothèque de terminal. Les failles visent les outils infocmp et tic sur une description de terminal piégée, en local."
+    },
+    "libusb-1.0": {
+      "state": "accepted",
+      "reason": "Bibliothèque USB des outils usbutils et flashrom. Les failles demandent de brancher un périphérique USB piégé : accès physique au boîtier, hors du modèle de menace (qui a le boîtier en main a déjà la carte SD)."
+    },
+    "glib2.0": {
+      "state": "accepted",
+      "reason": "Bibliothèque de base de NetworkManager et polkit. CVE-2012-0039 (collisions de hachage, « unimportant ») et un défaut de g_file_replace en local ; aucune donnée réseau n'alimente ces fonctions dans l'image."
+    },
+    "gcc-14": {
+      "state": "accepted",
+      "reason": "Seules les bibliothèques d'exécution (libstdc++6, libgcc-s1, libgomp1, libatomic1) sont installées, le compilateur est retiré. Les failles visent des usages précis de libstdc++ (operator new aligné sur de très grandes tailles, erase_if sur une file de priorité) dans le programme appelant ; Aurion est en Rust et n'y fait pas appel."
+    },
+    "acl": {
+      "state": "accepted",
+      "reason": "Bibliothèque des ACL de fichiers. Failles de liens symboliques et de concurrence, exploitables seulement avec un compte local."
+    },
+    "attr": {
+      "state": "accepted",
+      "reason": "Seule la bibliothèque libattr1 est installée ; la faille vise les utilitaires getfattr et setfattr (absents) avec un compte local."
+    },
+    "libpng1.6": {
+      "state": "accepted",
+      "reason": "Restent deux failles sans correctif, classées « unimportant » par Debian, dans les programmes d'exemple pngimage et pnm2png, non installés. La faille corrigée (CVE-2026-46675) l'est par la fabrication, qui impose 1.6.48-1+deb13u6."
+    },
+    "python-apt": {
+      "state": "accepted",
+      "reason": "Liaison Python d'apt (apt-listchanges). La faille demande un fichier de paquets piégé, lu en local par root."
+    },
+    "nghttp2": {
+      "state": "not_affected",
+      "justification": "code_not_present",
+      "reason": "La faille vise nghttpx, le mandataire de nghttp2, absent de l'image : seule la bibliothèque libnghttp2-14 est installée (client HTTP/2 de curl)."
+    },
+    "modemmanager": {
+      "state": "accepted",
+      "reason": "Seule la bibliothèque libmm-glib0 est installée (dépendance de NetworkManager) : le service ModemManager est absent de l'image et il n'y a pas de modem. L'avis Debian ne donne ni gravité ni description."
+    },
+    "lvm2": {
+      "state": "accepted",
+      "reason": "Seules dmsetup et libdevmapper sont présentes ; aucun volume LVM. La faille demande une configuration LVM piégée, en local, « unimportant » pour Debian."
+    },
+    "jbigkit": {
+      "state": "accepted",
+      "reason": "libjbig0, dépendance de libtiff ; aucun document TIFF externe n'est lu (voir tiff). Faille de 2017 classée « unimportant » par Debian."
+    },
+    "iputils": {
+      "state": "accepted",
+      "reason": "ping, jamais lancé par Aurion. La faille demande qu'un utilisateur lance ping vers un hôte qui répond une trame piégée ; « unimportant » pour Debian."
+    },
+    "iptables": {
+      "state": "accepted",
+      "reason": "Seule libxtables12 est installée ; le pare-feu de l'image est nftables. Faille de 2012 sur des règles --syn, « unimportant » pour Debian."
+    },
+    "initramfs-tools": {
+      "state": "accepted",
+      "reason": "Fabrication de l'initramfs lors des mises à jour du noyau. Faille de 2008 contestée par le mainteneur, « unimportant » pour Debian, compte local requis."
+    },
+    "gnutls28": {
+      "state": "accepted",
+      "reason": "CVE-2011-3389 (BEAST) vise le chiffrement CBC de TLS 1.0 : les connexions TLS de l'image (curl vers GitHub) négocient TLS 1.2 ou 1.3."
+    },
+    "apt": {
+      "state": "accepted",
+      "reason": "apt n'est utilisé qu'à la fabrication de l'image ; Aurion ne lance jamais apt sur la caméra. Faille de 2011 sur apt-key, outil obsolète, « unimportant » pour Debian."
+    },
+    "duktape": {
+      "state": "accepted",
+      "reason": "Moteur JavaScript embarqué de polkitd pour lire ses règles locales, écrites par root. Aucun JavaScript externe n'est exécuté."
+    },
+    "bzip2": {
+      "state": "accepted",
+      "reason": "La faille vise l'utilitaire bzip2recover sur un fichier piégé, en local. Jamais utilisé par Aurion."
+    },
+    "dnsmasq": {
+      "state": "not_affected",
+      "justification": "requires_configuration",
+      "reason": "dnsmasq sert le DHCP et le DNS du Wi-Fi Aurion, lancé par NetworkManager sans validation DNSSEC : CVE-2026-13002 exige la validation DNSSEC activée et une zone signée contrôlée par l'attaquant."
+    }
+  }
+}

@@ -164,8 +164,24 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   correction côté Lysbor.
 - Relevé Lysbor du 30/09/2026 à 16:25 UTC, base OSV de Lysbor resynchronisée : les 13 alertes openssl ont disparu. Restent
   2 CVE sur dash 0.5.12-12, sans correctif dans aucune version de Debian (12, 13, 14) : risque accepté, voir registre.
+- Plan Lysbor du 03/10/2026 (image 1.13.0, même SBOM que le 30/09) : 1 173 vulnérabilités ouvertes au lieu de 2.
+  L'image n'a pas changé : Lysbor rapproche désormais les paquets Debian par paquet source (`upstream=` du purl),
+  comme OSV et le suivi de sécurité Debian, alors qu'il comparait avant le nom du paquet binaire (`linux-image-rpi-v8`
+  contre `linux`, `libbluetooth3` contre `bluez`) et ne trouvait presque rien. Ces vulnérabilités existaient déjà.
+  Répartition : noyau 815, binutils 70, vim 44, curl 25, glibc 21, bluez 21, openssh 20, python3.13 17, tiff 14,
+  45 autres paquets à 8 ou moins. Une seule a un correctif (libpng1.6 1.6.48-1+deb13u6, CVE-2026-46675), imposé
+  désormais à la fabrication. Parmi les 1 172 autres, 223 sont classées « unimportant » par Debian.
+  Décisions par paquet source dans `config/lysbor-decisions.json` (54 paquets : 49 risques acceptés, 5 non affectés,
+  code absent ou configuration non utilisée), appliquées par `scripts/lysbor-decisions.py`, toutes « jusqu'au
+  correctif » : un correctif publié rouvre les vulnérabilités du paquet et la fabrication suivante l'installe.
+  Durcissement associé : avahi (seul démon exposé avec des failles de déni de service ouvertes) relancé en 2 s s'il
+  plante, DNS-SD étendu coupé. Retraits étudiés et écartés : binutils (requis par rpi-eeprom), serveur SSH (mode
+  maintenance documenté, désactivé par défaut), GnuPG (failles locales uniquement, gain nul).
 
 #### Registre des risques acceptés (image carte SD)
+
+Depuis le 03/10/2026, la référence des décisions est `config/lysbor-decisions.json` (un commentaire par paquet
+source, enregistré tel quel dans Lysbor). Le tableau ci-dessous garde les analyses détaillées antérieures.
 
 Exposition mesurée sur l'image : sur le Wi-Fi Aurion, seuls l'interface Aurion, dnsmasq (DHCP et DNS, lancé par
 NetworkManager), NetworkManager avec wpa_supplicant (point d'accès) et avahi (mDNS) reçoivent des données du
