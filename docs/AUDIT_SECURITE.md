@@ -162,8 +162,26 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   aucune action possible dans l'image. Décision : les 13 CVE sont tracées dans Lysbor comme faux positif (non
   affecté, correctif présent), et l'anomalie est signalée à l'éditeur. À réexaminer si une alerte subsiste après
   correction côté Lysbor.
+- Relevé Lysbor du 30/09/2026 à 16:25 UTC, base OSV de Lysbor resynchronisée : les 13 alertes openssl ont disparu. Restent
+  2 CVE sur dash 0.5.12-12, sans correctif dans aucune version de Debian (12, 13, 14) : risque accepté, voir registre.
+- Plan Lysbor du 03/10/2026 (image 1.13.0, même SBOM que le 30/09) : 1 173 vulnérabilités ouvertes au lieu de 2.
+  L'image n'a pas changé : Lysbor rapproche désormais les paquets Debian par paquet source (`upstream=` du purl),
+  comme OSV et le suivi de sécurité Debian, alors qu'il comparait avant le nom du paquet binaire (`linux-image-rpi-v8`
+  contre `linux`, `libbluetooth3` contre `bluez`) et ne trouvait presque rien. Ces vulnérabilités existaient déjà.
+  Répartition : noyau 815, binutils 70, vim 44, curl 25, glibc 21, bluez 21, openssh 20, python3.13 17, tiff 14,
+  45 autres paquets à 8 ou moins. Une seule a un correctif (libpng1.6 1.6.48-1+deb13u6, CVE-2026-46675), imposé
+  désormais à la fabrication. Parmi les 1 172 autres, 223 sont classées « unimportant » par Debian.
+  Décisions par paquet source dans `config/lysbor-decisions.json` (54 paquets : 49 risques acceptés, 5 non affectés,
+  code absent ou configuration non utilisée), appliquées par `scripts/lysbor-decisions.py`, toutes « jusqu'au
+  correctif » : un correctif publié rouvre les vulnérabilités du paquet et la fabrication suivante l'installe.
+  Durcissement associé : avahi (seul démon exposé avec des failles de déni de service ouvertes) relancé en 2 s s'il
+  plante, DNS-SD étendu coupé. Retraits étudiés et écartés : binutils (requis par rpi-eeprom), serveur SSH (mode
+  maintenance documenté, désactivé par défaut), GnuPG (failles locales uniquement, gain nul).
 
 #### Registre des risques acceptés (image carte SD)
+
+Depuis le 03/10/2026, la référence des décisions est `config/lysbor-decisions.json` (un commentaire par paquet
+source, enregistré tel quel dans Lysbor). Le tableau ci-dessous garde les analyses détaillées antérieures.
 
 Exposition mesurée sur l'image : sur le Wi-Fi Aurion, seuls l'interface Aurion, dnsmasq (DHCP et DNS, lancé par
 NetworkManager), NetworkManager avec wpa_supplicant (point d'accès) et avahi (mDNS) reçoivent des données du
@@ -175,6 +193,7 @@ réseau. SSH est coupé. Les autres paquets ne traitent que des données locales
 | sudo | lance le helper root depuis Aurion | non, mais sert d'escalade si l'interface était compromise | accepté (1.11.0) : CVE-2026-82474 (CVSS 4.0 `AV:L/PR:L`) ne contourne que le mode `intercept` de sudo, jamais activé ici ; la règle n'autorise que `aurion-helper`, qui revalide chaque argument |
 | rsync | copie du noyau et du micrologiciel vers `/boot/firmware` (dépendance de `raspi-firmware`) | non | gardé à jour (3.5.0+ds1-0+deb13u1 minimum, contrôlé à la fabrication) ; retrait impossible : `raspi-firmware`, indispensable au démarrage, en dépend |
 | openssl (libssl3t64) | TLS de curl (mises à jour depuis GitHub), wpa_supplicant (point d'accès WPA2) | oui, indirectement (wpa_supplicant) | non affecté (30/09/2026) : les 13 CVE Lysbor du 30/09/2026 sont corrigées en 3.5.7-1~deb13u3, version installée (faux positif Lysbor) ; gardé à jour (minimum contrôlé à la fabrication) ; retrait impossible (bibliothèque TLS du système) |
+| dash | `/bin/sh` du système (scripts de paquets, `system()` des programmes C) | non | accepté (30/09/2026) : aucun correctif Debian. CVE-2026-102473 (CVSS 5.5 `AV:L/PR:L`, déni de service CPU par un motif `*` répété) : le code vulnérable est bien présent (Debian compile dash avec `--disable-fnmatch`) mais il faut un compte local pour fournir le motif. CVE-2026-102474 (CVSS 4.0 `AV:L`, Debian « unimportant ») : débordement d'un ou deux octets dans `printf` avec un échappement `\u`/`\U` fourni par l'attaquant. Aurion ne passe jamais par `/bin/sh` : il lance directement `iw`, `ip`, `rpicam-*`, `vcgencmd`, `sync`, et ses scripts (`aurion-helper`, premier démarrage, règle udev) sont en bash. Aucune donnée venue du Wi-Fi n'atteint dash. Retrait impossible (paquet Essential). À réexaminer dès qu'un correctif Debian paraît : la mise à jour de sécurité à la fabrication l'installera |
 | libxml2 | bibliothèque XML, seul utilisateur : shared-mime-info | non | accepté |
 | systemd, util-linux, coreutils, tar, cpio, diffutils, bzip2, apt, kbd | socle du système | non | accepté |
 | busybox, initramfs-tools, parted | démarrage et agrandissement de la carte au premier allumage | non | accepté |

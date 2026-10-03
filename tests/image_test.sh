@@ -58,6 +58,7 @@ check "compte de maintenance (pas d'assistant bloquant)" 'grep -q "^pi:" "$W/use
 check "notice lisible depuis un PC" 'grep -q "aurora2024" "$W/lisezmoi.txt"'
 check "config.txt prêt dès le premier démarrage (LED, Bluetooth, chien de garde)" 'grep -q "^arm_64bit=1" "$W/configtxt.txt" && grep -q "^dtparam=watchdog=on" "$W/configtxt.txt" && grep -q "^dtparam=act_led_trigger=none" "$W/configtxt.txt" && grep -q "^dtoverlay=disable-bt" "$W/configtxt.txt"'
 check "nom réseau aurion (http://aurion.local)" '[[ "$(cat "$R/etc/hostname")" == aurion ]] && grep -qP "^127\.0\.1\.1\taurion$" "$R/etc/hosts" && grep -q "_http._tcp" "$R/etc/avahi/services/aurion.service"'
+check "avahi relancé s'il plante" 'grep -q "^Restart=on-failure" "$R/etc/systemd/system/avahi-daemon.service.d/aurion-restart.conf"'
 check "SSH non activé" '! grep -qiE "/ssh(\.txt)?$" "$W/bootfiles.txt"'
 
 echo
