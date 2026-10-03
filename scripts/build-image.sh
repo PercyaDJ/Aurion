@@ -220,6 +220,19 @@ cat >"$ROOT/etc/avahi/services/aurion.service" <<'XML'
   </service>
 </service-group>
 XML
+# avahi is the only daemon besides dnsmasq and NetworkManager that reads packets from Wi-Fi clients, and some of its
+# open flaws (no Debian fix yet) let a client crash it. Wide-area DNS-SD (unicast queries to a DNS server, predictable
+# ports and IDs: CVE-2024-52615, CVE-2024-52616) is never used for aurion.local: off. A crash restarts it in 2 s.
+conf="$ROOT/etc/avahi/avahi-daemon.conf"
+if [[ -f "$conf" ]]; then
+  if grep -qE '^#?enable-wide-area=' "$conf"; then
+    sed -i -E 's/^#?enable-wide-area=.*/enable-wide-area=no/' "$conf"
+  else
+    printf '\n[wide-area]\nenable-wide-area=no\n' >>"$conf"
+  fi
+fi
+install -d "$ROOT/etc/systemd/system/avahi-daemon.service.d"
+printf '[Service]\nRestart=on-failure\nRestartSec=2\n' >"$ROOT/etc/systemd/system/avahi-daemon.service.d/aurion-restart.conf"
 
 # Maintenance account (keyboard + screen only, SSH stays off): pi / aurion.
 # Its presence also skips the interactive first-boot user wizard.
