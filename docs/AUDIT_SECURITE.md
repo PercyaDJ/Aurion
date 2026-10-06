@@ -177,6 +177,9 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   Durcissement associé : avahi (seul démon exposé avec des failles de déni de service ouvertes) relancé en 2 s s'il
   plante, DNS-SD étendu coupé. Retraits étudiés et écartés : binutils (requis par rpi-eeprom), serveur SSH (mode
   maintenance documenté, désactivé par défaut), GnuPG (failles locales uniquement, gain nul).
+- Plan Lysbor du 06/10/2026 : CVE-2026-46675 (libpng1.6 1.6.48-1+deb13u5) toujours ouverte. Le correctif était bien
+  imposé par `build-image.sh` depuis le 03/10, mais l'image n'est refabriquée qu'à une nouvelle version : le SBOM
+  envoyé restait celui de l'image 1.13.0. Version 1.13.1 publiée pour refabriquer l'image et renvoyer son SBOM.
 
 #### Registre des risques acceptés (image carte SD)
 
