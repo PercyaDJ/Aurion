@@ -1,5 +1,17 @@
 # Journal des versions
 
+## 1.13.1
+
+Objectif : republier l'image carte SD avec les correctifs de sécurité du système, sans changement de l'application.
+
+- **libpng 1.6.48-1+deb13u6** dans l'image (CVE-2026-46675, plan Lysbor du 03/10/2026, toujours ouvert le 06/10/2026
+  car l'image 1.13.0 n'avait pas été refabriquée). La fabrication échoue si `libpng16-16t64` reste sous cette version.
+- **avahi durci** (seul démon exposé au Wi-Fi Aurion avec des failles de déni de service sans correctif) : relancé en
+  2 s s'il plante, DNS-SD étendu désactivé (inutile pour `aurion.local`).
+- Décisions Lysbor par paquet source (`config/lysbor-decisions.json`) appliquées par `scripts/lysbor-decisions.py`.
+- Caméras déjà en 1.13.0 : la mise à jour depuis le téléphone n'apporte que le programme, identique ; les paquets du
+  système ne sont corrigés qu'en regravant la carte SD avec cette image.
+
 ## 1.13.0
 
 Objectif : chaque nouvelle fonctionnalité d'Aurion arrive par le téléphone, boîtier fermé, même quand elle touche au
