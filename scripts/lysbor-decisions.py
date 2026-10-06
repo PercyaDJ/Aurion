@@ -16,16 +16,29 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import sys
 import urllib.error
 import urllib.request
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DECISIONS = os.path.join(HERE, "..", "config", "lysbor-decisions.json")
 
 
+# Only HTTPS (and plain HTTP for a local test server): an opener without the file:// and ftp:// handlers that
+# urlopen() would accept from LYSBOR_URL, and the key never travels in clear text over the network.
+OPENER = urllib.request.OpenerDirector()
+for handler in (urllib.request.ProxyHandler(), urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+                urllib.request.HTTPHandler(), urllib.request.HTTPErrorProcessor(),
+                urllib.request.HTTPDefaultErrorHandler()):
+    OPENER.add_handler(handler)
+
+
 def api(method: str, path: str, body: dict | None = None):
+    base = urlsplit(os.environ["LYSBOR_URL"])
+    if not (base.scheme == "https" or (base.scheme == "http" and base.hostname in ("localhost", "127.0.0.1", "::1"))):
+        sys.exit("LYSBOR_URL doit commencer par https://")
     url = os.environ["LYSBOR_URL"].rstrip("/") + "/api/v1" + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
@@ -34,7 +47,7 @@ def api(method: str, path: str, body: dict | None = None):
         "User-Agent": "aurion-ci/1 lysbor-decisions",
     })
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with OPENER.open(req, timeout=120) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         # Never the key: the code and the start of the answer say who refuses
