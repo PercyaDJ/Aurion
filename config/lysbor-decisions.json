@@ -1,6 +1,6 @@
 {
   "_comment": "Décisions de risque de l'image carte SD (projet Lysbor « AURION Image »), par paquet source Debian. Appliquées par scripts/lysbor-decisions.py. until_fix : un correctif publié rouvre les vulnérabilités et les fait entrer dans le plan (la fabrication de l'image l'installe déjà par la mise à jour de sécurité). Analyse : docs/AUDIT_SECURITE.md, relevé Lysbor du 03/10/2026.",
-  "reviewed": "2026-10-03",
+  "reviewed": "2026-10-14",
   "until_fix": true,
   "decisions": {
     "linux": {
@@ -223,6 +223,11 @@
       "state": "not_affected",
       "justification": "requires_configuration",
       "reason": "dnsmasq sert le DHCP et le DNS du Wi-Fi Aurion, lancé par NetworkManager sans validation DNSSEC : CVE-2026-13002 exige la validation DNSSEC activée et une zone signée contrôlée par l'attaquant."
+    },
+    "cyrus-sasl2": {
+      "state": "not_affected",
+      "justification": "code_not_present",
+      "reason": "CVE-2026-107161 (sans correctif Debian) : débordement de tas dans le module DIGEST-MD5 côté client, face à un serveur malveillant. Le module (libdigestmd5, paquet libsasl2-modules, simple recommandation) est retiré à la fabrication, qui échoue s'il reste. Seule la bibliothèque libsasl2-2 demeure, pour libldap2 (dépendance de libcurl) ; Aurion n'utilise ni LDAP ni SASL : curl ne fait que des requêtes HTTPS vers GitHub."
     }
   }
 }
