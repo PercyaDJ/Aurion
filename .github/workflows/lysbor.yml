@@ -36,8 +36,7 @@ jobs:
 
       - name: Aurion_Image (décisions de risque, config/lysbor-decisions.json)
         env:
-          LYSBOR_IMAGE_API_KEY: ${{ secrets.LYSBOR_IMAGE_API_KEY || secrets.ARBOR_IMAGE_API_KEY }}
-          LYSBOR_REQUIRED: "1"
+          LYSBOR_DECISIONS_API_KEY: ${{ secrets.LYSBOR_DECISIONS_API_KEY }}
         run: bash scripts/lysbor-scan.sh decisions
 
       - name: Aurion_Application (SBOM, Semgrep, Trivy)
