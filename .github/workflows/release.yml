@@ -207,3 +207,5 @@ jobs:
         run: |
           bash scripts/lysbor-scan.sh image dist/aurion-image-sbom.cdx.json
           bash scripts/lysbor-scan.sh app dist/aurion-sbom.cdx.json
+          # Risk decisions on the new image SBOM (sent a few minutes earlier, analysed by now)
+          bash scripts/lysbor-scan.sh decisions

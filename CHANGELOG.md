@@ -9,6 +9,8 @@ Objectif : republier l'image carte SD avec les correctifs de sécurité du syst�
 - **Module SASL DIGEST-MD5 retiré** (`libsasl2-modules`) : faille sans correctif Debian (CVE-2026-107161) dans un code
   qu'aucun programme de la caméra n'utilise. La fabrication échoue si le module reste.
 - Caméras déjà installées : ces correctifs du système n'arrivent qu'en regravant la carte SD avec cette image.
+- Publication : les décisions de risque de `config/lysbor-decisions.json` sont enregistrées dans Lysbor par la CI,
+  juste après l'envoi du SBOM de l'image (workflows Release et Lysbor). Plus de manipulation de clé API à la main.
 
 ## 1.13.1
 
