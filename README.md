@@ -1,134 +1,252 @@
 # Aurion
 
-Caméra autonome de capture d'aurores boréales pour Raspberry Pi 4/5 et HQ Camera (IMX477).
-Le Pi crée son propre Wi-Fi ; depuis le téléphone on règle, on lance la nuit, puis on récupère les photos.
+**Aurion transforme un Raspberry Pi et sa caméra HQ en appareil photo autonome pour les aurores boréales.**
 
-## Installation (aucune connaissance technique nécessaire)
+On le pose dehors, face au nord, on le règle depuis son téléphone, et il photographie le ciel toute la nuit sans
+personne à côté. Le matin, on récupère les photos (RAW pour la retouche et le timelapse), avec les aurores déjà
+repérées et classées de la plus forte à la plus faible.
 
-1. Téléchargez l'image (système + application, environ 600 Mo) : **[aurion-raspios-arm64.img.xz](https://github.com/PercyaDJ/Aurion/releases/latest/download/aurion-raspios-arm64.img.xz)**.
-2. Copiez-la sur une carte micro-SD avec **Raspberry Pi Imager** (*Utiliser une image personnalisée*, puis **Non** aux réglages personnalisés).
-3. Branchez la caméra, la carte SD, la clé USB (exFAT), puis l'alimentation.
-4. Après 3 à 5 minutes, rejoignez le Wi-Fi **Aurion** (mot de passe **aurora2024**) : la page s'ouvre toute seule.
+- **Aucun ordinateur sur le terrain** : le Raspberry Pi crée son propre Wi-Fi, tout se pilote depuis le navigateur
+  du téléphone, sans application à installer et sans internet.
+- **Autonome** : exposition automatique, extinction en fin de nuit, reprise seule après une coupure de courant.
+- **Deux modes** : *Toute la nuit* (idéal timelapse, les images avec aurore sont marquées) ou *Aurores seulement*
+  (surveille le ciel et n'enregistre qu'à partir de la première aurore confirmée).
+- **Plusieurs nuits d'affilée** (mode expédition) : chaque soir, la nuit démarre seule.
+- **Mise à jour depuis le téléphone**, avec retour arrière en un geste.
 
-Guide illustré pas à pas, branchements et dépannage : **[docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md)**.
+Ce README suffit pour passer du carton à la première nuit d'aurores. Le reste de la documentation est dans
+[docs/](docs/README.md).
 
-L'image est construite et publiée automatiquement par GitHub Actions à chaque nouvelle version.
-Mise à jour ensuite depuis le téléphone, sans ordinateur : *Diagnostics*, **Mettre à jour depuis GitHub** (version stable
-ou de développement, par le partage de connexion du téléphone), et retour arrière en un geste.
-Boucle essai / correction : [docs/GUIDE_DEVELOPPEMENT.md](docs/GUIDE_DEVELOPPEMENT.md).
+---
+
+## 1. Le matériel
+
+### Indispensable
+
+| Élément | Choix conseillé | Remarques |
+|---|---|---|
+| **Raspberry Pi** | Raspberry Pi 4 (2 Go de mémoire ou plus) ou Raspberry Pi 5 | voir « Pi 4 ou Pi 5 ? » ci-dessous |
+| **Caméra** | Raspberry Pi **HQ Camera** (capteur Sony IMX477) | c'est la seule caméra prise en charge |
+| **Objectif** | grand angle et lumineux, monture C ou CS (celle de la HQ Camera) | le ciel entier compte : la focale la plus courte possible, l'ouverture la plus grande possible (par exemple l'objectif officiel 6 mm CS) |
+| **Nappe caméra** | Pi 4 : celle fournie avec la caméra. **Pi 5 : une nappe « 22 broches vers 15 broches »** | le Pi 5 a un connecteur caméra plus petit : la nappe d'origine ne rentre pas |
+| **Carte micro-SD** | 16 Go ou plus | reçoit le système et l'application |
+| **Clé USB** | 128 Go ou plus, formatée en **exFAT** | reçoit les photos et une copie des réglages. Une photo RAW pèse environ 24 Mo |
+| **Alimentation** | batterie USB-C **5 V / 3 A**, avec un câble court et épais | une batterie de 20 000 mAh a tenu une nuit d'hiver complète (il restait 30 %). Sur secteur : l'alimentation officielle du Pi |
+| **Un téléphone** | n'importe quel smartphone avec un navigateur | pour tout piloter |
+| **Un ordinateur** | une seule fois | pour préparer la carte SD |
+
+À prévoir aussi : un support stable (trépied), et de quoi protéger le montage de l'humidité et du froid. Les
+batteries perdent 30 à 50 % de leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée).
+
+### Pi 4 ou Pi 5 ?
+
+| | Raspberry Pi 4 | Raspberry Pi 5 |
+|---|---|---|
+| Une nuit à la fois | parfait | parfait |
+| Plusieurs nuits d'affilée | il faut rebrancher la batterie (ou appuyer sur son bouton) chaque soir | **se rallume seul** chaque soir grâce à son horloge intégrée |
+| Consommation au repos | plus faible | plus élevée |
+| Nappe caméra | celle de la caméra | nappe 22 vers 15 broches à acheter |
+
+### En option
+
+| Élément | Pour quoi |
+|---|---|
+| Pile d'horloge **ML-2020** (Pi 5) | garder l'heure quand la batterie est débranchée : utile en mode expédition |
+| Module horloge **DS3231** (Pi 4) | démarrer seul à la bonne heure sans téléphone. Montage pas encore validé sur le matériel : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) |
+
+---
+
+## 2. Installation (une seule fois, environ 15 minutes)
+
+### Étape 1 : préparer la carte SD sur l'ordinateur
+
+1. Installez **Raspberry Pi Imager** (gratuit) : <https://www.raspberrypi.com/software/>.
+2. Téléchargez l'image Aurion, environ 600 Mo. Elle contient tout : le système du Raspberry Pi et l'application.
+   **[aurion-raspios-arm64.img.xz](https://github.com/PercyaDJ/Aurion/releases/latest/download/aurion-raspios-arm64.img.xz)**
+   (ce lien donne toujours la dernière version).
+3. Ouvrez Raspberry Pi Imager :
+   - *Appareil* : votre modèle de Raspberry Pi ;
+   - *Système d'exploitation* : tout en bas, **Utiliser une image personnalisée**, puis le fichier téléchargé ;
+   - *Stockage* : la carte micro-SD ;
+   - à la question des réglages personnalisés, répondez **Non** (Aurion se configure seul).
+4. Attendez la fin de l'écriture et de la vérification, puis retirez la carte.
+
+### Étape 2 : tout brancher (Raspberry Pi débranché)
+
+1. **Caméra** : soulevez doucement le loquet du connecteur *CAMERA* du Pi, insérez la nappe à fond, puis rabaissez
+   le loquet. Sur un Pi 4, les contacts métalliques de la nappe sont tournés vers les prises HDMI. Faites de même côté
+   caméra. Vissez l'objectif sur la caméra.
+2. **Carte micro-SD** : dans le lecteur, sous le Pi.
+3. **Clé USB** : dans un port USB (bleu de préférence).
+4. **Alimentation** : en dernier, sur la prise USB-C.
+
+Les voyants du Pi restent éteints : c'est voulu, pour ne pas éclairer la photo et pour économiser la batterie.
+
+### Étape 3 : premier allumage (3 à 5 minutes)
+
+Au premier démarrage, le Pi s'installe tout seul et peut redémarrer une fois. Ensuite, sur le téléphone :
+
+1. Dans les réglages Wi-Fi, rejoignez le réseau **Aurion**, mot de passe **aurora2024**.
+2. La page Aurion s'ouvre toute seule. Sinon, ouvrez le navigateur sur **<http://aurion.local>**
+   (ou **<http://192.168.4.1:8080>**).
+3. Un encadré **Protégez votre caméra** vous demande de choisir votre propre mot de passe Wi-Fi (10 caractères
+   minimum). Faites-le : le mot de passe d'origine est public. Le Wi-Fi Aurion redémarre, reconnectez-vous avec le
+   nouveau mot de passe.
+
+L'heure du Pi se règle automatiquement sur celle du téléphone à chaque connexion. C'est tout : Aurion est prêt.
+
+> **Clé USB neuve ou illisible** : si l'accueil affiche le point rouge « Clé USB à préparer », appuyez sur
+> **Préparer la clé**. Attention, tout son contenu est effacé.
+
+---
+
+## 3. Votre première nuit d'aurores
+
+1. **Installez la caméra** dehors, face au nord, bien stable, objectif propre. Faites la mise au point sur
+   l'infini (une étoile brillante ou une lumière très lointaine aide).
+2. **Allumez** (branchez la batterie) et connectez le téléphone au Wi-Fi **Aurion**.
+3. Sur l'accueil, **Cadrer (aperçu)** : vérifiez le cadrage, puis revenez à l'accueil.
+4. Lisez la liste **Prêt pour la nuit ?** : elle vérifie la caméra, la clé USB (et combien d'heures de photos elle
+   peut contenir), l'heure et l'alimentation. Un point rouge bloque le lancement et dit quoi faire ; un point orange
+   est un simple conseil.
+5. Choisissez :
+   - le **mode** : *Toute la nuit* (conseillé) ou *Aurores seulement* ;
+   - la **durée** : la plage horaire habituelle (21:00 à 06:00) ou un nombre d'heures à partir de maintenant ;
+   - les **photos** : RAW (conseillé), RAW + JPG, ou JPG seul.
+6. Appuyez sur **Lancer la nuit**. Le Wi-Fi se coupe au bout de 15 secondes pour économiser la batterie : c'est
+   normal, vous pouvez partir.
+
+Aurion photographie seul et **s'éteint seul** à la fin de la nuit.
+
+Si le courant est coupé pendant la nuit (batterie vide ou changée, câble arraché), rebranchez simplement : Aurion
+rallume son Wi-Fi 5 minutes, au cas où vous voudriez annuler, puis reprend la nuit là où elle s'était arrêtée.
+
+Les soirs suivants, c'est encore plus court : branchez la batterie, le téléphone retrouve seul le Wi-Fi Aurion, les
+réglages de la veille sont déjà remplis, appuyez sur **Lancer la nuit**.
+
+Conseils de réglage pour le timelapse (intervalle, balance des blancs, exposition verrouillée, darks) :
+[docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
+
+---
+
+## 4. Récupérer les photos
+
+**Sur le téléphone** : rallumez Aurion et reconnectez-vous au Wi-Fi. L'accueil affiche la **Dernière nuit** (nombre
+de photos, d'aurores, de RAW) avec trois boutons : **Voir les plus belles**, **Télécharger les RAW** et
+**Tout télécharger**. Le menu *Photos* donne accès à toutes les nuits.
+
+**Sur l'ordinateur** : sur l'accueil, appuyez sur **Éteindre Aurion**, attendez 20 secondes, puis branchez la clé
+USB sur l'ordinateur. Chaque nuit a son dossier :
+
+```
+sessions/<nuit>/
+├── RAW/          photos RAW (DNG)
+├── JPG/          photos JPEG
+└── aurores.csv   images avec aurore, de la plus forte à la plus faible
+```
+
+---
+
+## 5. Plusieurs nuits sans toucher à la caméra
+
+Cochez **Plusieurs nuits (expédition)** sur l'accueil : chaque soir, la nuit démarre seule. Un Raspberry Pi 5
+s'éteint le jour et se rallume seul le soir ; un Pi 4 demande de rebrancher la batterie. Comptez une batterie
+chargée par nuit (environ 14 000 mAh mesurés en hiver).
+
+Tout est expliqué dans [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md).
+
+---
+
+## 6. Mettre à jour
+
+| Ce qui change | Comment |
+|---|---|
+| **L'application** (cas le plus courant) | depuis le téléphone, connecté au Wi-Fi Aurion : *Diagnostics*, **Mettre à jour depuis GitHub**. Choisissez *Stable*, saisissez le nom et le mot de passe du partage de connexion du téléphone, appuyez sur **Mettre à jour maintenant**, puis activez le partage de connexion. Aurion télécharge la nouvelle version (2 à 5 minutes), remet son Wi-Fi, et une fenêtre donne le résultat à la reconnexion. Si la nouvelle version pose problème, elle est retirée seule ; sinon, bouton *Revenir à la version précédente* |
+| **Le système** (correctifs de sécurité du Raspberry Pi) | regravez la dernière image sur la carte SD, comme à l'étape 1. *Diagnostics* indique quand c'est nécessaire |
+
+Une mise à jour ne fait rien perdre : les photos restent sur la clé USB, et Aurion y garde une copie de ses réglages
+(`aurion-reglages.json`). Après avoir regravé la carte SD, il les reprend tout seul, mot de passe Wi-Fi compris.
+
+---
+
+## 7. En cas de problème
+
+| Symptôme | Solution |
+|---|---|
+| Le Wi-Fi « Aurion » n'apparaît pas | au premier démarrage, attendez 5 minutes ; sinon débranchez et rebranchez l'alimentation |
+| La page ne s'ouvre pas toute seule | tapez <http://aurion.local> ou <http://192.168.4.1:8080> dans le navigateur |
+| Point rouge « Caméra non détectée » | débranchez le Pi, vérifiez la nappe des deux côtés (sens et loquet). Pi 5 : nappe 22 vers 15 broches |
+| Point rouge « Clé USB absente » | rebranchez la clé, ou essayez-en une autre |
+| Point rouge « Clé USB à préparer » | bouton **Préparer la clé** (efface la clé) |
+| Point rouge « Alimentation trop faible », ou le Pi s'éteint seul | batterie 5 V / 3 A, câble court et épais |
+| Mot de passe Wi-Fi oublié | sur un ordinateur, créez un fichier vide nommé `aurion-reset-wifi.txt` à la racine de la clé USB, remettez la clé sur le Pi et rallumez : le mot de passe redevient **aurora2024** (les photos ne sont pas touchées) |
+| « Nuit interrompue » au démarrage alors que vous voulez juste vos photos | appuyez sur **Annuler la reprise** |
+
+Plus de cas, et le diagnostic avancé : [docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md) et
+[docs/DEX.md](docs/DEX.md).
+
+---
+
+## Pour aller plus loin
+
+| Document | Contenu |
+|---|---|
+| [docs/GUIDE_DEMARRAGE.md](docs/GUIDE_DEMARRAGE.md) | le même parcours, avec plus de détails |
+| [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md) | réglages photo : RAW, timelapse, darks, meilleures aurores |
+| [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) | plusieurs nuits d'affilée, énergie, horloge |
+| [docs/ENERGIE_ET_FIABILITE.md](docs/ENERGIE_ET_FIABILITE.md) | consommation, coupures de courant, conseils terrain |
+| [docs/DEX.md](docs/DEX.md) | exploitation : mises à jour, maintenance, SSH |
+| [CHANGELOG.md](CHANGELOG.md) | nouveautés de chaque version |
+| [docs/README.md](docs/README.md) | toute la documentation (architecture, sécurité, tests) |
 
 <details>
-<summary>Installation sur un Raspberry Pi OS déjà installé (utilisateurs avancés)</summary>
+<summary><strong>Installer sur un Raspberry Pi OS déjà en place (utilisateurs avancés)</strong></summary>
 
-- Paquet Debian (onglet *Releases*) : `sudo apt install ./aurion_1.10.0_arm64.deb`
-- Depuis un clone du dépôt : `sudo ./install.sh` (télécharge la dernière version précompilée, ou compile en dernier recours)
-- Depuis un PC : `.\scripts\deploy.ps1 pi@aurion.local .\aurion-1.10.0-rpi-arm64.tar.gz` (Windows), `scripts/deploy.sh pi@aurion.local` (Linux / macOS)
+L'image ci-dessus est la méthode recommandée. Pour installer Aurion sur un Raspberry Pi OS Lite 64 bits existant
+(Bookworm ou Trixie) :
 
-Détails : [DEPLOY_RPI.md](DEPLOY_RPI.md).
+- avec internet, sur le Pi : `curl -fsSL https://raw.githubusercontent.com/PercyaDJ/Aurion/main/scripts/get.sh | sudo bash`
+- paquet Debian de la release : `sudo apt install ./aurion_<version>_arm64.deb`
+- depuis un clone du dépôt, sur le Pi : `sudo ./install.sh`
+
+Dans ce cas, le mot de passe du Wi-Fi Aurion est tiré au hasard et affiché à la fin de l'installation. Détails :
+[DEPLOY_RPI.md](DEPLOY_RPI.md).
 </details>
 
-Réglages photo (RAW, timelapse, darks) : [docs/GUIDE_PHOTO.md](docs/GUIDE_PHOTO.md).
+<details>
+<summary><strong>Développement</strong></summary>
 
-## Utilisation sur le terrain
-
-1. Brancher le Pi (USB-C 5 V / 3 A) avec la clé USB.
-2. Se connecter au Wi-Fi **Aurion** : la page s'ouvre toute seule (portail captif), sinon `http://192.168.4.1:8080`.
-   L'heure du Pi est réglée automatiquement sur celle du téléphone.
-3. **Accueil** : la liste *Prêt pour la nuit ?* vérifie caméra, clé (et nombre d'heures de photos possibles),
-   heure et alimentation. Choisir le mode, la durée, le format, puis **Lancer la nuit**. Le Wi-Fi se coupe au bout
-   de 15 s, la nuit se déroule seule et le Pi s'éteint à la fin.
-4. **Le lendemain** : rallumer, l'accueil affiche la *Dernière nuit* avec **Télécharger les RAW**,
-   **Voir les plus belles** et **Tout télécharger**.
-
-Deux modes :
-- **Toute la nuit** (SAFE, défaut, idéal timelapse) : capture toute la nuit, les images avec aurore sont marquées `_AURORA`.
-- **Aurores seulement** (FILTER) : surveille le ciel et n'enregistre qu'après N détections consécutives.
-
-Plusieurs nuits d'affilée (expédition) : cocher *Plusieurs nuits* ; chaque soir la nuit démarre seule, un Raspberry Pi 5
-se rallume même tout seul. Guide : [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md).
-Sur la clé, chaque nuit a son dossier `sessions/<nuit>/` avec `RAW/`, `JPG/` et `aurores.csv`.
-
-Coupure de courant pendant la nuit : au redémarrage, la nuit reprend seule (annulable 5 min depuis le téléphone).
-Mot de passe Wi-Fi oublié : fichier vide `aurion-reset-wifi.txt` à la racine de la clé USB, puis rallumer.
-Menu simple par défaut ; *Mode expert* (en bas du menu) pour les réglages fins.
-
-## Développement sur PC
+Aurion est écrit en Rust (serveur web Axum, interface HTML/CSS/JS sans framework, incluse dans le binaire). Son
+architecture hexagonale (ports et adaptateurs) permet de tout tester sur PC, avec une caméra simulée.
 
 ```bash
-cargo run -- serve --port 8080      # interface web avec caméra simulée
+cargo run -- serve --port 8080      # interface web avec caméra simulée : http://localhost:8080
 cargo run -- simulate               # nuit simulée dans la console
-cargo test                          # tous les tests Rust
-```
-
-Tests complets (comme la CI) :
-```bash
+cargo test                          # tests Rust
 cargo clippy --all-targets -- -D warnings
-bash tests/helper_test.sh                         # helper root, validation des arguments
-sudo -E bash tests/install_test.sh target/debug/aurion   # installeur simulé dans une fausse racine
-cd tests/e2e && npm install && node ui_test.mjs   # interface dans Chromium
+bash tests/helper_test.sh           # helper root (validation des arguments)
 ```
-
-Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && bash scripts/package.sh`
-(binaire statique musl : fonctionne sur Bullseye, Bookworm et Trixie). Changer `version` dans `Cargo.toml` et pousser sur `main` publie la release automatiquement.
-
-## Tests
-
-| Suite | Contenu |
-|---|---|
-| `src/**` (unitaires) | validation, config, exposition, détection, machine d'état, sécurité HTTP, stockage |
-| `tests/api_tests.rs` | contrat de l'API utilisé par chaque page |
-| `tests/security_tests.rs` | traversée de chemin, injection Wi-Fi, CSRF, DNS rebinding, fuite du mot de passe, mise à jour OTA |
-| `tests/gallery_tests.rs` | galerie, miniatures, sessions, ZIP, suppression |
-| `tests/simulation_tests.rs` | nuits complètes en temps virtuel : SAFE, FILTER, plage horaire, caméra en panne, disque plein, RAW, reprise après coupure |
-| `tests/regression_tests.rs` | un test par bug corrigé + valeurs de référence de la détection |
-| `tests/integration_tests.rs` | cycle de vie avec les mocks |
-| `tests/helper_test.sh` | `aurion-helper` (seul programme exécuté en root) |
-| `tests/install_test.sh` | installation, mise à jour, réparation, désinstallation |
-| `tests/e2e/ui_test.mjs` | les pages dans un navigateur réel : accueil, mode expert, lancement de la nuit, téléchargements |
-
-Détail, chiffres et couverture : [docs/TESTS.md](docs/TESTS.md).
-
-## Architecture
-
-Hexagonale (ports / adapters) : le cœur est testable sans matériel.
 
 ```
 src/
-├── core/        config, validation, exposition, détection, débruitage, JPEG/EXIF, orchestrateur
-├── ports/       traits caméra, stockage, horloge, réseau, système
-├── adapters/    pc/ (mocks) et rpi/ (rpicam-still, clé USB, hotspot, arrêt)
-├── web/         API Axum, sécurité HTTP, galerie, portail captif, pages embarquées
-├── sys.rs       commandes système (helper root via sudo, espace disque)
-└── cli/         simulation, bench (coût des traitements sur le Pi)
-scripts/         install.sh, aurion-helper, package.sh, deploy.sh/.ps1, get.sh, setup.sh
-deploy/          aurion.service, règle udev de montage USB
+├── core/      configuration, exposition, détection, orchestrateur de la nuit
+├── ports/     interfaces caméra, stockage, horloge, réseau, système
+├── adapters/  pc/ (simulateurs) et rpi/ (rpicam-still, clé USB, point d'accès Wi-Fi)
+├── web/       API, sécurité HTTP, galerie, portail captif, pages
+└── cli/       simulation, mesures de performance
+scripts/       installation, helper root, fabrication de l'image et des paquets
 ```
 
-Sur le Pi : `/opt/aurion/aurion` (binaire unique, interface incluse), `/opt/aurion/config/aurion.json`,
-`/usr/local/sbin/aurion-helper` (seul accès root autorisé), photos sur la clé montée en `/mnt/capture`.
+Archive Raspberry Pi depuis Linux : `sudo apt install gcc-aarch64-linux-gnu && bash scripts/package.sh` (binaire
+statique, fonctionne sur Bullseye, Bookworm et Trixie).
 
-## Configuration
+Publier une version : changer `version` dans `Cargo.toml` et fusionner sur `main`. Le workflow Release teste,
+fabrique l'image carte SD, publie la release signée et envoie les inventaires de sécurité (SBOM). Sans changement de
+version, seul le canal de développement est mis à jour.
 
-Fichier `/opt/aurion/config/aurion.json`, modifiable depuis l'interface. Principaux paramètres :
-
-| Section | Paramètre | Défaut | Rôle |
-|---|---|---|---|
-| exposure | `iso_min` / `iso_max` | 100 / 3200 | plage ISO |
-| | `shutter_min_us` / `shutter_max_us` | 1 s / 30 s | plage d'obturation |
-| | `lock_in_run` | false | exposition figée pendant la capture (timelapse sans scintillement) |
-| detection | `detection_capture_enabled` | false | false = SAFE, true = FILTER |
-| | `roi_top_percent` | 65 | part haute de l'image analysée (50 à 99) |
-| | `consecutive_required` | 2 | détections consécutives pour confirmer |
-| capture | `output_format` | RawDng | `RawDng` (RAW seul), `RawAndJpg`, `Jpg` ou `JpgAuroraRaw` (RAW pendant les aurores) |
-| | `awb` | daylight | balance des blancs fixe (pas de scintillement en timelapse) |
-| | `denoise.stack_frames` | 0 | JPEG empilé toutes les N images (0 = non) |
-| | `capture_interval_secs` | 0 | pause entre deux photos (0 = à la suite, la pose donne la cadence) |
-| time_range | `start` / `end` | 21:00 / 06:00 | plage horaire (heure locale) |
-| | `duration_hours` | null | minuteur, prioritaire sur la plage |
-| network | `ssid` / `password` / `channel` | Aurion / unique / 6 | hotspot (mot de passe 10 à 63 caractères) |
-| expedition | `enabled` | false | démarrage automatique chaque soir, réveil programmé du Pi 5 |
-
-Documentation complète (DAT, DEX, spécifications, UX, audits, tests, énergie, plan d'action) : [docs/](docs/README.md). Nouveautés : [CHANGELOG.md](CHANGELOG.md).
+Guides : [docs/GUIDE_DEVELOPPEMENT.md](docs/GUIDE_DEVELOPPEMENT.md), [docs/DAT.md](docs/DAT.md) (architecture),
+[docs/TESTS.md](docs/TESTS.md), [docs/AUDIT_SECURITE.md](docs/AUDIT_SECURITE.md).
+</details>
 
 ## Licence
 
