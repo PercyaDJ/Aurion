@@ -202,6 +202,8 @@ jobs:
         env:
           LYSBOR_API_KEY: ${{ secrets.LYSBOR_API_KEY || secrets.ARBOR_API_KEY }}
           LYSBOR_IMAGE_API_KEY: ${{ secrets.LYSBOR_IMAGE_API_KEY || secrets.ARBOR_IMAGE_API_KEY }}
+          # Optional: key with the "admin" scope, only for recording risk decisions
+          LYSBOR_DECISIONS_API_KEY: ${{ secrets.LYSBOR_DECISIONS_API_KEY }}
           # A missing key fails the job (red) instead of a warning nobody reads
           LYSBOR_REQUIRED: "1"
         run: |
