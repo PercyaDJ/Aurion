@@ -1,5 +1,17 @@
 # Journal des versions
 
+## 1.13.2
+
+Objectif : republier l'image carte SD avec les correctifs de sécurité du système, sans changement de l'application.
+
+- **curl 8.14.1-2+deb13u7** dans l'image (CVE-2026-8927, CVE-2026-8924, CVE-2026-8286, CVE-2026-92392, plan Lysbor du
+  14/10/2026). La fabrication échoue si `curl`, `libcurl4t64` ou `libcurl3t64-gnutls` restent sous cette version.
+- **Module SASL DIGEST-MD5 retiré** (`libsasl2-modules`) : faille sans correctif Debian (CVE-2026-107161) dans un code
+  qu'aucun programme de la caméra n'utilise. La fabrication échoue si le module reste.
+- Caméras déjà installées : ces correctifs du système n'arrivent qu'en regravant la carte SD avec cette image.
+- Publication : les décisions de risque de `config/lysbor-decisions.json` sont enregistrées dans Lysbor par la CI,
+  juste après l'envoi du SBOM de l'image (workflows Release et Lysbor). Plus de manipulation de clé API à la main.
+
 ## 1.13.1
 
 Objectif : republier l'image carte SD avec les correctifs de sécurité du système, sans changement de l'application.

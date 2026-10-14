@@ -2,6 +2,7 @@
 # Analyses envoyées à Lysbor (https://lysbor.com), communes aux workflows Release et Lysbor.
 #   scripts/lysbor-scan.sh app [aurion-sbom.cdx.json]   SBOM Syft du dépôt, Semgrep, Trivy -> Aurion_Application
 #   scripts/lysbor-scan.sh image <aurion-image-sbom.cdx.json>                         -> Aurion_Image
+#   scripts/lysbor-scan.sh decisions   décisions de config/lysbor-decisions.json      -> Aurion_Image
 # Une clé par projet : LYSBOR_API_KEY (application), LYSBOR_IMAGE_API_KEY (image). Sans clé, rien n'est
 # installé ni envoyé (avertissement) : pas de minutes perdues. Avec LYSBOR_REQUIRED=1 (workflows Release et
 # Lysbor), une clé absente est une erreur : l'envoi ne peut pas manquer sans que le job soit rouge.
@@ -62,5 +63,11 @@ case "${1:-}" in
     [[ -n "$key" ]] || missing_key "Secret LYSBOR_IMAGE_API_KEY absent : SBOM de l'image non envoyé."
     upload "$IMAGE_PROJECT" "$key" sboms "$2"
     ;;
-  *) echo "Usage : $0 app [sbom] | image <sbom>"; exit 1 ;;
+  decisions)
+    # After the image SBOM: risk decisions recorded on its components (scripts/lysbor-decisions.py)
+    key="${LYSBOR_IMAGE_API_KEY:-}"
+    [[ -n "$key" ]] || missing_key "Secret LYSBOR_IMAGE_API_KEY absent : décisions de risque non enregistrées."
+    LYSBOR_PROJECT="$IMAGE_PROJECT" LYSBOR_API_KEY="$key" python3 scripts/lysbor-decisions.py --apply
+    ;;
+  *) echo "Usage : $0 app [sbom] | image <sbom> | decisions"; exit 1 ;;
 esac

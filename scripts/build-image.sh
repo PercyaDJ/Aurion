@@ -126,12 +126,15 @@ if [[ $APT -eq 1 ]]; then
     # (strace, htop, v4l-utils, wireless-tools), NetworkManager translations,
     # man-db (manuals are removed below) and ntfs-3g (NTFS keys go through the
     # kernel ntfs3 driver). avahi stays: aurion.local is used for maintenance.
+    # Also (1.13.2): libsasl2-modules, SASL plugins (DIGEST-MD5 and others), only
+    # recommended by libsasl2-2 (kept for libldap2): unfixed heap overflow in the
+    # DIGEST-MD5 client (CVE-2026-107161), never used on a camera.
     unused=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" rpi-connect-lite cloud-init mkvtoolnix gdb \
       cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id \
       linux-headers-rpi-2712 linux-headers-rpi-v8 firmware-atheros firmware-mediatek firmware-realtek \
       firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion \
       python3-venv python3-pip-whl python3-setuptools-whl strace htop v4l-utils wireless-tools \
-      network-manager-l10n man-db ntfs-3g 2>/dev/null \
+      network-manager-l10n man-db ntfs-3g libsasl2-modules 2>/dev/null \
       | awk "\$2 == \"installed\" {print \$1}")
     # Versioned kernel headers are protected from autoremove (APT::NeverAutoRemove):
     # name them, and the compiler they pull, explicitly.
@@ -143,6 +146,9 @@ if [[ $APT -eq 1 ]]; then
     if dpkg-query -W -f="\${Package} \${db:Status-Status}\n" "linux-headers-*" gcc-14-for-host 2>/dev/null | grep -q " installed$"; then
       echo "En-têtes du noyau ou compilateur encore présents"; exit 1
     fi
+    if compgen -G "/usr/lib/*/sasl2/libdigestmd5*" >/dev/null; then
+      echo "Module SASL DIGEST-MD5 encore présent (CVE-2026-107161)"; exit 1
+    fi
     # What boots the Pi and its Wi-Fi must still be there
     for p in raspi-firmware firmware-brcm80211 linux-image-rpi-2712 linux-image-rpi-v8 network-manager rpi-eeprom \
              netplan.io xz-utils; do
@@ -153,7 +159,8 @@ if [[ $APT -eq 1 ]]; then
     # the Debian security archive was not reached during the upgrade.
     # openssl: binary packages of the source package Lysbor reports (13 CVE fixed in deb13u3).
     for pv in "rsync 3.5.0+ds1-0+deb13u1" "libssl3t64 3.5.7-1~deb13u3" "openssl 3.5.7-1~deb13u3" \
-              "openssl-provider-legacy 3.5.7-1~deb13u3" "libpng16-16t64 1.6.48-1+deb13u6"; do
+              "openssl-provider-legacy 3.5.7-1~deb13u3" "libpng16-16t64 1.6.48-1+deb13u6" \
+              "curl 8.14.1-2+deb13u7" "libcurl4t64 8.14.1-2+deb13u7" "libcurl3t64-gnutls 8.14.1-2+deb13u7"; do
       p=${pv% *}; min=${pv#* }
       v=$(dpkg-query -W -f="\${db:Status-Status} \${Version}" "$p" 2>/dev/null || true)
       case "$v" in
