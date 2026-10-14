@@ -180,6 +180,12 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - Plan Lysbor du 06/10/2026 : CVE-2026-46675 (libpng1.6 1.6.48-1+deb13u5) toujours ouverte. Le correctif était bien
   imposé par `build-image.sh` depuis le 03/10, mais l'image n'est refabriquée qu'à une nouvelle version : le SBOM
   envoyé restait celui de l'image 1.13.0. Version 1.13.1 publiée pour refabriquer l'image et renvoyer son SBOM.
+- Plan Lysbor du 14/10/2026 (image 1.13.1) : 5 vulnérabilités. curl 8.14.1-2+deb13u5 (CVE-2026-8927, CVE-2026-8924,
+  CVE-2026-8286, CVE-2026-92392) : corrigées en deb13u7 (trixie-security), plancher imposé à la fabrication.
+  cyrus-sasl2 2.1.28+dfsg1-9 (CVE-2026-107161, sans correctif) : débordement dans le module DIGEST-MD5 côté client ;
+  le module (`libsasl2-modules`, simple recommandation, sans dépendant dans l'image) est retiré à la fabrication, qui
+  échoue s'il reste. `libsasl2-2` demeure pour libldap2 (dépendance de libcurl), jamais utilisé par Aurion : non
+  affecté, code absent (`config/lysbor-decisions.json`). Version 1.13.2 publiée pour refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 
