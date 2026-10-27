@@ -48,6 +48,9 @@ pub const MAX_BINARY_BYTES: u64 = 64 * 1024 * 1024;
 /// download then resumes where it stopped.
 const DOWNLOAD_ATTEMPTS: u32 = 10;
 const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_secs(20);
+/// The only protocols curl may use: never rtmp://, file://, ftp:// and the like, even
+/// from a URL read in GitHub's answer (plain HTTP only reaches the tests' fake GitHub).
+const CURL_PROTOCOLS: &str = "=http,https";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct UpdateStatus {
@@ -461,7 +464,7 @@ async fn download_and_install(state: &AppState, channel: &str, wifi: Option<&(St
     let url = release_url(api, channel).ok_or("Canal inconnu")?;
     let json = crate::sys::run(
         "curl",
-        &["-fsSL", "--retry", "3", "--retry-delay", "10", "--max-time", "60", "-H", "Accept: application/vnd.github+json", "-A", "aurion-updater", &url],
+        &["--proto", CURL_PROTOCOLS, "-fsSL", "--retry", "3", "--retry-delay", "10", "--max-time", "60", "-H", "Accept: application/vnd.github+json", "-A", "aurion-updater", &url],
         Duration::from_secs(120),
     )
     .await
@@ -554,7 +557,7 @@ pub async fn helper_version(state: &AppState) -> Option<u32> {
 async fn fetch_small(url: &str) -> Result<String, String> {
     crate::sys::run(
         "curl",
-        &["-fsSL", "--retry", "3", "--retry-delay", "5", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", url],
+        &["--proto", CURL_PROTOCOLS, "-fsSL", "--retry", "3", "--retry-delay", "5", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", url],
         Duration::from_secs(90),
     )
     .await
@@ -567,7 +570,7 @@ async fn fetch_small_bytes(state: &AppState, url: &str) -> Result<Vec<u8>, Strin
     let tmp_str = tmp.to_string_lossy().to_string();
     let out = crate::sys::run(
         "curl",
-        &["-fsSL", "--retry", "3", "--retry-delay", "5", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", "-o", &tmp_str, url],
+        &["--proto", CURL_PROTOCOLS, "-fsSL", "--retry", "3", "--retry-delay", "5", "--max-time", "60", "--max-filesize", "4096", "-A", "aurion-updater", "-o", &tmp_str, url],
         Duration::from_secs(90),
     )
     .await
@@ -588,7 +591,7 @@ async fn download(state: &AppState, url: &str, tag: &str) -> Result<Vec<u8>, Str
     for attempt in 1..=DOWNLOAD_ATTEMPTS {
         match crate::sys::run(
             "curl",
-            &["-fsSL", "-C", "-", "--max-time", "900", "--max-filesize", &max, "-A", "aurion-updater", "-o", &tmp_str, url],
+            &["--proto", CURL_PROTOCOLS, "-fsSL", "-C", "-", "--max-time", "900", "--max-filesize", &max, "-A", "aurion-updater", "-o", &tmp_str, url],
             Duration::from_secs(910),
         )
         .await
