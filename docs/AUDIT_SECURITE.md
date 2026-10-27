@@ -186,6 +186,13 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   le module (`libsasl2-modules`, simple recommandation, sans dépendant dans l'image) est retiré à la fabrication, qui
   échoue s'il reste. `libsasl2-2` demeure pour libldap2 (dépendance de libcurl), jamais utilisé par Aurion : non
   affecté, code absent (`config/lysbor-decisions.json`). Version 1.13.2 publiée pour refabriquer l'image.
+- Plans Lysbor du 27/10/2026. Application : tokio 1.49.0 (RUSTSEC-2026-0386), mis à jour en 1.51.6. Image 1.13.2 :
+  12 vulnérabilités. brotli 1.1.0-2+b7 (CVE-2026-111497, CISA KEV) et expat 2.8.3-1~deb13u1 (6 CVE) : correctifs de
+  trixie-security, planchers imposés à la fabrication. Sans correctif : libblockdev (CVE-2026-111581), tiré par le
+  seul udisks2, retiré de l'image ; libtirpc (CVE-2026-85231, CVE-2026-85977), dépendance d'iproute2 sans service RPC
+  dans l'image ; rtmpdump (CVE-2026-112060, CVE-2026-112061), dépendance de libcurl, rendu inatteignable par
+  `curl --proto =http,https` dans la mise à jour d'Aurion. Ces deux derniers : non affectés, code non atteignable
+  (`config/lysbor-decisions.json`). Version 1.13.3 publiée pour refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 

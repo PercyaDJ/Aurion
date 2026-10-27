@@ -1,5 +1,22 @@
 # Journal des versions
 
+## 1.13.3
+
+Objectif : corriger les vulnérabilités des plans Lysbor du 27/10/2026 (application et image carte SD).
+
+- **tokio 1.51.6** dans l'application (RUSTSEC-2026-0386).
+- **Mises à jour depuis GitHub limitées à HTTP(S)** : curl refuse tout autre protocole (rtmp, file, ftp…), même
+  après une redirection.
+- Image carte SD :
+  - **brotli 1.1.0-2+deb13u1** (CVE-2026-111497, faille activement exploitée) et **expat 2.9.0-1~deb13u1**
+    (6 CVE). La fabrication échoue si l'un des deux reste en dessous.
+  - **udisks2 retiré** (gestion de disques de bureau, inutile à la caméra), et avec lui libblockdev, dont une faille
+    n'a pas de correctif (CVE-2026-111581).
+  - libtirpc et rtmpdump, failles sans correctif : code non atteignable dans l'image (aucun service RPC, RTMP refusé
+    par curl). Décisions dans `config/lysbor-decisions.json`.
+- Caméras déjà installées : l'application arrive par le téléphone ; les correctifs du système, en regravant la carte
+  SD avec cette image.
+
 ## 1.13.2
 
 Objectif : republier l'image carte SD avec les correctifs de sécurité du système, sans changement de l'application.
