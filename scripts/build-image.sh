@@ -129,12 +129,15 @@ if [[ $APT -eq 1 ]]; then
     # Also (1.13.2): libsasl2-modules, SASL plugins (DIGEST-MD5 and others), only
     # recommended by libsasl2-2 (kept for libldap2): unfixed heap overflow in the
     # DIGEST-MD5 client (CVE-2026-107161), never used on a camera.
+    # Also (1.13.3): udisks2 and the libblockdev libraries it alone pulls in (unfixed
+    # CVE-2026-111581): desktop disk management; Aurion mounts its USB key with its own
+    # udev rule and systemd-mount.
     unused=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" rpi-connect-lite cloud-init mkvtoolnix gdb \
       cifs-utils bluez p7zip-full 7zip build-essential g++ g++-14 gcc gcc-14 dpkg-dev ssh-import-id \
       linux-headers-rpi-2712 linux-headers-rpi-v8 firmware-atheros firmware-mediatek firmware-realtek \
       firmware-libertas ppp rpi-update pastebinit python3-rich wget xdg-user-dirs bash-completion \
       python3-venv python3-pip-whl python3-setuptools-whl strace htop v4l-utils wireless-tools \
-      network-manager-l10n man-db ntfs-3g libsasl2-modules 2>/dev/null \
+      network-manager-l10n man-db ntfs-3g libsasl2-modules udisks2 2>/dev/null \
       | awk "\$2 == \"installed\" {print \$1}")
     # Versioned kernel headers are protected from autoremove (APT::NeverAutoRemove):
     # name them, and the compiler they pull, explicitly.
@@ -148,6 +151,9 @@ if [[ $APT -eq 1 ]]; then
     fi
     if compgen -G "/usr/lib/*/sasl2/libdigestmd5*" >/dev/null; then
       echo "Module SASL DIGEST-MD5 encore présent (CVE-2026-107161)"; exit 1
+    fi
+    if dpkg-query -W -f="\${db:Status-Status}\n" udisks2 libblockdev3 2>/dev/null | grep -qx installed; then
+      echo "udisks2 ou libblockdev encore présents (CVE-2026-111581)"; exit 1
     fi
     # What boots the Pi and its Wi-Fi must still be there
     for p in raspi-firmware firmware-brcm80211 linux-image-rpi-2712 linux-image-rpi-v8 network-manager rpi-eeprom \
