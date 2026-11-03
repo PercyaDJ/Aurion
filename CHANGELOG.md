@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 1.13.4
+
+Objectif : republier l'image carte SD avec le correctif de sécurité de vim, sans changement de l'application.
+
+- **vim 2:9.1.1230-2+deb13u1** dans l'image (40 CVE, plan Lysbor du 03/11/2026). vim-tiny n'est que l'éditeur de
+  maintenance, jamais lancé par Aurion. La fabrication échoue si `vim-tiny` ou `vim-common` restent dessous.
+- Caméras déjà installées : ce correctif du système n'arrive qu'en regravant la carte SD avec cette image.
+
 ## 1.13.3
 
 Objectif : corriger les vulnérabilités des plans Lysbor du 27/10/2026 (application et image carte SD).
