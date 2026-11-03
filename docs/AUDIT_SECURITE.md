@@ -193,6 +193,9 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   dans l'image ; rtmpdump (CVE-2026-112060, CVE-2026-112061), dépendance de libcurl, rendu inatteignable par
   `curl --proto =http,https` dans la mise à jour d'Aurion. Ces deux derniers : non affectés, code non atteignable
   (`config/lysbor-decisions.json`). Version 1.13.3 publiée pour refabriquer l'image.
+- Plan Lysbor du 03/11/2026 (image 1.13.3) : 40 vulnérabilités, toutes sur vim 2:9.1.1230-2 (vim-tiny, vim-common),
+  corrigées en 2:9.1.1230-2+deb13u1 (trixie-security). Plancher imposé à la fabrication. La décision « accepté
+  jusqu'au correctif » sur vim reste en place pour les failles futures. Version 1.13.4 publiée pour refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 
