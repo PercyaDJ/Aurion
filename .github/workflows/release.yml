@@ -22,7 +22,9 @@ concurrency:
 jobs:
   release:
     name: Edge, et release si nouvelle version
-    runs-on: ubuntu-latest
+    # Pinned: Ubuntu 26.04 (ubuntu-latest since 11/2026) no longer ships the
+    # qemu-user-static package the SD card image build needs (ARM chroot)
+    runs-on: ubuntu-24.04
     # The signing key is a secret of this environment: the job only starts
     # once the owner approves it (Settings > Environments > release)
     environment: release
