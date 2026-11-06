@@ -196,6 +196,9 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - Plan Lysbor du 03/11/2026 (image 1.13.3) : 40 vulnérabilités, toutes sur vim 2:9.1.1230-2 (vim-tiny, vim-common),
   corrigées en 2:9.1.1230-2+deb13u1 (trixie-security). Plancher imposé à la fabrication. La décision « accepté
   jusqu'au correctif » sur vim reste en place pour les failles futures. Version 1.13.4 publiée pour refabriquer l'image.
+- Plan Lysbor du 06/11/2026 (image 1.13.4) : 1 vulnérabilité, apt 3.0.3 (CVE-2026-109518), corrigée en 3.0.4
+  (trixie-security). Plancher imposé à la fabrication pour apt, apt-utils et libapt-pkg7.0. Version 1.13.5 publiée pour
+  refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 

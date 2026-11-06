@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 1.13.5
+
+Objectif : republier l'image carte SD avec le correctif de sécurité d'apt, sans changement de l'application.
+
+- **apt 3.0.4** dans l'image (CVE-2026-109518, plan Lysbor du 06/11/2026). La fabrication échoue si `apt`, `apt-utils`
+  ou `libapt-pkg7.0` restent dessous.
+- Caméras déjà installées : ce correctif du système n'arrive qu'en regravant la carte SD avec cette image.
+
 ## 1.13.4
 
 Objectif : republier l'image carte SD avec le correctif de sécurité de vim, sans changement de l'application.
