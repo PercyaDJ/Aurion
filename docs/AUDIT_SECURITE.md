@@ -199,6 +199,14 @@ l'interface web. Et c'est l'image entière qui est distribuée.
 - Plan Lysbor du 06/11/2026 (image 1.13.4) : 1 vulnérabilité, apt 3.0.3 (CVE-2026-109518), corrigée en 3.0.4
   (trixie-security). Plancher imposé à la fabrication pour apt, apt-utils et libapt-pkg7.0. Version 1.13.5 publiée pour
   refabriquer l'image.
+- Plan Lysbor du 06/11/2026 à 07:03 UTC (image 1.13.5) : 267 vulnérabilités, toutes sur le noyau. La 1.13.5 contenait
+  le nouveau noyau Raspberry Pi 6.18.60 (installé par le full-upgrade) en plus du 6.18.50 de l'image de base : 4
+  composants nouveaux, sans la décision « linux » (rattachée aux composants de l'ancien noyau, non réappliquée faute de
+  clé Lysbor « admin » dans la CI). En analysant ce point : la partition de démarrage n'était pas montée pendant la
+  fabrication, si bien que les mises à jour du noyau n'atteignaient jamais les fichiers démarrés par le Pi (toutes les
+  images démarraient le noyau de l'image de base). Corrigé en 1.13.6 : partition montée, ancien noyau retiré,
+  contrôle à la fabrication que le noyau démarré est celui installé. Décision « linux » à réappliquer aux composants
+  du nouveau noyau.
 
 #### Registre des risques acceptés (image carte SD)
 
