@@ -104,6 +104,11 @@ if [[ $APT -eq 1 ]]; then
   mount -t sysfs sys "$ROOT/sys"
   mount --bind /dev "$ROOT/dev"
   mount --bind /dev/pts "$ROOT/dev/pts"
+  # The boot partition, where it is on the Pi: a kernel or firmware update then
+  # reaches the files the Pi really boots (before 1.13.6 they stayed on the root
+  # filesystem, hidden under this mount point, and the Pi kept the base kernel).
+  install -d "$ROOT/boot/firmware"
+  mount -t vfat "$P1" "$ROOT/boot/firmware"
   cp /etc/resolv.conf "$ROOT/etc/resolv.conf.aurion"
   mv "$ROOT/etc/resolv.conf" "$ROOT/etc/resolv.conf.orig" 2>/dev/null || true
   cp "$ROOT/etc/resolv.conf.aurion" "$ROOT/etc/resolv.conf"
@@ -155,6 +160,25 @@ if [[ $APT -eq 1 ]]; then
     if dpkg-query -W -f="\${db:Status-Status}\n" udisks2 libblockdev3 2>/dev/null | grep -qx installed; then
       echo "udisks2 ou libblockdev encore présents (CVE-2026-111581)"; exit 1
     fi
+    # Kernels replaced by a newer one: never booted (the boot partition holds the
+    # newest), only scanned. Then the boot partition must hold exactly the kernel
+    # installed, with its modules: otherwise the Pi would boot without Wi-Fi.
+    for f in v8 2712; do
+      cur=$(dpkg-query -W -f="\${Depends}" "linux-image-rpi-$f" | grep -o "linux-image-[0-9][^ ,]*-rpi-$f" | head -n1)
+      cur=${cur#linux-image-}
+      [ -n "$cur" ] || { echo "Noyau rpi-$f introuvable"; exit 1; }
+      old=$(dpkg-query -W -f="\${Package} \${db:Status-Status}\n" "linux-*-rpi-$f" 2>/dev/null | grep " installed$" \
+        | cut -d" " -f1 | grep -E "^linux-[a-z]+-[0-9]" | grep -v -- "-$cur\$" || true)
+      # shellcheck disable=SC2086
+      [ -z "$old" ] || apt-get purge -y $old
+      k=/boot/firmware/kernel8.img; [ "$f" = 2712 ] && k=/boot/firmware/kernel_2712.img
+      { grep -aqF "$cur" "$k" || zcat "$k" 2>/dev/null | grep -aqF "$cur"; } \
+        || { echo "$k ne contient pas le noyau installé $cur"; exit 1; }
+      [ -d "/lib/modules/$cur" ] || { echo "Modules du noyau $cur absents"; exit 1; }
+    done
+    if ls /lib/modules | grep -qv -e "-rpi-v8$" -e "-rpi-2712$" || [ "$(ls /lib/modules | wc -l)" -ne 2 ]; then
+      echo "Modules de noyau en trop : $(ls /lib/modules | tr "\n" " ")"; exit 1
+    fi
     # What boots the Pi and its Wi-Fi must still be there
     for p in raspi-firmware firmware-brcm80211 linux-image-rpi-2712 linux-image-rpi-v8 network-manager rpi-eeprom \
              netplan.io xz-utils; do
@@ -201,7 +225,7 @@ CFG
   '
   rm -f "$ROOT/etc/resolv.conf" "$ROOT/etc/resolv.conf.aurion"
   mv "$ROOT/etc/resolv.conf.orig" "$ROOT/etc/resolv.conf" 2>/dev/null || true
-  umount "$ROOT/dev/pts" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys"
+  umount "$ROOT/boot/firmware" "$ROOT/dev/pts" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys"
 fi
 
 # ─── 4. Aurion + first boot installation ─────────────────────
