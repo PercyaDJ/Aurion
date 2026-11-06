@@ -1,5 +1,16 @@
 # Journal des versions
 
+## 1.13.6
+
+Objectif : que le Raspberry Pi démarre réellement le noyau le plus récent.
+
+- **Noyau à jour au démarrage** : jusqu'ici, la fabrication de l'image installait les nouveaux noyaux Raspberry Pi
+  mais laissait sur la partition de démarrage celui de l'image de base. Le Pi démarre désormais le noyau le plus
+  récent (6.18.60 au 06/11/2026), et l'ancien est retiré de l'image.
+- La fabrication échoue si la partition de démarrage ne contient pas le noyau installé ou si ses modules manquent :
+  une image qui démarrerait sans Wi-Fi n'est jamais publiée.
+- Rien ne change pour l'utilisateur : graver l'image et allumer, comme avant.
+
 ## 1.13.5
 
 Objectif : republier l'image carte SD avec le correctif de sécurité d'apt, sans changement de l'application.
