@@ -207,6 +207,11 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   images démarraient le noyau de l'image de base). Corrigé en 1.13.6 : partition montée, ancien noyau retiré,
   contrôle à la fabrication que le noyau démarré est celui installé. Décision « linux » à réappliquer aux composants
   du nouveau noyau.
+- Plans Lysbor du 08/11/2026. Application : pin-utils 0.1.0 non maintenu (RUSTSEC-2026-0441), tiré par hyper 1.8 ;
+  hyper 1.12 ne l'utilise plus, pin-utils retiré. Image 1.13.6 : zlib 1:1.3.dfsg+really1.3.1-1+b1 (3 CVE), corrigé en
+  +deb13u1 (trixie-security), plancher imposé à la fabrication ; dbus 1.16.2-2 (CVE-2026-120749, sans correctif) : arrêt
+  de dbus-daemon seulement avec un client de surveillance privilégié attaché, jamais sur la caméra, non affecté
+  (`config/lysbor-decisions.json`). Version 1.13.7 publiée pour refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 
