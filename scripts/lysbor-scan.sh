@@ -17,9 +17,17 @@ export LYSBOR_URL="${LYSBOR_URL:-https://lysbor.com}"
 APP_PROJECT=46e8a16d-58a7-4300-a6ae-e0cbac7ee6c1   # Aurion_Application
 IMAGE_PROJECT=7d095ce7-6d86-4c48-92ef-b9df2fbd3327 # Aurion_Image
 
+# Installer script of a tool, 3 attempts: GitHub's download servers sometimes answer 502/504 for a minute.
+install_tool() { # <install.sh URL> <version>
+  local i
+  for i in 1 2 3; do
+    curl -sSfL --retry 3 "$1" | sudo sh -s -- -b /usr/local/bin "$2" && return 0
+    [[ $i -lt 3 ]] && { echo "Installation de $2 échouée, nouvel essai dans 30 s"; sleep 30; }
+  done
+  return 1
+}
 need_syft() {
-  command -v syft >/dev/null || curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
-    | sudo sh -s -- -b /usr/local/bin "$SYFT_VERSION"
+  command -v syft >/dev/null || install_tool "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" "$SYFT_VERSION"
 }
 missing_key() { # <message>
   if [[ "${LYSBOR_REQUIRED:-0}" == "1" ]]; then
@@ -46,8 +54,8 @@ case "${1:-}" in
       syft scan dir:. --exclude ./target --exclude ./dist --source-name aurion --source-version "$v" \
         -o cyclonedx-json="$sbom"
     fi
-    command -v trivy >/dev/null || curl -sSfL "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" \
-      | sudo sh -s -- -b /usr/local/bin "$TRIVY_VERSION"
+    command -v trivy >/dev/null \
+      || install_tool "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" "$TRIVY_VERSION"
     command -v semgrep >/dev/null || pipx install --quiet "semgrep==${SEMGREP_VERSION}"
     # Semgrep only reads files tracked by git; Trivy skips build outputs
     semgrep scan --config p/default --metrics=off --quiet --sarif -o "$out/semgrep.sarif" .
