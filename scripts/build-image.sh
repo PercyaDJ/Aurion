@@ -193,7 +193,7 @@ if [[ $APT -eq 1 ]]; then
               "curl 8.14.1-2+deb13u7" "libcurl4t64 8.14.1-2+deb13u7" "libcurl3t64-gnutls 8.14.1-2+deb13u7" \
               "libbrotli1 1.1.0-2+deb13u1" "libexpat1 2.9.0-1~deb13u1" \
               "vim-tiny 2:9.1.1230-2+deb13u1" "vim-common 2:9.1.1230-2+deb13u1" \
-              "apt 3.0.4" "apt-utils 3.0.4" "libapt-pkg7.0 3.0.4"; do
+              "apt 3.0.4" "apt-utils 3.0.4" "libapt-pkg7.0 3.0.4" "zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1"; do
       p=${pv% *}; min=${pv#* }
       v=$(dpkg-query -W -f="\${db:Status-Status} \${Version}" "$p" 2>/dev/null || true)
       case "$v" in
