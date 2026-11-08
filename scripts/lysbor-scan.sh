@@ -10,7 +10,6 @@
 # pas ce qui s'exécute ici.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SYFT_VERSION=v1.20.0
 TRIVY_VERSION=v0.70.0
 SEMGREP_VERSION=1.177.0
 export LYSBOR_URL="${LYSBOR_URL:-https://lysbor.com}"
@@ -27,7 +26,7 @@ install_tool() { # <install.sh URL> <version>
   return 1
 }
 need_syft() {
-  command -v syft >/dev/null || install_tool "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" "$SYFT_VERSION"
+  bash scripts/install-syft.sh
 }
 missing_key() { # <message>
   if [[ "${LYSBOR_REQUIRED:-0}" == "1" ]]; then
