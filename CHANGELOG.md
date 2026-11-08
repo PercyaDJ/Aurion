@@ -1,5 +1,15 @@
 # Journal des versions
 
+## 1.13.7
+
+Objectif : corriger les vulnérabilités des plans Lysbor du 08/11/2026 (application et image carte SD).
+
+- Application : **hyper 1.12** (serveur HTTP) ; `pin-utils`, qui n'était plus maintenu (RUSTSEC-2026-0441), disparaît.
+- Image carte SD : **zlib 1:1.3.dfsg+really1.3.1-1+deb13u1** (CVE-2026-85091, CVE-2026-76844, CVE-2026-27171). La
+  fabrication échoue si `zlib1g` reste dessous.
+- dbus (CVE-2026-120749, sans correctif) : ne concerne que les systèmes où un outil de surveillance du bus tourne, jamais
+  la caméra. Décision enregistrée dans Lysbor par la CI.
+
 ## 1.13.6
 
 Objectif : que le Raspberry Pi démarre réellement le noyau le plus récent.
