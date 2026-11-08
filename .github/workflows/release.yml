@@ -153,13 +153,7 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         run: |
           v=${{ steps.version.outputs.version }}
-          # 3 attempts: a 504 from GitHub's download servers must not lose a 25-minute image build
-          for i in 1 2 3; do
-            curl -sSfL --retry 3 https://raw.githubusercontent.com/anchore/syft/v1.20.0/install.sh \
-              | sudo sh -s -- -b /usr/local/bin v1.20.0 && command -v syft >/dev/null && break
-            [ "$i" -lt 3 ] || exit 1
-            echo "Installation de syft échouée, nouvel essai dans 30 s"; sleep 30
-          done
+          bash scripts/install-tools.sh syft
           syft scan dir:. --exclude ./target --exclude ./dist \
             --source-name aurion --source-version "$v" -o cyclonedx-json=dist/aurion-sbom.cdx.json
           sudo bash scripts/image-sbom.sh dist/aurion-raspios-arm64.img.xz dist/aurion-image-sbom.cdx.json "$v"
