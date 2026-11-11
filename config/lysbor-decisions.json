@@ -1,6 +1,6 @@
 {
   "_comment": "Décisions de risque de l'image carte SD (projet Lysbor « AURION Image »), par paquet source Debian. Appliquées par scripts/lysbor-decisions.py. until_fix : un correctif publié rouvre les vulnérabilités et les fait entrer dans le plan (la fabrication de l'image l'installe déjà par la mise à jour de sécurité). Analyse : docs/AUDIT_SECURITE.md, relevé Lysbor du 03/10/2026.",
-  "reviewed": "2026-11-08",
+  "reviewed": "2026-11-11",
   "until_fix": true,
   "decisions": {
     "linux": {
@@ -243,6 +243,11 @@
       "state": "not_affected",
       "justification": "requires_environment",
       "reason": "CVE-2026-120749 (sans correctif Debian) : arrêt de dbus-daemon provoqué par un utilisateur local, uniquement quand un client de surveillance privilégié (dbus-monitor, busctl monitor) est attaché au bus. Aucun client de ce type ne tourne sur la caméra ; le seul compte local est celui de maintenance (pi), SSH coupé par défaut. Correctif Debian installé à la fabrication dès sa publication."
+    },
+    "openssl": {
+      "state": "not_affected",
+      "justification": "code_not_reachable",
+      "reason": "CVE-2026-95692 et CVE-2026-88823 (AES-GCM-SIV avec IV ou AAD fournis par l'application), CVE-2026-95691 et CVE-2026-88822 (client QUIC), CVE-2026-107496 (CMS_encrypt vers un certificat fourni par l'attaquant), sans correctif au 11/11/2026 (OpenSSL 3.5.9 ne les corrige pas). Dans l'image, OpenSSL ne sert qu'au TLS de curl (HTTPS vers GitHub, HTTP/1.1 ou HTTP/2, jamais HTTP/3 ni QUIC), à la vérification Ed25519 des mises à jour (openssl pkeyutl -verify) et au WPA2-PSK de wpa_supplicant : ni AES-GCM-SIV, ni QUIC, ni chiffrement CMS. À revoir à chaque nouvelle faille OpenSSL."
     }
   }
 }

@@ -212,6 +212,11 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   +deb13u1 (trixie-security), plancher imposé à la fabrication ; dbus 1.16.2-2 (CVE-2026-120749, sans correctif) : arrêt
   de dbus-daemon seulement avec un client de surveillance privilégié attaché, jamais sur la caméra, non affecté
   (`config/lysbor-decisions.json`). Version 1.13.7 publiée pour refabriquer l'image.
+- Plans Lysbor du 11/11/2026. Application : rustix 1.1.5 (RUSTSEC-2026-0486), dépendance de test (tempfile), mise à
+  jour en 1.1.6. Image 1.13.7 : openssl 3.5.7-1~deb13u3+rpt1, 5 CVE sans correctif (OpenSSL 3.5.9, déjà publié par
+  l'archive Raspberry Pi, ne les corrige pas : absentes de son NEWS.md). Code non atteignable : AES-GCM-SIV, client
+  QUIC et chiffrement CMS ne sont utilisés par aucun programme de l'image. Décision « non affecté » enregistrée par le
+  workflow Lysbor ; image inchangée, pas de nouvelle version.
 
 #### Registre des risques acceptés (image carte SD)
 
