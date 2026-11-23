@@ -44,8 +44,8 @@ impl SystemPort for SystemRpi {
         crate::sys::rtc_info().wake_capable
     }
 
-    async fn schedule_wake(&self, at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {
-        let epoch = at.timestamp().to_string();
+    async fn schedule_wake(&self, at: crate::core::time::Timestamp) -> Result<(), SystemError> {
+        let epoch = at.as_second().to_string();
         info!("SystemRpi: wake-up alarm at {}", at);
         crate::sys::helper(&["rtc-wake", &epoch], None, Duration::from_secs(10))
             .await

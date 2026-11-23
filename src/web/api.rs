@@ -7,7 +7,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
 use crate::core::dark_reminder::DarkReminder;
@@ -66,7 +65,7 @@ pub struct StatusResponse {
 pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     let phase = state.current_phase().await;
     let config = state.config.read().await.clone();
-    let now = chrono::Local::now();
+    let now = crate::core::time::now_local();
 
     let mount_point = FsPath::new(&config.storage.mount_point);
     let health = crate::sys::storage_health(mount_point);
@@ -97,9 +96,9 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
 
     Json(StatusResponse {
         phase: phase.to_string(),
-        time: now.format("%H:%M:%S").to_string(),
-        date: now.format("%d/%m/%Y").to_string(),
-        epoch_ms: now.timestamp_millis(),
+        time: now.strftime("%H:%M:%S").to_string(),
+        date: now.strftime("%d/%m/%Y").to_string(),
+        epoch_ms: now.timestamp().as_millisecond(),
         storage: storage_response(mount_point),
         warnings,
         usb_mounted,
@@ -230,7 +229,7 @@ pub fn planned_hours(config: &AppConfig) -> f64 {
     }
     let start = config.time_range.start;
     let end = config.time_range.end;
-    let secs = (end - start).num_seconds();
+    let secs = end.duration_since(start).as_secs();
     let secs = if secs <= 0 { secs + 24 * 3600 } else { secs };
     secs as f64 / 3600.0
 }
@@ -349,21 +348,21 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
     }
 
     // Clock
-    let now = chrono::Local::now();
+    let now = crate::core::time::now_local();
     let from_rtc = state.clock_from_rtc.load(std::sync::atomic::Ordering::Relaxed);
     if now.year() < 2024 {
         checks.push(check("clock", "error", "Heure non réglée",
             "Rechargez cette page depuis le téléphone : l'heure se règle automatiquement."));
     } else if from_rtc {
-        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), "Horloge matérielle : l'heure est juste même sans téléphone."));
+        checks.push(check("clock", "ok", format!("Heure : {}", now.strftime("%H:%M")), "Horloge matérielle : l'heure est juste même sans téléphone."));
     } else if state.clock_trusted() {
-        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), "Réglée par le téléphone."));
+        checks.push(check("clock", "ok", format!("Heure : {}", now.strftime("%H:%M")), "Réglée par le téléphone."));
     } else if config.expedition.enabled {
-        checks.push(check("clock", "warn", format!("Heure à confirmer : {}", now.format("%H:%M")),
+        checks.push(check("clock", "warn", format!("Heure à confirmer : {}", now.strftime("%H:%M")),
             "Ce Raspberry Pi n'a pas d'horloge sauvegardée : l'heure se règle quand un téléphone ouvre cette page. \
              Pour des nuits sans téléphone, un Raspberry Pi 5 ou un module horloge (RTC DS3231) est nécessaire."));
     } else {
-        checks.push(check("clock", "ok", format!("Heure : {}", now.format("%H:%M")), ""));
+        checks.push(check("clock", "ok", format!("Heure : {}", now.strftime("%H:%M")), ""));
     }
 
     // Power supply and temperature (Raspberry Pi only)
@@ -787,7 +786,7 @@ pub async fn capture_darks(
         let mount = FsPath::new(&st.config.read().await.storage.mount_point).join("darks");
         let tmp = st.paths.tmp_dir.join("aurion_dark.jpg");
         let tmp_dng = tmp.with_extension("dng");
-        let date = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+        let date = crate::core::time::now_local().strftime("%Y%m%d_%H%M%S").to_string();
         let mut error = None;
         for n in 0..count {
             let shutter = shutter_us.to_string();
@@ -975,7 +974,7 @@ fn read_timezone() -> String {
                 s.split("zoneinfo/").nth(1).map(str::to_string)
             })
         })
-        .unwrap_or_else(|| chrono::Local::now().format("UTC%:z").to_string())
+        .unwrap_or_else(|| crate::core::time::now_local().strftime("UTC%:z").to_string())
 }
 
 pub async fn get_diagnostics(State(state): State<AppState>) -> Json<DiagnosticsResponse> {
@@ -1006,15 +1005,15 @@ pub async fn get_diagnostics(State(state): State<AppState>) -> Json<DiagnosticsR
         .ok()
         .map(|s| s.trim().trim_start_matches("throttled=").to_string());
 
-    let now = chrono::Local::now();
+    let now = crate::core::time::now_local();
     Json(DiagnosticsResponse {
         version: crate::VERSION.to_string(),
         platform,
         hostname,
         uptime,
         cpu_temp,
-        system_time: now.format("%H:%M:%S").to_string(),
-        system_date: now.format("%d/%m/%Y").to_string(),
+        system_time: now.strftime("%H:%M:%S").to_string(),
+        system_date: now.strftime("%d/%m/%Y").to_string(),
         timezone: read_timezone(),
         memory_available_mb,
         throttled,
@@ -1075,8 +1074,8 @@ pub async fn set_system_time(
     }
 
     let phase = state.current_phase().await;
-    let drift = (target_epoch - chrono::Utc::now().timestamp()).abs();
-    let clock_unset = chrono::Utc::now().year() < 2024;
+    let drift = (target_epoch - crate::core::time::Timestamp::now().as_second()).abs();
+    let clock_unset = crate::core::time::clock_unset();
     let tz_change = req.timezone.clone().filter(|tz| *tz != read_timezone());
     let need_time = drift >= if req.auto { AUTO_SYNC_MIN_DRIFT_SECS } else { 1 };
 
@@ -1098,6 +1097,8 @@ pub async fn set_system_time(
         crate::sys::helper(&["set-timezone", tz], None, Duration::from_secs(10))
             .await
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("Fuseau: {}", e)))?;
+        // The night schedule follows the new time zone at once
+        crate::core::time::reset_local_tz();
     }
     if need_time {
         let epoch = target_epoch.to_string();
@@ -1109,7 +1110,7 @@ pub async fn set_system_time(
     state.time_synced.store(true, std::sync::atomic::Ordering::Relaxed);
     let msg = format!(
         "Heure système réglée: {}{}",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        crate::core::time::now_local().strftime("%Y-%m-%d %H:%M:%S"),
         tz_change.map(|tz| format!(" ({})", tz)).unwrap_or_default()
     );
     state.add_log(msg.clone()).await;
@@ -1454,8 +1455,8 @@ mod tests {
         c.time_range.duration_hours = Some(4.5);
         assert_eq!(planned_hours(&c), 4.5);
         c.time_range.duration_hours = None;
-        c.time_range.start = chrono::NaiveTime::from_hms_opt(18, 30, 0).unwrap();
-        c.time_range.end = chrono::NaiveTime::from_hms_opt(23, 0, 0).unwrap();
+        c.time_range.start = crate::core::time::hm(18, 30);
+        c.time_range.end = crate::core::time::hm(23, 0);
         assert_eq!(planned_hours(&c), 4.5);
     }
 

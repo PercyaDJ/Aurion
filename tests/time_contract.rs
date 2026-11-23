@@ -1,7 +1,8 @@
 //! Time behaviour contract, written against the chrono implementation before
 //! the move to jiff (chrono is unmaintained, RUSTSEC-2026-0543) and kept as is
 //! afterwards: only the small `lib` module below may change with the date
-//! library, never the cases or the expected values.
+//! library (plus the `.clone()` a jiff date needs, it is not `Copy`), never
+//! the cases or the expected values.
 //!
 //! What a camera depends on: settings files already on SD cards and USB keys
 //! (time range "HH:MM:SS"), dates typed in the UI, file and folder names on
@@ -19,26 +20,27 @@ use aurion::web::gallery::{assign_images_to_sessions, parse_session_start};
 
 /// The only part that depends on the date library.
 mod lib {
-    use chrono::{Local, NaiveTime, TimeZone};
+    use aurion::core::time::{local_earliest, local_tz, CivilDateTime, Time, ZonedDateTime};
 
-    pub type Local_ = chrono::DateTime<Local>;
+    pub type Local_ = ZonedDateTime;
 
     /// Local date/time on the machine running the tests (TZ-independent use:
     /// every assertion compares instants built the same way).
     pub fn local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> Local_ {
-        Local.with_ymd_and_hms(y, mo, d, h, mi, 0).earliest().unwrap()
+        let dt = jiff::civil::date(y as i16, mo as i8, d as i8).at(h as i8, mi as i8, 0, 0);
+        local_earliest(dt, &local_tz()).unwrap()
     }
     pub fn epoch(t: &Local_) -> i64 {
-        t.timestamp()
+        t.timestamp().as_second()
     }
     pub fn plus_secs(t: &Local_, s: i64) -> Local_ {
-        *t + chrono::Duration::seconds(s)
+        aurion::core::time::plus_secs(t, s)
     }
-    pub fn time(h: u32, m: u32) -> NaiveTime {
-        NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    pub fn time(h: u32, m: u32) -> Time {
+        aurion::core::time::hm(h as i8, m as i8)
     }
-    pub fn ymdhms(dt: &chrono::NaiveDateTime) -> String {
-        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    pub fn ymdhms(dt: &CivilDateTime) -> String {
+        dt.strftime("%Y-%m-%d %H:%M:%S").to_string()
     }
 }
 use lib::*;
@@ -217,7 +219,7 @@ fn before_the_night() {
 #[test]
 fn night_window_timer_and_range() {
     let start = local(2026, 1, 15, 21, 0);
-    let mut w = NightWindow::new(Some(2.5), range(21, 0, 6, 0), start);
+    let mut w = NightWindow::new(Some(2.5), range(21, 0, 6, 0), start.clone());
     assert_eq!(w.check(plus_secs(&start, 9_000 - 1)), WindowState::Capture);
     assert_eq!(w.check(plus_secs(&start, 9_000)), WindowState::Stop);
 
@@ -232,9 +234,9 @@ fn night_window_timer_and_range() {
 fn raw_kept_after_an_aurora() {
     let now = local(2026, 1, 15, 23, 0);
     let hold = aurion::core::orchestrator::AURORA_RAW_HOLD_SECS;
-    assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(plus_secs(&now, -hold)), now));
-    assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, Some(plus_secs(&now, -hold - 1)), now));
-    assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, None, now));
+    assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(plus_secs(&now, -hold)), now.clone()));
+    assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, Some(plus_secs(&now, -hold - 1)), now.clone()));
+    assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, None, now.clone()));
     assert!(keeps_raw(OutputFormat::RawDng, None, now));
 }
 

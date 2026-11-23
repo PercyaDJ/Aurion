@@ -168,7 +168,7 @@ impl CameraPort for CameraRpi {
             metadata: FrameMetadata {
                 iso: exposure.iso,
                 shutter_us: exposure.shutter_us,
-                timestamp: chrono::Utc::now(),
+                timestamp: crate::core::time::Timestamp::now(),
             },
             raw_bytes: data, // original JPEG bytes — used for lossless save
         })
@@ -222,7 +222,7 @@ impl CameraPort for CameraRpi {
             metadata: FrameMetadata {
                 iso: exposure.iso,
                 shutter_us: exposure.shutter_us,
-                timestamp: chrono::Utc::now(),
+                timestamp: crate::core::time::Timestamp::now(),
             },
             raw_bytes: dng_data, // original DNG bytes — used for lossless save
         })

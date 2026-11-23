@@ -96,11 +96,11 @@ pub fn validate_channel(channel: u32) -> Result<(), String> {
 
 /// Parse a date/time sent by the UI.
 /// Accepts `YYYY-MM-DD HH:MM[:SS]` or `YYYY-MM-DDTHH:MM[:SS]` (local time).
-pub fn parse_local_datetime(input: &str) -> Option<chrono::NaiveDateTime> {
+pub fn parse_local_datetime(input: &str) -> Option<crate::core::time::CivilDateTime> {
     let s = input.trim().replace('T', " ");
     ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]
         .iter()
-        .find_map(|fmt| chrono::NaiveDateTime::parse_from_str(&s, fmt).ok())
+        .find_map(|fmt| crate::core::time::CivilDateTime::strptime(fmt, &s).ok())
 }
 
 /// Why a local date/time sent by the UI cannot be turned into a Unix time.
@@ -116,10 +116,8 @@ pub enum LocalTimeError {
 /// zone. A time repeated by a daylight saving change gives the earliest one.
 pub fn parse_local_epoch(input: &str) -> Result<i64, LocalTimeError> {
     let naive = parse_local_datetime(input).ok_or(LocalTimeError::Format)?;
-    naive
-        .and_local_timezone(chrono::Local)
-        .earliest()
-        .map(|dt| dt.timestamp())
+    crate::core::time::local_earliest(naive, &crate::core::time::local_tz())
+        .map(|dt| dt.timestamp().as_second())
         .ok_or(LocalTimeError::Nonexistent)
 }
 

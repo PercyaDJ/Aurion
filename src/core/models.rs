@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::NaiveTime;
+use crate::core::time::Time;
 use std::fmt;
 
 // ─── Phases ────────────────────────────────────────────────
@@ -92,7 +92,7 @@ pub enum CaptureFormat {
 pub struct FrameMetadata {
     pub iso: u32,
     pub shutter_us: u64,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: crate::core::time::Timestamp,
 }
 
 // ─── Exposure ──────────────────────────────────────────────
@@ -248,14 +248,14 @@ pub struct SessionEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRange {
-    pub start: NaiveTime,
-    pub end: NaiveTime,
+    pub start: Time,
+    pub end: Time,
 }
 
 impl TimeRange {
     /// Check if a given time is within this range.
     /// Handles overnight ranges where start > end (e.g., 21:00 → 06:00).
-    pub fn contains(&self, time: NaiveTime) -> bool {
+    pub fn contains(&self, time: Time) -> bool {
         if self.start <= self.end {
             time >= self.start && time <= self.end
         } else {
@@ -293,6 +293,7 @@ pub fn check_star_trail_rule(focal_mm: f64, shutter_us: u64, crop_factor: f64) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::time::hm;
 
     #[test]
     fn test_storage_info_display() {
@@ -326,12 +327,12 @@ mod tests {
     #[test]
     fn test_time_range_overnight() {
         let range = TimeRange {
-            start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-            end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+            start: hm(21, 0),
+            end: hm(6, 0),
         };
-        assert!(range.contains(NaiveTime::from_hms_opt(23, 0, 0).unwrap()));
-        assert!(range.contains(NaiveTime::from_hms_opt(3, 0, 0).unwrap()));
-        assert!(!range.contains(NaiveTime::from_hms_opt(12, 0, 0).unwrap()));
+        assert!(range.contains(hm(23, 0)));
+        assert!(range.contains(hm(3, 0)));
+        assert!(!range.contains(hm(12, 0)));
     }
 
     #[test]

@@ -199,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
             // time is known without a phone, needed for unattended nights.
             #[cfg(feature = "rpi")]
             if let Some(epoch) = aurion::sys::rtc_info().epoch {
-                let drift = (epoch - chrono::Utc::now().timestamp()).abs();
+                let drift = (epoch - jiff::Timestamp::now().as_second()).abs();
                 let ok = drift <= 60
                     || aurion::sys::helper(&["set-time", &epoch.to_string()], None, std::time::Duration::from_secs(10))
                         .await

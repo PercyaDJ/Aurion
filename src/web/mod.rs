@@ -218,7 +218,7 @@ impl AppState {
     }
 
     pub async fn add_log(&self, msg: String) {
-        let line = format!("[{}] {}", chrono::Local::now().format("%H:%M:%S"), msg);
+        let line = format!("[{}] {}", crate::core::time::now_local().strftime("%H:%M:%S"), msg);
         let mut logs = self.log_buffer.write().await;
         logs.push(line);
         let len = logs.len();

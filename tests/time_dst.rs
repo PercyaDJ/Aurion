@@ -1,7 +1,7 @@
 //! Daylight saving changes, in the Europe/Paris time zone (2026: clocks go
 //! forward on 29 March at 02:00, back on 25 October at 03:00). Written against
 //! the chrono implementation before the move to jiff, kept as is afterwards:
-//! only the `lib` module may change. Expected instants are Unix seconds (UTC),
+//! only the `lib` module changed, plus the repeated October time (chrono bug). Expected instants are Unix seconds (UTC),
 //! independent of any date library.
 //!
 //! One test only: the time zone is set for the whole process before any date
@@ -14,19 +14,19 @@ use aurion::core::validate::{parse_local_epoch, LocalTimeError};
 
 /// The only part that depends on the date library.
 mod lib {
-    use chrono::{Local, NaiveTime, TimeZone};
+    use aurion::core::time::{local_earliest, local_tz, Time, ZonedDateTime};
 
-    pub type Local_ = chrono::DateTime<Local>;
+    pub type Local_ = ZonedDateTime;
 
-    /// Local wall time (a time repeated in October: what chrono `earliest()` gives).
-    pub fn local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> Local_ {
-        Local.with_ymd_and_hms(y, mo, d, h, mi, 0).earliest().unwrap()
+    /// Local wall time (a time repeated in October: its first occurrence).
+    pub fn local(y: i16, mo: i8, d: i8, h: i8, mi: i8) -> Local_ {
+        local_earliest(jiff::civil::date(y, mo, d).at(h, mi, 0, 0), &local_tz()).unwrap()
     }
     pub fn epoch(t: &Local_) -> i64 {
-        t.timestamp()
+        t.timestamp().as_second()
     }
-    pub fn time(h: u32, m: u32) -> NaiveTime {
-        NaiveTime::from_hms_opt(h, m, 0).unwrap()
+    pub fn time(h: i8, m: i8) -> Time {
+        aurion::core::time::hm(h, m)
     }
 }
 use lib::*;
@@ -43,9 +43,10 @@ fn daylight_saving_changes_in_paris() {
     // A time skipped in March (02:30 does not exist on 29/03): the next one
     // that exists, the following day
     assert_eq!(epoch(&next_occurrence(local(2026, 3, 28, 22, 0), time(2, 30))), 1_774_830_600, "02:30, 30/03");
-    // A time repeated in October: the code asks for its first occurrence, but
-    // chrono 0.4.43 `earliest()` returns the later one (02:30 CET, 01:30 UTC)
-    assert_eq!(epoch(&next_occurrence(local(2026, 10, 24, 22, 0), time(2, 30))), 1_792_891_800, "02:30 CET, 25/10");
+    // A time repeated in October: its first occurrence (02:30 CEST, 00:30 UTC).
+    // chrono 0.4.43 `earliest()` returned the later one (1_792_891_800), a
+    // library bug fixed by the move to jiff: the only intended change.
+    assert_eq!(epoch(&next_occurrence(local(2026, 10, 24, 22, 0), time(2, 30))), 1_792_888_200, "02:30 CEST, 25/10");
 
     // Wake-up 10 min of real time before the start
     assert_eq!(epoch(&wake_before(local(2026, 3, 29, 7, 0), time(21, 0))), 1_774_810_200, "20:50 CEST");
@@ -84,6 +85,6 @@ fn daylight_saving_changes_in_paris() {
     // Date typed in the UI (time setting without a phone clock)
     assert_eq!(parse_local_epoch("2026-03-29 02:30"), Err(LocalTimeError::Nonexistent));
     assert_eq!(parse_local_epoch("2026-03-29 03:30"), Ok(1_774_747_800));
-    assert_eq!(parse_local_epoch("2026-10-25 02:30"), Ok(1_792_891_800), "chrono: the later of the two");
+    assert_eq!(parse_local_epoch("2026-10-25 02:30"), Ok(1_792_888_200), "the first of the two (chrono gave the later one)");
     assert_eq!(parse_local_epoch("2026-10-25"), Err(LocalTimeError::Format));
 }

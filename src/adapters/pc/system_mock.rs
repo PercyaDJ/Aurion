@@ -12,7 +12,7 @@ pub struct SystemMock {
     shutdowns: Arc<AtomicUsize>,
     /// Simulate a Raspberry Pi 5 (RTC wake-up alarm).
     wake: bool,
-    wakes: Arc<std::sync::Mutex<Vec<chrono::DateTime<chrono::Utc>>>>,
+    wakes: Arc<std::sync::Mutex<Vec<crate::core::time::Timestamp>>>,
     profiles: Arc<std::sync::Mutex<Vec<crate::ports::system::PowerProfile>>>,
     /// Simulated processor temperature (°C).
     temperature: Option<f64>,
@@ -35,7 +35,7 @@ impl SystemMock {
     }
 
     /// Wake-up times programmed so far.
-    pub fn wakes(&self) -> Vec<chrono::DateTime<chrono::Utc>> {
+    pub fn wakes(&self) -> Vec<crate::core::time::Timestamp> {
         self.wakes.lock().unwrap().clone()
     }
 
@@ -71,7 +71,7 @@ impl SystemPort for SystemMock {
         self.temperature
     }
 
-    async fn schedule_wake(&self, at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {
+    async fn schedule_wake(&self, at: crate::core::time::Timestamp) -> Result<(), SystemError> {
         if !self.wake {
             return Err(SystemError::WakeUnsupported);
         }

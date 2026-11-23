@@ -10,7 +10,7 @@ use crate::core::exposure::{ExposureController, compute_histogram};
 use crate::core::models::{
     CaptureFrame, DetectionResult, ExposureSettings, OutputFormat, Phase, SessionEvent, StorageStatus, TimeRange,
 };
-use chrono::Datelike;
+use crate::core::time::{plus_secs, secs_between, Time, ZonedDateTime};
 use crate::core::dark_reminder::{DarkReminder, NightStats};
 use crate::core::layout::{self, NightLayout};
 use crate::core::night::{
@@ -72,7 +72,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         self
     }
 
-    fn now(&self) -> chrono::DateTime<chrono::Local> {
+    fn now(&self) -> ZonedDateTime {
         self.clock.now_local()
     }
 
@@ -198,7 +198,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// Log the system clock (critical for diagnosis without screen).
     async fn log_start_clock(&self) {
         let sys_now = self.now();
-        let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.format("%Y-%m-%d %H:%M:%S"));
+        let clock_msg = format!("Heure systeme au demarrage: {}", sys_now.strftime("%Y-%m-%d %H:%M:%S"));
         info!("Orchestrator: {}", clock_msg);
         self.log(&clock_msg).await;
 
@@ -225,11 +225,11 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 return false;
             }
             let now = self.now();
-            match before_night(now, &range, self.system.can_wake()) {
+            match before_night(now.clone(), &range, self.system.can_wake()) {
                 BeforeNight::Start => break,
                 BeforeNight::Sleep { wake, hours } => {
-                    if self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await.is_ok() {
-                        self.log(&format!("Nuit dans {} h : extinction, réveil programmé à {}", hours, wake.format("%H:%M"))).await;
+                    if self.system.schedule_wake(wake.timestamp()).await.is_ok() {
+                        self.log(&format!("Nuit dans {} h : extinction, réveil programmé à {}", hours, wake.strftime("%H:%M"))).await;
                         self.set_phase(Phase::Shutdown).await;
                         let _ = self.storage.sync().await;
                         if let Err(e) = self.system.shutdown().await {
@@ -244,7 +244,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                 let msg = format!(
                     "Attente plage horaire ({} -> {}) | heure actuelle: {}",
                     config.time_range.start, config.time_range.end,
-                    now.format("%H:%M:%S")
+                    now.strftime("%H:%M:%S")
                 );
                 info!("Orchestrator: {}", msg);
                 self.log(&msg).await;
@@ -401,8 +401,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// End of the night: timer (N hours from now) or time range.
     async fn log_night_mode(&self, config: &AppConfig, files: &mut NightFiles) {
         let msg = if let Some(hours) = config.time_range.duration_hours {
-            let end = self.now() + chrono::Duration::seconds((hours * 3600.0) as i64);
-            format!("Mode minuteur: {}h → fin prévue à {}", hours, end.format("%H:%M:%S"))
+            let end = plus_secs(&self.now(), (hours * 3600.0) as i64);
+            format!("Mode minuteur: {}h → fin prévue à {}", hours, end.strftime("%H:%M:%S"))
         } else {
             format!("Mode plage horaire: {} → {}", config.time_range.start, config.time_range.end)
         };
@@ -421,12 +421,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             }
 
             let now = self.now();
-            let window = night.window.check(now);
+            let window = night.window.check(now.clone());
             if window == WindowState::Wait {
                 if night.wait_iters.is_multiple_of(30) {
                     let wait_msg = format!(
                         "Attente du début de plage (actuel: {}, début: {})",
-                        now.format("%H:%M:%S"), config.time_range.start
+                        now.strftime("%H:%M:%S"), config.time_range.start
                     );
                     info!("Orchestrator: {}", wait_msg);
                     self.log(&wait_msg).await;
@@ -441,13 +441,13 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let should_stop = window == WindowState::Stop;
             let iter_msg = format!(
                 "[loop] heure={} phase={:?} should_stop={}",
-                now.format("%H:%M:%S"), night.sm.phase(), should_stop
+                now.strftime("%H:%M:%S"), night.sm.phase(), should_stop
             );
             info!("Orchestrator: {}", iter_msg);
             files.text(&iter_msg);
 
             if should_stop {
-                let stop_msg = format!("Heure de fin de plage atteinte ({}) — arret capture", now.format("%H:%M:%S"));
+                let stop_msg = format!("Heure de fin de plage atteinte ({}) — arret capture", now.strftime("%H:%M:%S"));
                 info!("Orchestrator: {}", stop_msg);
                 self.log(&stop_msg).await;
                 files.text(&stop_msg);
@@ -474,7 +474,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             // ─── Session logging ────────────────────────────
             if let Some(ref mut logger) = files.logger {
                 let event = night_event(NightEventInput {
-                    timestamp: self.now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+                    timestamp: self.now().strftime("%Y-%m-%dT%H:%M:%S").to_string(),
                     config,
                     mode,
                     phase: current_phase,
@@ -631,7 +631,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         if shot.detected {
             night.last_aurora_at = Some(self.now());
         }
-        let raw = shot.raw.filter(|_| keeps_raw(config.capture.output_format, night.last_aurora_at, self.now()));
+        let raw = shot.raw.filter(|_| keeps_raw(config.capture.output_format, night.last_aurora_at.clone(), self.now()));
         self.save_frame(config, &files.layout, shot.frame, raw, night.frame_number, shot.detected, &mut night.stacker).await;
         night.frame_number += 1;
         night.stats.add(shot.exposure.iso, shot.exposure.shutter_us, self.system.temperature_c());
@@ -649,7 +649,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
         // Darks reminder shown on the home screen at the next power-on
         let dark_path = self.state.paths.dark_reminder.clone();
-        if let Some(reminder) = stats.reminder(name, self.now().timestamp_millis()) {
+        if let Some(reminder) = stats.reminder(name, self.now().timestamp().as_millisecond()) {
             let reminder = reminder.merge(DarkReminder::load(&dark_path));
             let summary = reminder.summary();
             if let Err(e) = reminder.save(&dark_path) {
@@ -684,8 +684,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         if !interrupted && config.expedition.enabled {
             if config.time_range.duration_hours.is_none() && self.system.can_wake() {
                 let wake = wake_before(self.now(), config.time_range.start);
-                match self.system.schedule_wake(wake.with_timezone(&chrono::Utc)).await {
-                    Ok(()) => self.log(&format!("Expédition : réveil programmé le {}", wake.format("%d/%m à %H:%M"))).await,
+                match self.system.schedule_wake(wake.timestamp()).await {
+                    Ok(()) => self.log(&format!("Expédition : réveil programmé le {}", wake.strftime("%d/%m à %H:%M"))).await,
                     Err(e) => self.log(&format!("Expédition : réveil automatique impossible ({})", e)).await,
                 }
             } else {
@@ -723,7 +723,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         is_aurora: bool,
         stacker: &mut Option<Stacker>,
     ) {
-        let timestamp = self.now().format("%Y%m%d_%H%M%S");
+        let timestamp = self.now().strftime("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
         let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
         let denoise = &config.capture.denoise;
@@ -1043,7 +1043,7 @@ struct NightLoop {
     iterations: u64,
     frame_number: u64,
     stats: NightStats,
-    last_aurora_at: Option<chrono::DateTime<chrono::Local>>,
+    last_aurora_at: Option<ZonedDateTime>,
     failures: CameraFailures,
     window: NightWindow,
     wait_iters: u64,
@@ -1082,18 +1082,18 @@ pub enum WindowState {
 pub struct NightWindow {
     timer_secs: Option<i64>,
     range: TimeRange,
-    start: chrono::DateTime<chrono::Local>,
+    start: ZonedDateTime,
     entered: bool,
 }
 
 impl NightWindow {
-    pub fn new(duration_hours: Option<f64>, range: TimeRange, start: chrono::DateTime<chrono::Local>) -> Self {
+    pub fn new(duration_hours: Option<f64>, range: TimeRange, start: ZonedDateTime) -> Self {
         Self { timer_secs: duration_hours.map(|h| (h * 3600.0) as i64), range, start, entered: false }
     }
 
-    pub fn check(&mut self, now: chrono::DateTime<chrono::Local>) -> WindowState {
+    pub fn check(&mut self, now: ZonedDateTime) -> WindowState {
         match self.timer_secs {
-            Some(max) if now.signed_duration_since(self.start).num_seconds() >= max => WindowState::Stop,
+            Some(max) if secs_between(&self.start, &now) >= max => WindowState::Stop,
             Some(_) => WindowState::Capture,
             None if self.range.contains(now.time()) => {
                 self.entered = true;
@@ -1106,30 +1106,30 @@ impl NightWindow {
 }
 
 /// Before a time-range night: what to do now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BeforeNight {
     Start,
     /// Power off and wake up at `wake` (the night starts in `hours` h).
-    Sleep { wake: chrono::DateTime<chrono::Local>, hours: i64 },
+    Sleep { wake: ZonedDateTime, hours: i64 },
     Wait,
 }
 
 /// Start now, wait, or (a Pi that can wake itself) power off until just
 /// before the night when it starts in more than [`SLEEP_IF_START_IN_SECS`].
-pub fn before_night(now: chrono::DateTime<chrono::Local>, range: &TimeRange, can_wake: bool) -> BeforeNight {
+pub fn before_night(now: ZonedDateTime, range: &TimeRange, can_wake: bool) -> BeforeNight {
     if range.contains(now.time()) {
         return BeforeNight::Start;
     }
-    let until_start = (next_occurrence(now, range.start) - now).num_seconds();
+    let until_start = secs_between(&now, &next_occurrence(now.clone(), range.start));
     if can_wake && until_start > SLEEP_IF_START_IN_SECS {
-        return BeforeNight::Sleep { wake: wake_before(now, range.start), hours: until_start / 3600 };
+        return BeforeNight::Sleep { wake: wake_before(now.clone(), range.start), hours: until_start / 3600 };
     }
     BeforeNight::Wait
 }
 
 /// Wake-up time for the next night starting at `start`.
-pub fn wake_before(now: chrono::DateTime<chrono::Local>, start: chrono::NaiveTime) -> chrono::DateTime<chrono::Local> {
-    next_occurrence(now, start) - chrono::Duration::seconds(WAKE_LEAD_SECS)
+pub fn wake_before(now: ZonedDateTime, start: Time) -> ZonedDateTime {
+    plus_secs(&next_occurrence(now, start), -WAKE_LEAD_SECS)
 }
 
 /// Below this free space the night stops at once, before the file system
@@ -1227,11 +1227,11 @@ pub fn captures_raw_now(phase: Phase, format: OutputFormat) -> bool {
 /// aurora and [`AURORA_RAW_HOLD_SECS`] after the last detection.
 pub fn keeps_raw(
     format: OutputFormat,
-    last_aurora_at: Option<chrono::DateTime<chrono::Local>>,
-    now: chrono::DateTime<chrono::Local>,
+    last_aurora_at: Option<ZonedDateTime>,
+    now: ZonedDateTime,
 ) -> bool {
     match format {
-        OutputFormat::JpgAuroraRaw => last_aurora_at.is_some_and(|t| (now - t).num_seconds() <= AURORA_RAW_HOLD_SECS),
+        OutputFormat::JpgAuroraRaw => last_aurora_at.is_some_and(|t| secs_between(&t, &now) <= AURORA_RAW_HOLD_SECS),
         f => f.captures_raw(),
     }
 }
@@ -1347,14 +1347,14 @@ mod tests {
 
     // ─── Steps of the night ───────────────────────────────
 
-    use chrono::{Local, NaiveTime, TimeZone};
+    use crate::core::time::{hm, local_earliest, local_tz};
 
-    fn at(h: u32, m: u32) -> chrono::DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 1, 15, h, m, 0).unwrap()
+    fn at(h: i8, m: i8) -> ZonedDateTime {
+        local_earliest(jiff::civil::date(2026, 1, 15).at(h, m, 0, 0), &local_tz()).unwrap()
     }
 
     fn night_range() -> TimeRange {
-        TimeRange { start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(), end: NaiveTime::from_hms_opt(6, 0, 0).unwrap() }
+        TimeRange { start: hm(21, 0), end: hm(6, 0) }
     }
 
     #[test]
@@ -1378,8 +1378,8 @@ mod tests {
         assert_eq!(w.check(at(20, 50)), WindowState::Wait, "before the range, never entered");
         assert_eq!(w.check(at(21, 0)), WindowState::Capture);
         assert_eq!(w.check(at(23, 59)), WindowState::Capture);
-        assert_eq!(w.check(Local.with_ymd_and_hms(2026, 1, 16, 5, 59, 0).unwrap()), WindowState::Capture, "overnight");
-        assert_eq!(w.check(Local.with_ymd_and_hms(2026, 1, 16, 6, 1, 0).unwrap()), WindowState::Stop, "left after entering");
+        assert_eq!(w.check(local_earliest(jiff::civil::date(2026, 1, 16).at(5, 59, 0, 0), &local_tz()).unwrap()), WindowState::Capture, "overnight");
+        assert_eq!(w.check(local_earliest(jiff::civil::date(2026, 1, 16).at(6, 1, 0, 0), &local_tz()).unwrap()), WindowState::Stop, "left after entering");
     }
 
     #[test]
@@ -1391,7 +1391,7 @@ mod tests {
     fn before_night_sleeps_only_when_the_pi_can_wake_and_the_night_is_far() {
         let far = at(14, 0); // 7 h before 21:00
         assert_eq!(
-            before_night(far, &night_range(), true),
+            before_night(far.clone(), &night_range(), true),
             BeforeNight::Sleep { wake: at(20, 50), hours: 7 }
         );
         assert_eq!(before_night(far, &night_range(), false), BeforeNight::Wait, "Pi 4 without wake alarm");
@@ -1401,11 +1401,11 @@ mod tests {
 
     #[test]
     fn wake_up_is_ten_minutes_before_the_next_night() {
-        assert_eq!(wake_before(at(7, 0), NaiveTime::from_hms_opt(21, 0, 0).unwrap()), at(20, 50));
+        assert_eq!(wake_before(at(7, 0), hm(21, 0)), at(20, 50));
         // After tonight's start: tomorrow's
         assert_eq!(
-            wake_before(at(22, 0), NaiveTime::from_hms_opt(21, 0, 0).unwrap()),
-            Local.with_ymd_and_hms(2026, 1, 16, 20, 50, 0).unwrap()
+            wake_before(at(22, 0), hm(21, 0)),
+            local_earliest(jiff::civil::date(2026, 1, 16).at(20, 50, 0, 0), &local_tz()).unwrap()
         );
     }
 
@@ -1463,13 +1463,14 @@ mod tests {
     #[test]
     fn aurora_raw_is_kept_during_the_aurora_and_ten_minutes_after() {
         let now = at(23, 0);
-        let hold = chrono::Duration::seconds(AURORA_RAW_HOLD_SECS);
-        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, None, now), "no aurora yet");
-        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(now), now));
-        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(now - hold), now));
-        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, Some(now - hold - chrono::Duration::seconds(1)), now));
-        assert!(keeps_raw(OutputFormat::RawDng, None, now));
-        assert!(!keeps_raw(OutputFormat::Jpg, Some(now), now));
+        let held = plus_secs(&now, -AURORA_RAW_HOLD_SECS);
+        let too_old = plus_secs(&now, -AURORA_RAW_HOLD_SECS - 1);
+        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, None, now.clone()), "no aurora yet");
+        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(now.clone()), now.clone()));
+        assert!(keeps_raw(OutputFormat::JpgAuroraRaw, Some(held), now.clone()));
+        assert!(!keeps_raw(OutputFormat::JpgAuroraRaw, Some(too_old), now.clone()));
+        assert!(keeps_raw(OutputFormat::RawDng, None, now.clone()));
+        assert!(!keeps_raw(OutputFormat::Jpg, Some(now.clone()), now));
     }
 
     #[test]

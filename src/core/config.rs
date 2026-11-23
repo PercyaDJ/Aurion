@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::NaiveTime;
+use crate::core::time::{hm, Time};
 use std::path::{Path, PathBuf};
 use crate::core::models::OutputFormat;
 use crate::core::validate;
@@ -246,8 +246,8 @@ impl DenoiseConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeRangeConfig {
-    pub start: NaiveTime,
-    pub end: NaiveTime,
+    pub start: Time,
+    pub end: Time,
     /// If set, use timer mode: detect for N hours then shutdown. Overrides start/end.
     #[serde(default)]
     pub duration_hours: Option<f64>,
@@ -556,8 +556,8 @@ impl Default for AppConfig {
                 immediate: false,
             },
             time_range: TimeRangeConfig {
-                start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+                start: hm(21, 0),
+                end: hm(6, 0),
                 duration_hours: None,
             },
             storage: StorageConfig {

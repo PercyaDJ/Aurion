@@ -179,7 +179,7 @@ impl CameraMock {
             metadata: FrameMetadata {
                 iso: exposure.iso,
                 shutter_us: exposure.shutter_us,
-                timestamp: chrono::Utc::now(),
+                timestamp: crate::core::time::Timestamp::now(),
             },
             raw_bytes: vec![],
         }
@@ -247,7 +247,7 @@ impl CameraPort for CameraMock {
                 metadata: FrameMetadata {
                     iso: exposure.iso,
                     shutter_us: exposure.shutter_us,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: crate::core::time::Timestamp::now(),
                 },
                 raw_bytes: vec![],
             })

@@ -110,7 +110,7 @@ async fn set_status(state: &AppState, channel: &str, running: bool, ok: Option<b
     state.add_log(format!("Mise à jour en ligne : {}", message)).await;
     let mut status = read_raw_status(state);
     status.running = running;
-    status.at = chrono::Local::now().format("%d/%m %H:%M").to_string();
+    status.at = crate::core::time::now_local().strftime("%d/%m %H:%M").to_string();
     status.ok = ok;
     if !channel.is_empty() {
         status.channel = channel.to_string();

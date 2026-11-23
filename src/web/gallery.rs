@@ -19,7 +19,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::NaiveDateTime;
+use crate::core::time::{local_from_system, CivilDateTime, SignedDuration};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
@@ -97,13 +97,13 @@ fn scan_images(dir: &FsPath, session: Option<&str>) -> Vec<ImageFile> {
             continue;
         }
         let modified_time = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-        let modified: chrono::DateTime<chrono::Local> = modified_time.into();
+        let modified = local_from_system(modified_time);
         images.push(ImageFile {
             info: GalleryImage {
                 aurora: name.contains("_AURORA"),
                 size_display: size_display(meta.len()),
                 size_bytes: meta.len(),
-                modified: modified.format("%d/%m/%Y %H:%M").to_string(),
+                modified: modified.strftime("%d/%m/%Y %H:%M").to_string(),
                 session: session.map(str::to_string),
                 filename: name,
             },
@@ -193,9 +193,9 @@ pub fn clear_capacity_cache() {
 pub fn recent_night_rate(mount: &FsPath) -> Option<f64> {
     for s in session_names(mount).into_iter().rev() {
         let files = night_folder_images(mount, &s);
-        let stamps: Vec<NaiveDateTime> = files.iter().filter_map(|f| parse_image_timestamp(&f.info.filename)).collect();
+        let stamps: Vec<CivilDateTime> = files.iter().filter_map(|f| parse_image_timestamp(&f.info.filename)).collect();
         let (Some(a), Some(b)) = (stamps.iter().min(), stamps.iter().max()) else { continue };
-        let hours = (*b - *a).num_seconds() as f64 / 3600.0;
+        let hours = b.duration_since(*a).as_secs() as f64 / 3600.0;
         if files.len() >= 20 && hours >= 0.25 {
             let bytes: u64 = files.iter().map(|f| f.info.size_bytes).sum();
             return Some(bytes as f64 / hours);
@@ -216,13 +216,13 @@ pub fn resolve_image(mount: &FsPath, name: &str) -> Option<ImageFile> {
         if let Ok(meta) = std::fs::metadata(&path) {
             if meta.is_file() {
                 let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-                let m: chrono::DateTime<chrono::Local> = modified.into();
+                let m = local_from_system(modified);
                 return Some(ImageFile {
                     info: GalleryImage {
                         aurora: name.contains("_AURORA"),
                         size_display: size_display(meta.len()),
                         size_bytes: meta.len(),
-                        modified: m.format("%d/%m/%Y %H:%M").to_string(),
+                        modified: m.strftime("%d/%m/%Y %H:%M").to_string(),
                         session,
                         filename: name.to_string(),
                     },
@@ -292,8 +292,7 @@ pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GallerySta
     let images = tokio::task::spawn_blocking(move || all_images(&mount)).await.unwrap_or_default();
     let total_size: u64 = images.iter().map(|i| i.info.size_bytes).sum();
     let last = images.iter().map(|i| i.modified).max().map(|t| {
-        let dt: chrono::DateTime<chrono::Local> = t.into();
-        dt.format("%d/%m/%Y").to_string()
+        local_from_system(t).strftime("%d/%m/%Y").to_string()
     });
     Json(GalleryStats {
         total_images: images.len(),
@@ -307,8 +306,8 @@ pub async fn get_gallery_stats(State(state): State<AppState>) -> Json<GallerySta
 pub use crate::core::layout::{parse_frame_number, parse_image_timestamp};
 
 /// `YYYY-MM-DD_HH-MM` → session start.
-pub fn parse_session_start(name: &str) -> Option<NaiveDateTime> {
-    NaiveDateTime::parse_from_str(&format!("{}-00", name.get(..16)?), "%Y-%m-%d_%H-%M-%S").ok()
+pub fn parse_session_start(name: &str) -> Option<CivilDateTime> {
+    CivilDateTime::strptime("%Y-%m-%d_%H-%M-%S", format!("{}-00", name.get(..16)?)).ok()
 }
 
 /// Group image names by session (images at the root of the key, before
@@ -316,10 +315,10 @@ pub fn parse_session_start(name: &str) -> Option<NaiveDateTime> {
 /// margin) before it, as long as the next session has not started and the
 /// session is not older than 16 h.
 pub fn assign_images_to_sessions(sessions: &[String], images: &[String]) -> BTreeMap<String, Vec<String>> {
-    let margin = chrono::TimeDelta::minutes(SESSION_START_MARGIN_MIN);
-    let max_len = chrono::TimeDelta::hours(SESSION_MAX_HOURS);
+    let margin = SignedDuration::from_mins(SESSION_START_MARGIN_MIN);
+    let max_len = SignedDuration::from_hours(SESSION_MAX_HOURS);
 
-    let mut starts: Vec<(NaiveDateTime, &String)> = sessions
+    let mut starts: Vec<(CivilDateTime, &String)> = sessions
         .iter()
         .filter_map(|s| parse_session_start(s).map(|t| (t, s)))
         .collect();
@@ -413,9 +412,9 @@ fn compute_sessions(mount: &FsPath) -> Vec<SessionInfo> {
         .map(|(name, files)| {
             let dir = layout::night_dir(mount, &name);
             let has_log = dir.join("event.jsonl").exists() || dir.join("session.log").exists();
-            let stamps: Vec<NaiveDateTime> = files.iter().filter_map(|f| parse_image_timestamp(&f.info.filename)).collect();
+            let stamps: Vec<CivilDateTime> = files.iter().filter_map(|f| parse_image_timestamp(&f.info.filename)).collect();
             let duration_minutes = match (stamps.iter().min(), stamps.iter().max()) {
-                (Some(a), Some(b)) => (*b - *a).num_minutes().max(0) as u64,
+                (Some(a), Some(b)) => b.duration_since(*a).as_mins().max(0) as u64,
                 _ => 0,
             };
             // Count one aurora per capture even with RAW+JPG pairs.
@@ -856,7 +855,7 @@ pub async fn download_gallery_zip(
     })
     .await
     .unwrap_or_default();
-    let zip_name = format!("aurion_{}.zip", chrono::Local::now().format("%Y-%m-%d"));
+    let zip_name = format!("aurion_{}.zip", crate::core::time::now_local().strftime("%Y-%m-%d"));
     zip_response(&zip_name, zip_stream(entries))
 }
 

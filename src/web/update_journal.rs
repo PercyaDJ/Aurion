@@ -61,7 +61,7 @@ pub fn valid_name(name: &str) -> bool {
 pub fn new_name(channel: &str) -> String {
     let channel: String = channel.chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();
     let channel = if channel.is_empty() { "maj".to_string() } else { channel };
-    format!("{}_{}.log", chrono::Local::now().format("%Y-%m-%d_%H%M%S"), channel)
+    format!("{}_{}.log", crate::core::time::now_local().strftime("%Y-%m-%d_%H%M%S"), channel)
 }
 
 /// Append a line to the journal (SD card and USB key, best effort: a
@@ -70,7 +70,7 @@ pub async fn write(state: &AppState, name: &str, level: Level, message: &str) {
     if !valid_name(name) {
         return;
     }
-    let line = format!("{} {} {}\n", chrono::Local::now().format("%H:%M:%S"), level.label(), message.replace('\n', " "));
+    let line = format!("{} {} {}\n", crate::core::time::now_local().strftime("%H:%M:%S"), level.label(), message.replace('\n', " "));
     let mut dirs = vec![sd_dir(state)];
     if let Some(usb) = usb_dir(state).await {
         dirs.push(usb);
