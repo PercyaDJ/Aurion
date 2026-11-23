@@ -223,6 +223,9 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   fabrication pour krb5 (+deb13u2, 18 CVE), rsync (+deb13u2), sudo (+deb13u5), parted (+deb13u1), nghttp2 (+deb13u2) ;
   sans correctif : dpkg (CVE-2026-91094, dpkg-source absent : non affecté) et libyaml (CVE-2026-44842, YAML local de
   root uniquement : risque accepté). Version 1.13.8 publiée pour refabriquer l'image.
+- Version 1.13.9 : chrono (RUSTSEC-2026-0543) remplacé par jiff 1.0.2 ; plus aucune dépendance à chrono. Comportement
+  horaire figé avant la migration par tests/time_contract.rs et tests/time_dst.rs ; seul changement, une heure répétée
+  en octobre prend sa première occurrence (chrono 0.4.43 prenait la seconde).
 
 #### Registre des risques acceptés (image carte SD)
 
