@@ -24,7 +24,7 @@ pub trait SystemPort: Send + Sync {
     }
 
     /// Program the power-on time used after the next shutdown.
-    async fn schedule_wake(&self, _at: chrono::DateTime<chrono::Utc>) -> Result<(), SystemError> {
+    async fn schedule_wake(&self, _at: crate::core::time::Timestamp) -> Result<(), SystemError> {
         Err(SystemError::WakeUnsupported)
     }
 }

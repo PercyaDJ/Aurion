@@ -1,5 +1,18 @@
 # Journal des versions
 
+## 1.13.9
+
+Objectif : quitter chrono, bibliothèque de dates qui n'est plus maintenue (RUSTSEC-2026-0543, plan Lysbor du 23/11/2026).
+
+- Application : **jiff 1.0.2** remplace chrono pour toutes les dates et heures.
+- Rien ne change pour l'utilisateur : réglages déjà enregistrés sur les cartes SD, noms des images et des dossiers de
+  nuit, heures affichées, plage horaire, minuteur, reprise après coupure et réveil automatique se comportent comme avant.
+- Seule différence voulue : une heure répétée au passage à l'heure d'hiver (02:30 le dernier dimanche d'octobre) est
+  désormais la première des deux, comme prévu. chrono prenait la seconde.
+- Changer le fuseau horaire depuis le téléphone s'applique tout de suite au programme de la nuit.
+- Un test de contrat (écrit avant la migration, sur l'ancienne bibliothèque) garantit ces points, y compris aux
+  changements d'heure à Paris.
+
 ## 1.13.8
 
 Objectif : corriger les vulnérabilités des plans Lysbor du 23/11/2026 (application et image carte SD).

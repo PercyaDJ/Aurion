@@ -209,7 +209,7 @@ async fn system_actions_disabled_off_device() {
 #[tokio::test]
 async fn time_sync_rules() {
     let t = common::env();
-    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now_ms = jiff::Timestamp::now().as_millisecond();
     // Auto sync with a clock already right: nothing to do, marked as synced
     let res = t.server.post("/api/system/time").json(&json!({"epoch_ms": now_ms, "auto": true})).await;
     res.assert_status_ok();

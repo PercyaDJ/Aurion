@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDateTime;
+use crate::core::time::CivilDateTime;
 
 pub const SESSIONS_DIR: &str = "sessions";
 pub const JPG_DIR: &str = "JPG";
@@ -65,10 +65,10 @@ pub fn is_raw(name: &str) -> bool {
 }
 
 /// `aurora_YYYYMMDD_HHMMSS_...` → timestamp.
-pub fn parse_image_timestamp(name: &str) -> Option<NaiveDateTime> {
+pub fn parse_image_timestamp(name: &str) -> Option<CivilDateTime> {
     let rest = name.strip_prefix("aurora_")?;
     let ts = rest.get(..15)?;
-    NaiveDateTime::parse_from_str(ts, "%Y%m%d_%H%M%S").ok()
+    CivilDateTime::strptime("%Y%m%d_%H%M%S", ts).ok()
 }
 
 /// `aurora_YYYYMMDD_HHMMSS_NNNNN...` → frame number NNNNN.

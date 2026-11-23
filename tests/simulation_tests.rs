@@ -13,7 +13,7 @@ use aurion::ports::clock::ClockPort;
 use aurion::ports::network::NetworkApPort;
 use aurion::ports::storage::StoragePort;
 use aurion::web::{AppState, Paths};
-use chrono::{TimeZone, Utc};
+use aurion::core::time::{plus_secs, secs_between, utc, CivilDateTime, Time};
 
 struct Night {
     _dir: tempfile::TempDir,
@@ -41,7 +41,7 @@ fn setup(configure: impl FnOnce(&mut AppConfig)) -> (Night, AppConfig) {
 }
 
 fn clock() -> Arc<TokioClock> {
-    Arc::new(TokioClock::new(Utc.with_ymd_and_hms(2026, 1, 15, 21, 0, 0).unwrap()))
+    Arc::new(TokioClock::new(utc(jiff::civil::date(2026, 1, 15).at(21, 0, 0, 0))))
 }
 
 /// Images of every night folder (`sessions/<night>/JPG|RAW`), by name.
@@ -160,19 +160,19 @@ async fn time_range_mode_waits_for_start_and_stops_at_end() {
     let now = clock.now_local();
     let (night, _) = setup(|c| {
         c.time_range.duration_hours = None;
-        c.time_range.start = (now + chrono::Duration::minutes(20)).time();
-        c.time_range.end = (now + chrono::Duration::minutes(50)).time();
+        c.time_range.start = plus_secs(&now, 20 * 60).time();
+        c.time_range.end = plus_secs(&now, 50 * 60).time();
     });
     let storage = StorageMock::new(night.capture.clone());
     run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock.clone()).await;
 
     let files = images(&night.capture);
     assert!((170..=182).contains(&files.len()), "30 min window → ~180 frames, got {}", files.len());
-    let elapsed = clock.now_local() - now;
-    assert!(elapsed >= chrono::Duration::minutes(50) && elapsed < chrono::Duration::minutes(53), "ended after {:?}", elapsed);
+    let elapsed = secs_between(&now, &clock.now_local());
+    assert!((50 * 60..53 * 60).contains(&elapsed), "ended after {} s", elapsed);
     // No frame taken before the start of the window
-    let first_ts = chrono::NaiveDateTime::parse_from_str(&files[0][7..22], "%Y%m%d_%H%M%S").unwrap();
-    assert!(first_ts >= (now + chrono::Duration::minutes(20)).naive_local() - chrono::Duration::seconds(1));
+    let first_ts = CivilDateTime::strptime("%Y%m%d_%H%M%S", &files[0][7..22]).unwrap();
+    assert!(first_ts >= plus_secs(&now, 20 * 60 - 1).datetime());
 }
 
 #[tokio::test(start_paused = true)]
@@ -369,7 +369,7 @@ async fn strongest_auroras_are_ranked_from_the_night_log() {
 use aurion::core::night::{NightMarker, RESUME_DELAY_SECS};
 
 fn interrupted_marker(night: &Night, clock: &TokioClock, started_hours_ago: f64, duration: f64) -> PathBuf {
-    let started = clock.now_local() - chrono::Duration::seconds((started_hours_ago * 3600.0) as i64);
+    let started = plus_secs(&clock.now_local(), -((started_hours_ago * 3600.0) as i64));
     let path = night.state.paths.night_marker.clone();
     NightMarker::new(started, Some(duration)).save(&path).unwrap();
     path
@@ -509,7 +509,7 @@ async fn resumed_night_continues_in_the_same_folder_and_numbering() {
     std::fs::create_dir_all(previous.join("JPG")).unwrap();
     std::fs::write(previous.join("JPG/aurora_20260115_205900_00041.jpg"), b"x").unwrap();
     std::fs::write(previous.join("JPG/.aurora_20260115_205910_00042.jpg.part"), b"half").unwrap();
-    let started = clock.now_local() - chrono::Duration::hours(1);
+    let started = plus_secs(&clock.now_local(), -3600);
     let mut marker = NightMarker::new(started, Some(1.5));
     marker.session = Some("2026-01-15_20-00".into());
     marker.save(&night.state.paths.night_marker).unwrap();
@@ -532,9 +532,9 @@ async fn resumed_night_continues_in_the_same_folder_and_numbering() {
 
 // ─── Expedition: nights without anyone touching the camera ──
 
-fn range_from(clock: &TokioClock, start_in_min: i64, len_min: i64) -> (chrono::NaiveTime, chrono::NaiveTime) {
+fn range_from(clock: &TokioClock, start_in_min: i64, len_min: i64) -> (Time, Time) {
     let now = clock.now_local();
-    ((now + chrono::Duration::minutes(start_in_min)).time(), (now + chrono::Duration::minutes(start_in_min + len_min)).time())
+    (plus_secs(&now, start_in_min * 60).time(), plus_secs(&now, (start_in_min + len_min) * 60).time())
 }
 
 #[tokio::test(start_paused = true)]
@@ -595,8 +595,8 @@ async fn pi5_expedition_programs_its_wake_up_for_the_next_night() {
     assert!(!images(&night.capture).is_empty());
     let wakes = night.system.wakes();
     assert_eq!(wakes.len(), 1, "one wake-up programmed");
-    let expected = clock.now_local() - chrono::Duration::minutes(30) + chrono::Duration::days(1) - chrono::Duration::minutes(10);
-    assert!((wakes[0].timestamp() - expected.timestamp()).abs() <= 120, "tomorrow, 10 min before the start: {} vs {}", wakes[0], expected);
+    let expected = plus_secs(&clock.now_local(), -30 * 60 + 24 * 3600 - 10 * 60).timestamp();
+    assert!((wakes[0].as_second() - expected.as_second()).abs() <= 120, "tomorrow, 10 min before the start: {} vs {}", wakes[0], expected);
     assert_eq!(night.system.shutdown_count(), 1);
 }
 
@@ -618,7 +618,7 @@ async fn pi5_sleeps_until_the_night_then_resumes_by_itself() {
     assert!(night.state.paths.night_marker.exists(), "the marker brings the night back");
 
     // The RTC switches the board on: boot, resume window, night
-    let until_wake = (wake.timestamp() - clock.now_local().timestamp()) as u64;
+    let until_wake = (wake.as_second() - clock.now_local().timestamp().as_second()) as u64;
     tokio::time::sleep(std::time::Duration::from_secs(until_wake)).await;
     *night.state.phase.write().await = Phase::Arm;
     let storage = StorageMock::new(night.capture.clone());

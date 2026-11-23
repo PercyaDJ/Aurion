@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use chrono::{TimeZone, Utc};
 use tracing::info;
 
 use crate::core::config::AppConfig;
@@ -24,7 +23,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
 
     // Create mocks
     // 21:25 → user disconnects at 21:30, inside the default 21:00–06:00 window
-    let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 21, 25, 0).unwrap();
+    let start_time = crate::core::time::utc(jiff::civil::date(2025, 3, 23).at(21, 25, 0, 0));
     let clock = ClockMock::accelerated(start_time, 60.0);
     let camera = CameraMock::synthetic();
     let storage = StorageMock::new(PathBuf::from("./output"));
@@ -96,9 +95,9 @@ pub async fn run_simulation() -> anyhow::Result<()> {
         }
 
         // Check time range
-        let now_time = clock.now().time();
+        let now_time = clock.now().to_zoned_datetime(jiff::tz::TimeZone::UTC).time();
         if !time_range.contains(now_time) {
-            info!("[WATCH] Time range ended at {}", clock.now().format("%H:%M:%S"));
+            info!("[WATCH] Time range ended at {}", clock.now().strftime("%H:%M:%S"));
             sm.transition(Event::TimeRangeEnded)?;
             break;
         }
@@ -112,7 +111,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
         info!(
             "[WATCH] Frame #{} @ {} | green={:.1} red={:.1} lum={:.1} score={:.2} → {}",
             frame_count,
-            clock.now().format("%H:%M:%S"),
+            clock.now().strftime("%H:%M:%S"),
             result.green_score,
             result.red_score,
             result.luminosity,
@@ -149,9 +148,9 @@ pub async fn run_simulation() -> anyhow::Result<()> {
                 break;
             }
 
-            let now_time = clock.now().time();
+            let now_time = clock.now().to_zoned_datetime(jiff::tz::TimeZone::UTC).time();
             if !time_range.contains(now_time) {
-                info!("[RUN] Time range ended at {}", clock.now().format("%H:%M:%S"));
+                info!("[RUN] Time range ended at {}", clock.now().strftime("%H:%M:%S"));
                 sm.transition(Event::TimeRangeEnded)?;
                 break;
             }
@@ -165,7 +164,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
             exposure_ctrl.update(&histogram, Phase::Run);
 
             // Save frame (encode the RGB pixels as a real JPEG)
-            let filename = format!("aurora_{}_{:05}.jpg", clock.now().format("%Y%m%d_%H%M%S"), run_frames);
+            let filename = format!("aurora_{}_{:05}.jpg", clock.now().strftime("%Y%m%d_%H%M%S"), run_frames);
             let img = image::RgbImage::from_raw(frame.width, frame.height, frame.data.clone())
                 .ok_or_else(|| anyhow::anyhow!("invalid frame size"))?;
             let mut jpg = std::io::Cursor::new(Vec::new());
@@ -177,7 +176,7 @@ pub async fn run_simulation() -> anyhow::Result<()> {
                 run_frames,
                 exposure.iso,
                 exposure.shutter_us,
-                clock.now().format("%H:%M:%S"),
+                clock.now().strftime("%H:%M:%S"),
             );
 
             run_frames += 1;

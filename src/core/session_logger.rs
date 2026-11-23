@@ -25,17 +25,17 @@ const FLUSH_EVERY_N_LINES: u32 = 10;
 impl SessionLogger {
     /// Create a new session logger. Creates the session directory.
     pub fn new(base_dir: &Path) -> Result<Self, SessionLoggerError> {
-        Self::new_at(base_dir, chrono::Local::now())
+        Self::new_at(base_dir, crate::core::time::now_local())
     }
 
     /// Create a session logger named after `now` (injected clock).
-    pub fn new_at(base_dir: &Path, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
-        Self::open_named(base_dir, &now.format("%Y-%m-%d_%H-%M").to_string(), now)
+    pub fn new_at(base_dir: &Path, now: crate::core::time::ZonedDateTime) -> Result<Self, SessionLoggerError> {
+        Self::open_named(base_dir, &now.strftime("%Y-%m-%d_%H-%M").to_string(), now)
     }
 
     /// Open (or create) the session folder `name`: a resumed night appends to
     /// the logs of the interrupted one.
-    pub fn open_named(base_dir: &Path, session_name: &str, now: chrono::DateTime<chrono::Local>) -> Result<Self, SessionLoggerError> {
+    pub fn open_named(base_dir: &Path, session_name: &str, now: crate::core::time::ZonedDateTime) -> Result<Self, SessionLoggerError> {
         if !crate::core::validate::is_safe_name(session_name) {
             return Err(SessionLoggerError::IoError(format!("Nom de session invalide: {}", session_name)));
         }
@@ -70,7 +70,7 @@ impl SessionLogger {
         // Write session header
         let header = format!(
             "=== Aurion Session — {} ===\n",
-            now.format("%Y-%m-%d %H:%M:%S")
+            now.strftime("%Y-%m-%d %H:%M:%S")
         );
         let _ = logger.log_writer.write_all(header.as_bytes());
         let _ = logger.log_writer.flush();
@@ -100,7 +100,7 @@ impl SessionLogger {
     /// This is the persistent log, readable after reboot.
     /// Flushes immediately so it survives hard shutdowns.
     pub fn log_text(&mut self, msg: &str) {
-        let now = chrono::Local::now().format("%H:%M:%S").to_string();
+        let now = crate::core::time::now_local().strftime("%H:%M:%S").to_string();
         let line = format!("[{}] {}\n", now, msg);
         let _ = self.log_writer.write_all(line.as_bytes());
         let _ = self.log_writer.flush(); // immediate flush — critical messages must survive

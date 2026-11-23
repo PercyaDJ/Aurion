@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use chrono::{TimeZone, Utc, NaiveTime};
+use aurion::core::time::{hm, utc};
 
 use aurion::core::config::AppConfig;
 use aurion::core::detection::AuroraDetector;
@@ -33,7 +33,7 @@ async fn run_watch_loop(
             break sm.phase();
         }
 
-        let now_time = clock.now().time();
+        let now_time = clock.now().to_zoned_datetime(jiff::tz::TimeZone::UTC).time();
         if !time_range.contains(now_time) {
             let _ = sm.transition(Event::TimeRangeEnded);
             break sm.phase();
@@ -74,13 +74,13 @@ async fn test_night_without_aurora_never_run() {
     let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     // Start at 21:00, end at 06:00 → 9-hour night
-    let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 21, 0, 0).unwrap();
+    let start_time = utc(jiff::civil::date(2025, 3, 23).at(21, 0, 0, 0));
     let clock = ClockMock::new(start_time);
     let camera = CameraMock::synthetic();
 
     let time_range = TimeRange {
-        start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-        end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+        start: hm(21, 0),
+        end: hm(6, 0),
     };
 
     // Boot → Arm → Disconnect → Calibration → Watch
@@ -120,13 +120,13 @@ async fn test_persistent_aurora_triggers_run() {
     let mut detector = AuroraDetector::new(65, 1.0, 1.0, 1.0, 1.0, 0.1, 0.1, 0.05, false, 240.0);
     let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
-    let start_time = Utc.with_ymd_and_hms(2025, 3, 23, 23, 0, 0).unwrap();
+    let start_time = utc(jiff::civil::date(2025, 3, 23).at(23, 0, 0, 0));
     let clock = ClockMock::new(start_time);
     let camera = CameraMock::synthetic();
 
     let time_range = TimeRange {
-        start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-        end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+        start: hm(21, 0),
+        end: hm(6, 0),
     };
 
     // Boot → Arm → Disconnect → Calibration → Watch
@@ -249,7 +249,7 @@ async fn test_end_of_time_range_shutdown() {
     let mut sm = StateMachine::new(2);
 
     // Start at 05:50, time range ends at 06:00
-    let start_time = Utc.with_ymd_and_hms(2025, 3, 24, 5, 50, 0).unwrap();
+    let start_time = utc(jiff::civil::date(2025, 3, 24).at(5, 50, 0, 0));
     let clock = ClockMock::new(start_time);
     let camera = CameraMock::synthetic();
 
@@ -258,8 +258,8 @@ async fn test_end_of_time_range_shutdown() {
     let mut exposure_ctrl = ExposureController::from_config(&config.exposure);
 
     let time_range = TimeRange {
-        start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-        end: NaiveTime::from_hms_opt(6, 0, 0).unwrap(),
+        start: hm(21, 0),
+        end: hm(6, 0),
     };
 
     // Boot → Watch

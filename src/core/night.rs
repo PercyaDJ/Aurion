@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-use chrono::{DateTime, Local};
+use crate::core::time::{local_earliest, Time, Timestamp, ZonedDateTime};
 use serde::{Deserialize, Serialize};
 
 use crate::core::models::TimeRange;
@@ -34,16 +34,18 @@ pub const SLEEP_IF_START_IN_SECS: i64 = 2 * 3600;
 pub const WAKE_LEAD_SECS: i64 = 10 * 60;
 
 /// Next time `t` occurs strictly after `after` (local time).
-pub fn next_occurrence(after: DateTime<Local>, t: chrono::NaiveTime) -> DateTime<Local> {
-    use chrono::TimeZone;
-    let mut day = after.date_naive();
+/// A time skipped by a daylight saving change is skipped that day; a repeated
+/// one gives its first occurrence.
+pub fn next_occurrence(after: ZonedDateTime, t: Time) -> ZonedDateTime {
+    let tz = after.time_zone().clone();
+    let mut day = after.date();
     loop {
-        if let Some(dt) = Local.from_local_datetime(&day.and_time(t)).earliest() {
+        if let Some(dt) = local_earliest(day.to_datetime(t), &tz) {
             if dt > after {
                 return dt;
             }
         }
-        day = day.succ_opt().expect("date in range");
+        day = day.tomorrow().expect("date in range");
     }
 }
 
@@ -73,8 +75,8 @@ pub enum ResumePlan {
 }
 
 impl NightMarker {
-    pub fn new(now: DateTime<Local>, duration_hours: Option<f64>) -> Self {
-        let started = now.timestamp_millis();
+    pub fn new(now: ZonedDateTime, duration_hours: Option<f64>) -> Self {
+        let started = now.timestamp().as_millisecond();
         Self {
             started_epoch_ms: started,
             end_epoch_ms: duration_hours.map(|h| started + (h * 3_600_000.0) as i64),
@@ -98,11 +100,11 @@ impl NightMarker {
     }
 
     /// Whether the night should resume at `now`, and how.
-    pub fn resume_plan(&self, now: DateTime<Local>, range: &TimeRange) -> Option<ResumePlan> {
+    pub fn resume_plan(&self, now: ZonedDateTime, range: &TimeRange) -> Option<ResumePlan> {
         if self.resumes >= MAX_RESUMES {
             return None;
         }
-        let now_ms = now.timestamp_millis();
+        let now_ms = now.timestamp().as_millisecond();
         match (self.end_epoch_ms, self.duration_hours) {
             (Some(end), Some(total)) => {
                 let remaining = (end - now_ms) as f64 / 3_600_000.0;
@@ -112,8 +114,7 @@ impl NightMarker {
             _ => {
                 // The night launched at `started` ends at the first range end
                 // after it (launched at 14:00 for 21:00 → 06:00 tomorrow).
-                use chrono::TimeZone;
-                let started = Local.timestamp_millis_opt(self.started_epoch_ms).single()?;
+                let started = Timestamp::from_millisecond(self.started_epoch_ms).ok()?.to_zoned_datetime(now.time_zone().clone());
                 let cycle_end = next_occurrence(started, range.end);
                 (now < cycle_end).then_some(ResumePlan::Range)
             }
@@ -124,28 +125,30 @@ impl NightMarker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{NaiveTime, TimeZone};
+    use crate::core::time::{hm, local_tz, plus_secs};
 
-    fn at(h: u32, m: u32) -> DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 1, 15, h, m, 0).unwrap()
+    const DAY: i64 = 24 * 3600;
+
+    fn at(h: i8, m: i8) -> ZonedDateTime {
+        local_earliest(jiff::civil::date(2026, 1, 15).at(h, m, 0, 0), &local_tz()).unwrap()
     }
 
     fn range() -> TimeRange {
-        TimeRange { start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(), end: NaiveTime::from_hms_opt(6, 0, 0).unwrap() }
+        TimeRange { start: hm(21, 0), end: hm(6, 0) }
     }
 
     #[test]
     fn timer_night_resumes_for_the_remaining_time_only() {
         let m = NightMarker::new(at(21, 0), Some(6.0));
         assert_eq!(m.resume_plan(at(23, 0), &range()), Some(ResumePlan::Timer(4.0)));
-        assert_eq!(m.resume_plan(at(3, 0) + chrono::Duration::days(1), &range()), None, "night over");
+        assert_eq!(m.resume_plan(plus_secs(&at(3, 0), DAY), &range()), None, "night over");
     }
 
     #[test]
     fn clock_behind_never_extends_the_night() {
         // After a power cut the Pi 4 clock can be far in the past
         let m = NightMarker::new(at(21, 0), Some(6.0));
-        let past = Local.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let past = local_earliest(jiff::civil::date(2020, 1, 1).at(0, 0, 0, 0), &local_tz()).unwrap();
         assert_eq!(m.resume_plan(past, &range()), Some(ResumePlan::Timer(6.0)));
     }
 
@@ -154,7 +157,7 @@ mod tests {
         let m = NightMarker::new(at(18, 0), None);
         assert_eq!(m.resume_plan(at(19, 0), &range()), Some(ResumePlan::Range), "launched early, still waiting");
         assert_eq!(m.resume_plan(at(23, 30), &range()), Some(ResumePlan::Range));
-        let next_morning = at(10, 0) + chrono::Duration::days(1);
+        let next_morning = plus_secs(&at(10, 0), DAY);
         assert_eq!(m.resume_plan(next_morning, &range()), None, "past night");
     }
 
@@ -163,16 +166,16 @@ mod tests {
         // Pi 5 powered off until the night, or battery swapped in the afternoon
         let m = NightMarker::new(at(7, 0), None);
         assert_eq!(m.resume_plan(at(20, 50), &range()), Some(ResumePlan::Range));
-        assert_eq!(m.resume_plan(at(5, 59) + chrono::Duration::days(1), &range()), Some(ResumePlan::Range));
-        assert_eq!(m.resume_plan(at(6, 1) + chrono::Duration::days(1), &range()), None, "that night is over");
+        assert_eq!(m.resume_plan(plus_secs(&at(5, 59), DAY), &range()), Some(ResumePlan::Range));
+        assert_eq!(m.resume_plan(plus_secs(&at(6, 1), DAY), &range()), None, "that night is over");
     }
 
     #[test]
     fn next_occurrences() {
-        let t = chrono::NaiveTime::from_hms_opt(21, 0, 0).unwrap();
+        let t = hm(21, 0);
         assert_eq!(next_occurrence(at(14, 0), t), at(21, 0));
-        assert_eq!(next_occurrence(at(21, 0), t), at(21, 0) + chrono::Duration::days(1), "strictly after");
-        assert_eq!(next_occurrence(at(23, 0), t), at(21, 0) + chrono::Duration::days(1));
+        assert_eq!(next_occurrence(at(21, 0), t), plus_secs(&at(21, 0), DAY), "strictly after");
+        assert_eq!(next_occurrence(at(23, 0), t), plus_secs(&at(21, 0), DAY));
     }
 
     #[test]
