@@ -103,6 +103,26 @@ pub fn parse_local_datetime(input: &str) -> Option<chrono::NaiveDateTime> {
         .find_map(|fmt| chrono::NaiveDateTime::parse_from_str(&s, fmt).ok())
 }
 
+/// Why a local date/time sent by the UI cannot be turned into a Unix time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalTimeError {
+    /// Not `YYYY-MM-DD HH:MM[:SS]`.
+    Format,
+    /// Skipped by a daylight saving change in the Pi time zone.
+    Nonexistent,
+}
+
+/// Unix time (seconds) of a local date/time sent by the UI, in the Pi time
+/// zone. A time repeated by a daylight saving change gives the earliest one.
+pub fn parse_local_epoch(input: &str) -> Result<i64, LocalTimeError> {
+    let naive = parse_local_datetime(input).ok_or(LocalTimeError::Format)?;
+    naive
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .map(|dt| dt.timestamp())
+        .ok_or(LocalTimeError::Nonexistent)
+}
+
 /// IANA time zone name such as `Europe/Paris` or `UTC`.
 /// Only the syntax is checked here; the privileged helper checks that the
 /// zone exists in `/usr/share/zoneinfo`.

@@ -1056,13 +1056,10 @@ pub async fn set_system_time(
     let target_epoch: i64 = if let Some(ms) = req.epoch_ms {
         ms.div_euclid(1000)
     } else if let Some(ref dt) = req.datetime {
-        let naive = validate::parse_local_datetime(dt)
-            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Format de date invalide (AAAA-MM-JJ HH:MM)"))?;
-        naive
-            .and_local_timezone(chrono::Local)
-            .earliest()
-            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Date locale inexistante"))?
-            .timestamp()
+        validate::parse_local_epoch(dt).map_err(|e| match e {
+            validate::LocalTimeError::Format => err(StatusCode::BAD_REQUEST, "Format de date invalide (AAAA-MM-JJ HH:MM)"),
+            validate::LocalTimeError::Nonexistent => err(StatusCode::BAD_REQUEST, "Date locale inexistante"),
+        })?
     } else {
         return Err(err(StatusCode::BAD_REQUEST, "epoch_ms ou datetime requis"));
     };
