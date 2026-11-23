@@ -19,24 +19,37 @@ Ce README suffit pour passer du carton à la première nuit d'aurores. Le reste 
 
 ---
 
-## 1. Le matériel
+## 1. Le matériel (liste d'achat)
 
-### Indispensable
+Tous les liens mènent aux pages officielles Raspberry Pi. Le bouton **Buy now** de chaque page donne la liste des
+revendeurs agréés de votre pays : le prix et la disponibilité se voient là. Pour le reste (objectif, clé, batterie),
+la ligne indique quoi chercher.
 
-| Élément | Choix conseillé | Remarques |
-|---|---|---|
-| **Raspberry Pi** | Raspberry Pi 4 (2 Go de mémoire ou plus) ou Raspberry Pi 5 | voir « Pi 4 ou Pi 5 ? » ci-dessous |
-| **Caméra** | Raspberry Pi **HQ Camera** (capteur Sony IMX477) | c'est la seule caméra prise en charge |
-| **Objectif** | grand angle et lumineux, monture C ou CS (celle de la HQ Camera) | le ciel entier compte : la focale la plus courte possible, l'ouverture la plus grande possible (par exemple l'objectif officiel 6 mm CS) |
-| **Nappe caméra** | Pi 4 : celle fournie avec la caméra. **Pi 5 : une nappe « 22 broches vers 15 broches »** | le Pi 5 a un connecteur caméra plus petit : la nappe d'origine ne rentre pas |
-| **Carte micro-SD** | 16 Go ou plus | reçoit le système et l'application |
-| **Clé USB** | 128 Go ou plus, formatée en **exFAT** | reçoit les photos et une copie des réglages. Une photo RAW pèse environ 24 Mo |
-| **Alimentation** | batterie USB-C **5 V / 3 A**, avec un câble court et épais | une batterie de 20 000 mAh a tenu une nuit d'hiver complète (il restait 30 %). Sur secteur : l'alimentation officielle du Pi |
-| **Un téléphone** | n'importe quel smartphone avec un navigateur | pour tout piloter |
-| **Un ordinateur** | une seule fois | pour préparer la carte SD |
+### Liste d'achat (HBOM)
 
-À prévoir aussi : un support stable (trépied), et de quoi protéger le montage de l'humidité et du froid. Les
-batteries perdent 30 à 50 % de leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée).
+Choisissez d'abord votre modèle de Raspberry Pi (voir « Pi 4 ou Pi 5 ? » plus bas), puis achetez la colonne
+correspondante.
+
+| Qté | Élément | Avec un Raspberry Pi 5 | Avec un Raspberry Pi 4 |
+|---|---|---|---|
+| 1 | **Raspberry Pi** | [Raspberry Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/), 2 Go ou plus | [Raspberry Pi 4 Model B](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/), 2 Go ou plus |
+| 1 | **Caméra** | [Raspberry Pi High Quality Camera](https://www.raspberrypi.com/products/raspberry-pi-high-quality-camera/), version **C/CS mount** (pas M12) | la même |
+| 1 | **Nappe caméra** | [Raspberry Pi Camera Cable](https://www.raspberrypi.com/products/camera-cable/), version **Standard–Mini**, 200 mm | aucune : celle fournie avec la caméra |
+| 1 | **Objectif** | grand angle et lumineux, monture CS ou C, par exemple un **6 mm CS** (la page de la HQ Camera cite le 6 mm CS de CGL) | le même |
+| 1 | **Carte micro-SD** | 16 Go ou plus, par exemple une [carte SD Raspberry Pi](https://www.raspberrypi.com/products/sd-cards/) de 32 Go | la même |
+| 1 | **Clé USB** | 128 Go ou plus, USB 3 de préférence. Elle sera formatée en **exFAT** (l'interface Aurion sait le faire) | la même |
+| 1 | **Batterie** (terrain) | batterie externe USB-C capable de **5 V / 3 A**, environ **20 000 mAh**, avec un câble USB-C court et épais | la même |
+| 1 | **Alimentation secteur** (maison, essais) | [Raspberry Pi 27W USB-C Power Supply](https://www.raspberrypi.com/products/27w-power-supply/) | [Raspberry Pi 15W USB-C Power Supply](https://www.raspberrypi.com/products/type-c-power-supply/) |
+| 1 | **Trépied** | tout trépied photo stable | le même |
+
+Repères :
+- une photo RAW pèse environ 24 Mo, d'où la clé de 128 Go ;
+- une batterie de 20 000 mAh a tenu une nuit d'hiver complète (il restait 30 %). Les batteries perdent 30 à 50 % de
+  leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée) ;
+- l'objectif : le ciel entier compte, prenez la focale la plus courte et l'ouverture la plus grande possibles.
+
+Vous avez aussi besoin d'un **téléphone** (n'importe quel smartphone avec un navigateur, pour tout piloter) et,
+une seule fois, d'un **ordinateur** avec un lecteur de carte micro-SD (pour préparer la carte).
 
 ### Pi 4 ou Pi 5 ?
 
@@ -45,14 +58,17 @@ batteries perdent 30 à 50 % de leur capacité vers -10 °C : gardez-la au chaud
 | Une nuit à la fois | parfait | parfait |
 | Plusieurs nuits d'affilée | il faut rebrancher la batterie (ou appuyer sur son bouton) chaque soir | **se rallume seul** chaque soir grâce à son horloge intégrée |
 | Consommation au repos | plus faible | plus élevée |
-| Nappe caméra | celle de la caméra | nappe 22 vers 15 broches à acheter |
+| Nappe caméra | celle de la caméra | nappe Standard–Mini à acheter |
+
+En résumé : Pi 5 pour partir plusieurs nuits sans toucher à la caméra, Pi 4 si vous en avez déjà un.
 
 ### En option
 
-| Élément | Pour quoi |
-|---|---|
-| Pile d'horloge **ML-2020** (Pi 5) | garder l'heure quand la batterie est débranchée : utile en mode expédition |
-| Module horloge **DS3231** (Pi 4) | démarrer seul à la bonne heure sans téléphone. Montage pas encore validé sur le matériel : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) |
+| Élément | Pour quoi | Où le trouver |
+|---|---|---|
+| Pile d'horloge **ML-2020** (Pi 5) | garder l'heure quand la batterie est débranchée : utile en mode expédition | [Raspberry Pi RTC Battery](https://www.raspberrypi.com/products/rtc-battery/) (prise déjà montée) |
+| Module horloge **DS3231** (Pi 4) | démarrer seul à la bonne heure sans téléphone. Montage pas encore validé sur le matériel : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) | module DS3231 pour Raspberry Pi |
+| Boîtier | protéger le Pi de l'humidité et des chocs. Vérifiez que la nappe caméra peut en sortir | [boîtier Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5-case/), [boîtier Pi 4](https://www.raspberrypi.com/products/raspberry-pi-4-case/) |
 
 ---
 

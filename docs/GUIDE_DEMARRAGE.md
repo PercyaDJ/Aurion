@@ -2,6 +2,9 @@
 
 ## Ce qu'il faut
 
+Liste d'achat détaillée, avec les liens et les références exactes pour le Pi 4 et le Pi 5 :
+[README, section « Le matériel »](../README.md#1-le-matériel-liste-dachat).
+
 | Matériel | Détail |
 |---|---|
 | Raspberry Pi 4 (2 Go ou plus) | le Pi 5 fonctionne aussi, avec la nappe caméra adaptée au Pi 5 |
