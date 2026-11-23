@@ -1,5 +1,20 @@
 # Journal des versions
 
+## 1.13.8
+
+Objectif : corriger les vulnérabilités des plans Lysbor du 23/11/2026 (application et image carte SD).
+
+- Application (dépendances de test uniquement) : **cookie 0.18.3** (RUSTSEC-2026-0594), **url 2.5.9** (RUSTSEC-2026-0592).
+- Image carte SD, correctifs Debian imposés à la fabrication :
+  - **krb5 1.21.3-5+deb13u2** (18 CVE) ;
+  - **rsync 3.5.0+ds1-0+deb13u2** (CVE-2026-119741) ;
+  - **sudo 1.9.16p2-3+deb13u5** (CVE-2026-96512) ;
+  - **parted 3.6-5+deb13u1** (CVE-2026-89085, CVE-2026-89088) ;
+  - **nghttp2 1.64.0-1.1+deb13u2** (CVE-2026-58055).
+- dpkg et libyaml, failles sans correctif : code absent de l'image pour dpkg, YAML local uniquement pour libyaml.
+  Décisions enregistrées dans Lysbor par la CI.
+- Caméras déjà installées : ces correctifs du système n'arrivent qu'en regravant la carte SD avec cette image.
+
 ## 1.13.7
 
 Objectif : corriger les vulnérabilités des plans Lysbor du 08/11/2026 (application et image carte SD).

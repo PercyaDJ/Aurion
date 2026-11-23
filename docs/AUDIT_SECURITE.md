@@ -217,6 +217,12 @@ l'interface web. Et c'est l'image entière qui est distribuée.
   l'archive Raspberry Pi, ne les corrige pas : absentes de son NEWS.md). Code non atteignable : AES-GCM-SIV, client
   QUIC et chiffrement CMS ne sont utilisés par aucun programme de l'image. Décision « non affecté » enregistrée par le
   workflow Lysbor ; image inchangée, pas de nouvelle version.
+- Plans Lysbor du 23/11/2026. Application : cookie 0.18.1 (RUSTSEC-2026-0594) et url 2.5.8 (RUSTSEC-2026-0592),
+  dépendances de axum-test seulement, mises à jour ; chrono 0.4 signalé non maintenu (RUSTSEC-2026-0543), sans
+  version corrective : conservé, migration vers jiff ou time à planifier (78 usages). Image 1.13.7 : planchers à la
+  fabrication pour krb5 (+deb13u2, 18 CVE), rsync (+deb13u2), sudo (+deb13u5), parted (+deb13u1), nghttp2 (+deb13u2) ;
+  sans correctif : dpkg (CVE-2026-91094, dpkg-source absent : non affecté) et libyaml (CVE-2026-44842, YAML local de
+  root uniquement : risque accepté). Version 1.13.8 publiée pour refabriquer l'image.
 
 #### Registre des risques acceptés (image carte SD)
 
