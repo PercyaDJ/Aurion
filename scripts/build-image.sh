@@ -195,7 +195,7 @@ if [[ $APT -eq 1 ]]; then
               "vim-tiny 2:9.1.1230-2+deb13u1" "vim-common 2:9.1.1230-2+deb13u1" \
               "apt 3.0.4" "apt-utils 3.0.4" "libapt-pkg7.0 3.0.4" "zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1" \
               "libkrb5-3 1.21.3-5+deb13u2" "libgssapi-krb5-2 1.21.3-5+deb13u2" "libk5crypto3 1.21.3-5+deb13u2" "libkrb5support0 1.21.3-5+deb13u2" \
-              "sudo 1.9.16p2-3+deb13u5"; do
+              "sudo 1.9.16p2-3+deb13u5" "parted 3.6-5+deb13u1" "libparted2t64 3.6-5+deb13u1"; do
       p=${pv% *}; min=${pv#* }
       v=$(dpkg-query -W -f="\${db:Status-Status} \${Version}" "$p" 2>/dev/null || true)
       case "$v" in
