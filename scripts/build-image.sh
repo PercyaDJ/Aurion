@@ -188,7 +188,7 @@ if [[ $APT -eq 1 ]]; then
     # Lowest version carrying the security fixes (Lysbor plans): an older one means
     # the Debian security archive was not reached during the upgrade.
     # openssl: binary packages of the source package Lysbor reports (13 CVE fixed in deb13u3).
-    for pv in "rsync 3.5.0+ds1-0+deb13u1" "libssl3t64 3.5.7-1~deb13u3" "openssl 3.5.7-1~deb13u3" \
+    for pv in "rsync 3.5.0+ds1-0+deb13u2" "libssl3t64 3.5.7-1~deb13u3" "openssl 3.5.7-1~deb13u3" \
               "openssl-provider-legacy 3.5.7-1~deb13u3" "libpng16-16t64 1.6.48-1+deb13u6" \
               "curl 8.14.1-2+deb13u7" "libcurl4t64 8.14.1-2+deb13u7" "libcurl3t64-gnutls 8.14.1-2+deb13u7" \
               "libbrotli1 1.1.0-2+deb13u1" "libexpat1 2.9.0-1~deb13u1" \
