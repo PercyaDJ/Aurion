@@ -21,54 +21,125 @@ Ce README suffit pour passer du carton à la première nuit d'aurores. Le reste 
 
 ## 1. Le matériel (liste d'achat)
 
-Tous les liens mènent aux pages officielles Raspberry Pi. Le bouton **Buy now** de chaque page donne la liste des
-revendeurs agréés de votre pays : le prix et la disponibilité se voient là. Pour le reste (objectif, clé, batterie),
-la ligne indique quoi chercher.
+Cette partie suffit pour commander. Elle se lit dans l'ordre : choisir le Raspberry Pi (1.1), commander la liste
+correspondante (1.2), vérifier l'objectif (1.3), ajouter ou non les options (1.4).
 
-### Liste d'achat (HBOM)
+Prix relevés le 23/11/2026 chez [Kubii](https://www.kubii.com) (revendeur officiel Raspberry Pi en France) et
+[LDLC](https://www.ldlc.com). Ils changent avec le temps. Si un article est en rupture, le même produit officiel se
+trouve chez les autres revendeurs agréés : bouton **Buy now** de sa page sur
+[raspberrypi.com](https://www.raspberrypi.com/products/).
 
-Choisissez d'abord votre modèle de Raspberry Pi (voir « Pi 4 ou Pi 5 ? » plus bas), puis achetez la colonne
-correspondante.
+### 1.1 Raspberry Pi 4 ou Raspberry Pi 5 ?
 
-| Qté | Élément | Avec un Raspberry Pi 5 | Avec un Raspberry Pi 4 |
-|---|---|---|---|
-| 1 | **Raspberry Pi** | [Raspberry Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/), 2 Go ou plus | [Raspberry Pi 4 Model B](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/), 2 Go ou plus |
-| 1 | **Caméra** | [Raspberry Pi High Quality Camera](https://www.raspberrypi.com/products/raspberry-pi-high-quality-camera/), version **C/CS mount** (pas M12) | la même |
-| 1 | **Nappe caméra** | [Raspberry Pi Camera Cable](https://www.raspberrypi.com/products/camera-cable/), version **Standard–Mini**, 200 mm | aucune : celle fournie avec la caméra |
-| 1 | **Objectif** | grand angle et lumineux, monture CS ou C, par exemple un **6 mm CS** (la page de la HQ Camera cite le 6 mm CS de CGL) | le même |
-| 1 | **Carte micro-SD** | 16 Go ou plus, par exemple une [carte SD Raspberry Pi](https://www.raspberrypi.com/products/sd-cards/) de 32 Go | la même |
-| 1 | **Clé USB** | 128 Go ou plus, USB 3 de préférence. Elle sera formatée en **exFAT** (l'interface Aurion sait le faire) | la même |
-| 1 | **Batterie** (terrain) | batterie externe USB-C capable de **5 V / 3 A**, environ **20 000 mAh**, avec un câble USB-C court et épais | la même |
-| 1 | **Alimentation secteur** (maison, essais) | [Raspberry Pi 27W USB-C Power Supply](https://www.raspberrypi.com/products/27w-power-supply/) | [Raspberry Pi 15W USB-C Power Supply](https://www.raspberrypi.com/products/type-c-power-supply/) |
-| 1 | **Trépied** | tout trépied photo stable | le même |
-
-Repères :
-- une photo RAW pèse environ 24 Mo, d'où la clé de 128 Go ;
-- une batterie de 20 000 mAh a tenu une nuit d'hiver complète (il restait 30 %). Les batteries perdent 30 à 50 % de
-  leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée) ;
-- l'objectif : le ciel entier compte, prenez la focale la plus courte et l'ouverture la plus grande possibles.
-
-Vous avez aussi besoin d'un **téléphone** (n'importe quel smartphone avec un navigateur, pour tout piloter) et,
-une seule fois, d'un **ordinateur** avec un lecteur de carte micro-SD (pour préparer la carte).
-
-### Pi 4 ou Pi 5 ?
+Les deux font exactement les mêmes photos. La différence est ailleurs :
 
 | | Raspberry Pi 4 | Raspberry Pi 5 |
 |---|---|---|
-| Une nuit à la fois | parfait | parfait |
-| Plusieurs nuits d'affilée | il faut rebrancher la batterie (ou appuyer sur son bouton) chaque soir | **se rallume seul** chaque soir grâce à son horloge intégrée |
-| Consommation au repos | plus faible | plus élevée |
-| Nappe caméra | celle de la caméra | nappe Standard–Mini à acheter |
+| Pour qui | une nuit à la fois, ou plusieurs nuits en rebranchant la batterie chaque soir | partir plusieurs nuits sans revenir à la caméra |
+| Ce qui est testé | **une nuit d'hiver complète sur une batterie UGREEN Nexode 25 000 mAh** | les mêmes photos ; le rallumage automatique est prévu mais **pas encore vérifié sur le matériel** |
+| Le soir suivant | il faut rebrancher la batterie (ou appuyer sur son bouton) | il doit se rallumer seul, avec une batterie qui reste allumée quand le Pi est éteint (beaucoup se coupent) |
+| L'heure sans téléphone | perdue à chaque coupure : le téléphone la remet en se connectant | gardée par sa pile d'horloge (option à 6 €) |
+| Consommation | plus faible : la batterie dure plus | plus élevée |
+| Montage | la nappe de la caméra suffit | une nappe plus petite à acheter (1,32 €) |
+| Budget de la liste 1.2 (sans l'alimentation secteur) | environ 335 € | environ 350 € (355 € avec la pile d'horloge) |
 
-En résumé : Pi 5 pour partir plusieurs nuits sans toucher à la caméra, Pi 4 si vous en avez déjà un.
+**En résumé** : vous débutez ou vous sortez une nuit à la fois, prenez le **Pi 4**, c'est la configuration éprouvée.
+Vous voulez laisser la caméra plusieurs nuits seule et acceptez d'essuyer les plâtres, prenez le **Pi 5**.
 
-### En option
+### 1.2 Liste d'achat (HBOM)
 
-| Élément | Pour quoi | Où le trouver |
+Une ligne = un article à commander, en un exemplaire. « Pareil » : le même article que la colonne d'à côté.
+
+| Élément | Avec un Raspberry Pi 4 | Avec un Raspberry Pi 5 |
 |---|---|---|
-| Pile d'horloge **ML-2020** (Pi 5) | garder l'heure quand la batterie est débranchée : utile en mode expédition | [Raspberry Pi RTC Battery](https://www.raspberrypi.com/products/rtc-battery/) (prise déjà montée) |
-| Module horloge **DS3231** (Pi 4) | démarrer seul à la bonne heure sans téléphone. Montage pas encore validé sur le matériel : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) | module DS3231 pour Raspberry Pi |
-| Boîtier | protéger le Pi de l'humidité et des chocs. Vérifiez que la nappe caméra peut en sortir | [boîtier Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5-case/), [boîtier Pi 4](https://www.raspberrypi.com/products/raspberry-pi-4-case/) |
+| **Raspberry Pi** | [Raspberry Pi 4 Model B 4 Go](https://www.kubii.com/en/nano-computers/2772-raspberry-pi-4-model-b-4gb-5056561800349.html) (124,80 €). La version 2 Go suffit aussi | [Raspberry Pi 5 4 Go](https://www.kubii.com/fr/cartes-nano-ordinateurs/4106-1831-raspberry-pi-5-3272496315938.html) (137,40 €). La version 2 Go suffit aussi |
+| **Caméra** | [Raspberry Pi HQ Camera, version C/CS](https://www.kubii.com/en/cameras-sensors/2950-official-hq-camera-c-to-cs-mount-5056561800127.html) (57,00 €) | pareil |
+| **Objectif** | [objectif grand angle officiel 6 mm, f/1.2](https://www.kubii.com/en/objectives-supports/2952-official-6mm-wide-angle-lens-3272496301498.html) (28,80 €) | pareil |
+| **Nappe caméra** | rien à acheter : fournie avec la caméra | [nappe caméra 200 mm pour Pi 5, réf. SC1128](https://www.kubii.com/en/cables-adapters-converters/4116-1859-csi-mipi-camera-cable-for-raspberry-pi-5-3272496316669.html) (1,32 €) |
+| **Carte micro-SD** | [carte SD officielle Raspberry Pi 32 Go](https://www.kubii.com/en/storage-device/4392-2099-official-raspberry-pi-sd-card-3272496319158.html) (33,60 €) | pareil |
+| **Clé USB** (les photos) | [SanDisk Ultra Fit 128 Go, USB 3.0](https://www.ldlc.com/fiche/PB00251354.html) (39,25 €) | pareil |
+| **Batterie** (sur le terrain) | [UGREEN Nexode 25 000 mAh 145 W, réf. 90597A](https://fr.ugreen.com/products/ugreen-batterie-externe-portable-usb-c-25000-mah-145w-3-sorties-cable) (49,99 € en promotion, 513 g) : **celle testée avec Aurion** | pareil |
+| **Alimentation secteur** (à la maison, pour les essais) | [alimentation officielle 15 W USB-C, prise UE](https://www.kubii.com/fr/alimentations/2678-1049-alimentation-officielle-usb-type-c-raspberry-pi-3272496300002.html) (9,60 €) | [alimentation officielle 27 W USB-C, prise UE](https://www.kubii.com/en/power-supplies/4107-1818-power-supply-raspberry-pi-27w-usb-c-3272496315761.html) (12,90 €) |
+| **Trépied** | n'importe quel trépied photo : la caméra a un pas de vis standard (1/4 de pouce) | pareil |
+
+À avoir déjà : un **smartphone** (pour tout piloter, sans application à installer) et, une seule fois, un
+**ordinateur** qui lit les cartes micro-SD (sinon un lecteur USB de carte micro-SD, quelques euros).
+
+Pourquoi ces choix, pour remplacer un article par un équivalent :
+- **Clé USB** : 128 Go ou plus. Une photo RAW pèse environ 24 Mo. Aurion la formate lui-même (bouton *Préparer la
+  clé*).
+- **Batterie** : elle doit fournir **5 V / 3 A en USB-C**, c'est écrit dans ses caractéristiques (la UGREEN l'indique
+  sur ses deux ports USB-C) et faire 20 000 mAh ou plus. Un câble USB-C vers USB-C court et épais (50 cm, 3 A) est
+  nécessaire si la batterie n'en fournit pas. Autres batteries qui annoncent 5 V / 3 A en USB-C, **non testées avec
+  Aurion** : [Vention 20 000 mAh 100 W](https://www.kubii.com/en/cells-batteries/4910-20000-mah-100-w-external-battery-6922794791206.html)
+  (71,95 €, câble de 50 cm fourni), [Belkin 20K Boost Charge](https://www.ldlc.com/fiche/PB00503199.html) (34,75 €).
+  Pour un Pi 5 qui doit se rallumer seul, on ne sait pas encore si ces batteries restent allumées quand le Pi
+  s'éteint. Les
+  batteries perdent 30 à 50 % de leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée).
+- **Carte micro-SD** : 16 Go ou plus, de marque. La carte officielle est sûre, une autre bonne carte convient.
+
+### 1.3 L'objectif : lequel garder, lequel acheter
+
+La HQ Camera existe en deux versions qui ne diffèrent que par la **monture**, la façon de fixer l'objectif :
+**C/CS** (gros objectifs vissés) ou **M12** (petits objectifs). Aurion fonctionne pareil avec les deux. Seul compte
+l'objectif, jugé sur deux chiffres écrits dessus ou sur sa fiche : sa **focale** (en mm) et son **ouverture**
+(« f/ » suivi d'un nombre).
+
+Pour photographier des aurores, il faut **voir grand** (petite focale) et **capter beaucoup de lumière** (petit
+nombre après « f/ »).
+
+**La focale** : plus elle est petite, plus on voit de ciel. Valeurs calculées pour le capteur de la HQ Camera.
+
+| Focale | Équivalent appareil photo classique | Largeur de ciel vue | Pose max avant que les étoiles filent | Pour les aurores |
+|---|---|---|---|---|
+| 2,1 mm | 12 mm | 113° | 42 s | idéal (très grand champ) |
+| 2,7 mm | 15 mm | 99° | 33 s | idéal |
+| 3,2 mm | 18 mm | 89° | 28 s | très bien |
+| 4 mm | 22 mm | 76° | 22 s | bien |
+| 6 mm | 34 mm | 55° | 15 s | correct : champ plus serré, ciel cadré |
+| 8 mm | 45 mm | 43° | 11 s | déconseillé : trop serré |
+| 12 mm et plus | 67 mm et plus | 29° et moins | 7 s et moins | à éviter |
+
+Les objectifs « fisheye » (œil de poisson) voient plus large que ce tableau. Par exemple, l'objectif M12 2,7 mm
+vendu pour la HQ Camera annonce 140° de large.
+
+**L'ouverture** : plus le nombre est petit, plus l'image est lumineuse à temps de pose égal.
+
+| Ouverture | Lumière reçue (référence f/2.0) | Pour les aurores |
+|---|---|---|
+| f/1.0 à f/1.4 | 2 à 4 fois plus | excellent |
+| f/1.6 à f/1.8 | 1,2 à 1,6 fois plus | très bien |
+| f/2.0 | référence | bien |
+| f/2.5 | 1,6 fois moins | correct |
+| f/2.8 | 2 fois moins | limite : aurores faibles difficiles |
+| f/4 et plus | 4 fois moins et pire | à éviter |
+
+« Idéal », « correct » et « à éviter » sont des conseils de photographe, pas des mesures faites avec Aurion.
+
+**Vous avez déjà une HQ Camera M12 ?** Gardez-la. Regardez son objectif dans les deux tableaux : vers 2 à 4 mm et
+f/2.5 ou moins, il convient. Sinon, l'objectif M12 [2,7 mm f/2.5 pour HQ Camera](https://www.kubii.com/en/objectives-supports/3881-1694-m12-mount-lenses-for-official-hq-camera-3272496313767.html)
+(28,20 €, fisheye 140°) est fait pour elle.
+
+**Vous achetez ?** La version C/CS avec l'objectif officiel 6 mm f/1.2 (liste 1.2) reçoit le plus de lumière, avec un
+champ plus serré. La version M12 avec l'objectif 2,7 mm voit beaucoup plus de ciel, avec moins de lumière. Les deux
+conviennent.
+
+Dans Aurion, indiquez la focale de votre objectif : menu, cocher **Mode expert**, **Réglages experts**,
+**Longueur focale (mm)**. Elle sert seulement à vous prévenir si la pose fait filer les étoiles : une erreur ne bloque
+rien.
+
+### 1.4 Les options : à quoi elles servent, faut-il les acheter ?
+
+| Option | Le problème qu'elle règle | Faut-il l'acheter ? | Où |
+|---|---|---|---|
+| **Pile d'horloge** (Pi 5 seulement) | Le Pi 5 a une horloge, mais elle s'arrête dès qu'on débranche sa batterie. La pile la fait tourner sans courant : le Pi connaît l'heure au rallumage, sans téléphone. Indispensable pour qu'il démarre seul le soir | **Oui si Pi 5 et plusieurs nuits seul.** Non sinon | [pile RTC officielle pour Pi 5, ML-2020](https://www.kubii.com/en/cells-batteries/4110-rtc-battery-for-raspberry-pi-5-5056561803739.html) (6,00 €), se branche sur le connecteur de pile du Pi 5 |
+| **Module horloge DS3231** (Pi 4 seulement) | Le Pi 4 n'a pas d'horloge : sans téléphone le soir, il ne sait pas l'heure et la nuit ne démarre pas seule. Ce module lui en ajoute une | **Non si vous débutez.** À brancher sur les broches du Pi et à régler à la main, **pas encore validé avec Aurion** : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) | un module « RTC DS3231 pour Raspberry Pi » avec sa pile ; pas de référence vérifiée à ce jour |
+| **Boîtier du Pi** | Protège le Pi de la poussière, des chocs et un peu de l'humidité. La caméra reste à l'extérieur, reliée par la nappe | Conseillé. Vérifiez qu'il laisse passer la nappe caméra | [boîtier officiel Pi 4](https://www.kubii.com/en/cases-mountings/2681-1051-official-case-for-raspberry-pi-4-3272496298583.html) (5,94 €), [boîtier officiel Pi 5 avec ventilateur](https://www.kubii.com/en/ventilated-smart-cases/4108-1903-official-case-for-raspberry-pi-5-with-fan-3272496316638.html) (10,68 €) |
+
+Ces boîtiers ne protègent pas de la pluie ni du givre. Pour dehors toute la nuit, il faut une boîte fermée qui garde
+la caméra face au ciel, la batterie au chaud et l'objectif à l'abri de la buée. Le prototype d'Aurion utilise un
+boîtier imprimé en 3D en **ASA**, un plastique qui supporte le froid, l'humidité et le soleil. Son fichier sera publié
+dans ce dépôt une fois finalisé.
 
 ---
 
@@ -166,7 +237,8 @@ sessions/<nuit>/
 ## 5. Plusieurs nuits sans toucher à la caméra
 
 Cochez **Plusieurs nuits (expédition)** sur l'accueil : chaque soir, la nuit démarre seule. Un Raspberry Pi 5
-s'éteint le jour et se rallume seul le soir ; un Pi 4 demande de rebrancher la batterie. Comptez une batterie
+s'éteint le jour et doit se rallumer seul le soir (pile d'horloge et batterie qui reste allumée nécessaires, pas
+encore vérifié sur le matériel) ; un Pi 4 demande de rebrancher la batterie. Comptez une batterie
 chargée par nuit (environ 14 000 mAh mesurés en hiver).
 
 Tout est expliqué dans [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md).
