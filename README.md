@@ -36,12 +36,12 @@ Les deux font exactement les mêmes photos. La différence est ailleurs :
 | | Raspberry Pi 4 | Raspberry Pi 5 |
 |---|---|---|
 | Pour qui | une nuit à la fois, ou plusieurs nuits en rebranchant la batterie chaque soir | partir plusieurs nuits sans revenir à la caméra |
-| Ce qui est testé | **une nuit d'hiver complète sur une batterie de 20 000 mAh** (il restait 30 %) | les mêmes photos ; le rallumage automatique est prévu mais **pas encore vérifié sur le matériel** |
+| Ce qui est testé | **une nuit d'hiver complète sur une batterie UGREEN Nexode 25 000 mAh** | les mêmes photos ; le rallumage automatique est prévu mais **pas encore vérifié sur le matériel** |
 | Le soir suivant | il faut rebrancher la batterie (ou appuyer sur son bouton) | il doit se rallumer seul, avec une batterie qui reste allumée quand le Pi est éteint (beaucoup se coupent) |
 | L'heure sans téléphone | perdue à chaque coupure : le téléphone la remet en se connectant | gardée par sa pile d'horloge (option à 6 €) |
 | Consommation | plus faible : la batterie dure plus | plus élevée |
 | Montage | la nappe de la caméra suffit | une nappe plus petite à acheter (1,32 €) |
-| Budget de la liste 1.2 (sans l'alimentation secteur) | environ 355 € | environ 370 € (375 € avec la pile d'horloge) |
+| Budget de la liste 1.2 (sans l'alimentation secteur) | environ 335 € | environ 350 € (355 € avec la pile d'horloge) |
 
 **En résumé** : vous débutez ou vous sortez une nuit à la fois, prenez le **Pi 4**, c'est la configuration éprouvée.
 Vous voulez laisser la caméra plusieurs nuits seule et acceptez d'essuyer les plâtres, prenez le **Pi 5**.
@@ -58,7 +58,7 @@ Une ligne = un article à commander, en un exemplaire. « Pareil » : le même a
 | **Nappe caméra** | rien à acheter : fournie avec la caméra | [nappe caméra 200 mm pour Pi 5, réf. SC1128](https://www.kubii.com/en/cables-adapters-converters/4116-1859-csi-mipi-camera-cable-for-raspberry-pi-5-3272496316669.html) (1,32 €) |
 | **Carte micro-SD** | [carte SD officielle Raspberry Pi 32 Go](https://www.kubii.com/en/storage-device/4392-2099-official-raspberry-pi-sd-card-3272496319158.html) (33,60 €) | pareil |
 | **Clé USB** (les photos) | [SanDisk Ultra Fit 128 Go, USB 3.0](https://www.ldlc.com/fiche/PB00251354.html) (39,25 €) | pareil |
-| **Batterie** (sur le terrain) | [Vention 20 000 mAh 100 W](https://www.kubii.com/en/cells-batteries/4910-20000-mah-100-w-external-battery-6922794791206.html) (71,95 €), câble USB-C de 50 cm fourni | pareil |
+| **Batterie** (sur le terrain) | [UGREEN Nexode 25 000 mAh 145 W, réf. 90597A](https://fr.ugreen.com/products/ugreen-batterie-externe-portable-usb-c-25000-mah-145w-3-sorties-cable) (49,99 € en promotion, 513 g) : **celle testée avec Aurion** | pareil |
 | **Alimentation secteur** (à la maison, pour les essais) | [alimentation officielle 15 W USB-C, prise UE](https://www.kubii.com/fr/alimentations/2678-1049-alimentation-officielle-usb-type-c-raspberry-pi-3272496300002.html) (9,60 €) | [alimentation officielle 27 W USB-C, prise UE](https://www.kubii.com/en/power-supplies/4107-1818-power-supply-raspberry-pi-27w-usb-c-3272496315761.html) (12,90 €) |
 | **Trépied** | n'importe quel trépied photo : la caméra a un pas de vis standard (1/4 de pouce) | pareil |
 
@@ -68,9 +68,13 @@ Une ligne = un article à commander, en un exemplaire. « Pareil » : le même a
 Pourquoi ces choix, pour remplacer un article par un équivalent :
 - **Clé USB** : 128 Go ou plus. Une photo RAW pèse environ 24 Mo. Aurion la formate lui-même (bouton *Préparer la
   clé*).
-- **Batterie** : elle doit fournir **5 V / 3 A en USB-C**, c'est écrit dans ses caractéristiques. La Vention l'indique
-  sur ses deux ports USB-C. Moins chère : la [Belkin 20K Boost Charge](https://www.ldlc.com/fiche/PB00503199.html)
-  (34,75 €), 5 V / 3 A en USB-C selon le vendeur. Ni l'une ni l'autre n'a encore été testée avec Aurion. Les
+- **Batterie** : elle doit fournir **5 V / 3 A en USB-C**, c'est écrit dans ses caractéristiques (la UGREEN l'indique
+  sur ses deux ports USB-C) et faire 20 000 mAh ou plus. Un câble USB-C vers USB-C court et épais (50 cm, 3 A) est
+  nécessaire si la batterie n'en fournit pas. Autres batteries qui annoncent 5 V / 3 A en USB-C, **non testées avec
+  Aurion** : [Vention 20 000 mAh 100 W](https://www.kubii.com/en/cells-batteries/4910-20000-mah-100-w-external-battery-6922794791206.html)
+  (71,95 €, câble de 50 cm fourni), [Belkin 20K Boost Charge](https://www.ldlc.com/fiche/PB00503199.html) (34,75 €).
+  Pour un Pi 5 qui doit se rallumer seul, on ne sait pas encore si ces batteries restent allumées quand le Pi
+  s'éteint. Les
   batteries perdent 30 à 50 % de leur capacité vers -10 °C : gardez-la au chaud (poche, boîte isolée).
 - **Carte micro-SD** : 16 Go ou plus, de marque. La carte officielle est sûre, une autre bonne carte convient.
 
@@ -130,10 +134,12 @@ rien.
 |---|---|---|---|
 | **Pile d'horloge** (Pi 5 seulement) | Le Pi 5 a une horloge, mais elle s'arrête dès qu'on débranche sa batterie. La pile la fait tourner sans courant : le Pi connaît l'heure au rallumage, sans téléphone. Indispensable pour qu'il démarre seul le soir | **Oui si Pi 5 et plusieurs nuits seul.** Non sinon | [pile RTC officielle pour Pi 5, ML-2020](https://www.kubii.com/en/cells-batteries/4110-rtc-battery-for-raspberry-pi-5-5056561803739.html) (6,00 €), se branche sur le connecteur de pile du Pi 5 |
 | **Module horloge DS3231** (Pi 4 seulement) | Le Pi 4 n'a pas d'horloge : sans téléphone le soir, il ne sait pas l'heure et la nuit ne démarre pas seule. Ce module lui en ajoute une | **Non si vous débutez.** À brancher sur les broches du Pi et à régler à la main, **pas encore validé avec Aurion** : voir [docs/GUIDE_EXPEDITION.md](docs/GUIDE_EXPEDITION.md) | un module « RTC DS3231 pour Raspberry Pi » avec sa pile ; pas de référence vérifiée à ce jour |
-| **Boîtier** | Protège le Pi de la poussière, des chocs et un peu de l'humidité. La caméra reste à l'extérieur, reliée par la nappe | Conseillé. Vérifiez qu'il laisse passer la nappe caméra | [boîtier officiel Pi 4](https://www.kubii.com/en/cases-mountings/2681-1051-official-case-for-raspberry-pi-4-3272496298583.html) (5,94 €), [boîtier officiel Pi 5 avec ventilateur](https://www.kubii.com/en/ventilated-smart-cases/4108-1903-official-case-for-raspberry-pi-5-with-fan-3272496316638.html) (10,68 €) |
+| **Boîtier du Pi** | Protège le Pi de la poussière, des chocs et un peu de l'humidité. La caméra reste à l'extérieur, reliée par la nappe | Conseillé. Vérifiez qu'il laisse passer la nappe caméra | [boîtier officiel Pi 4](https://www.kubii.com/en/cases-mountings/2681-1051-official-case-for-raspberry-pi-4-3272496298583.html) (5,94 €), [boîtier officiel Pi 5 avec ventilateur](https://www.kubii.com/en/ventilated-smart-cases/4108-1903-official-case-for-raspberry-pi-5-with-fan-3272496316638.html) (10,68 €) |
 
 Ces boîtiers ne protègent pas de la pluie ni du givre. Pour dehors toute la nuit, il faut une boîte fermée qui garde
-la caméra face au ciel, la batterie au chaud et l'objectif à l'abri de la buée.
+la caméra face au ciel, la batterie au chaud et l'objectif à l'abri de la buée. Le prototype d'Aurion utilise un
+boîtier imprimé en 3D en **ASA**, un plastique qui supporte le froid, l'humidité et le soleil. Son fichier sera publié
+dans ce dépôt une fois finalisé.
 
 ---
 
