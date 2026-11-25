@@ -117,6 +117,31 @@
             </div>
         </div>
 
+        <!-- Vérification et rapport -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <span class="card-title">Vérification et rapport</span>
+            </div>
+            <span class="form-hint" style="margin-bottom: 0.75rem; display: block;">
+                La vérification prend une vraie photo avec son RAW, l'enregistre sur la clé et la relit (environ une minute).
+                Le rapport rassemble les versions, les vérifications et le journal : c'est le fichier à envoyer en cas de souci.
+            </span>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button class="btn btn-primary" style="flex: 1;" id="diagSelftestBtn" onclick="diagSelftest()">Vérifier Aurion</button>
+                <a class="btn btn-outline" style="flex: 1; text-align: center;" href="/api/report" download>Télécharger le rapport</a>
+            </div>
+            <div id="diagSelftestResult" class="muted small" style="margin-top: 0.75rem;"></div>
+            <div id="wakeTestBox" hidden style="margin-top: 1rem;">
+                <span class="form-hint" style="margin-bottom: 0.5rem; display: block;">
+                    Raspberry Pi 5 : Aurion s'éteint et doit se rallumer seul 3 minutes plus tard. Faites-le une fois sur la
+                    batterie du terrain : cela vérifie aussi qu'elle reste allumée quand le Pi dort. Le résultat s'affiche
+                    ici à la reconnexion.
+                </span>
+                <button class="btn btn-outline btn-block" onclick="wakeTest()">Tester le rallumage (3 minutes)</button>
+                <div id="wakeResult" class="muted small" style="margin-top: 0.5rem;"></div>
+            </div>
+        </div>
+
         <!-- Shutdown -->
         <div class="card fade-in">
             <div class="card-header">
@@ -252,6 +277,56 @@
 
     <script>
 
+        // ─── Vérification, rallumage, rapport ───
+        function showSelftest(st) {
+            const t = st && st.test;
+            const box = document.getElementById('diagSelftestResult');
+            if (t) {
+                const word = { ok: 'tout est prêt', warn: 'prêt, avec des conseils', error: 'problème à corriger' }[t.level] || t.level;
+                box.innerHTML = `<b>Dernière vérification (${escapeHtml(t.at)}) : ${escapeHtml(word)}</b><br>` +
+                    t.steps.map(s => `${s.level === 'ok' ? 'OK' : s.level === 'warn' ? 'Conseil' : 'Problème'} : ${escapeHtml(s.title)}` +
+                        (s.detail ? ` (${escapeHtml(s.detail)})` : '')).join('<br>');
+            } else {
+                box.textContent = 'Pas encore de vérification.';
+            }
+            const w = st && st.wake;
+            document.getElementById('wakeResult').textContent = w
+                ? `Dernier test (${w.at}) : ${w.ok ? 'réussi' : 'échec'}. ${w.detail}`
+                : 'Pas encore testé.';
+        }
+
+        async function loadSelftest() {
+            try {
+                showSelftest(await (await fetch('/api/selftest')).json());
+                const pf = await (await fetch('/api/preflight')).json();
+                document.getElementById('wakeTestBox').hidden = !pf.wake_capable;
+            } catch (_) { /* hors ligne */ }
+        }
+
+        async function diagSelftest() {
+            const btn = document.getElementById('diagSelftestBtn');
+            btn.disabled = true;
+            document.getElementById('diagSelftestResult').textContent = 'Vérification en cours (environ une minute)…';
+            try {
+                showSelftest(await (await apiFetch('/api/selftest', { method: 'POST' })).json());
+            } catch (e) {
+                document.getElementById('diagSelftestResult').textContent = 'Vérification impossible : ' + e.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function wakeTest() {
+            if (!confirm('Aurion va s\'éteindre maintenant et doit se rallumer seul dans 3 minutes. Ne débranchez rien. Continuer ?')) return;
+            try {
+                const r = await (await apiFetch('/api/selftest/wake', { method: 'POST' })).json();
+                document.getElementById('wakeResult').textContent =
+                    `Extinction en cours. Rallumage prévu à ${r.wake_at} : reconnectez-vous au Wi-Fi Aurion vers ${r.wake_at} + 2 min, puis rouvrez cette page.`;
+            } catch (e) {
+                document.getElementById('wakeResult').textContent = 'Test impossible : ' + e.message;
+            }
+        }
+
         async function refreshLogs() {
             try {
                 const res = await fetch('/api/logs');
@@ -360,6 +435,7 @@
         }
 
         refreshLogs();
+        loadSelftest();
         async function loadUpdateStatus() {
             try {
                 const u = await (await apiFetch('/api/system/update/status')).json();

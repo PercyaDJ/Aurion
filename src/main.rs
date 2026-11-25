@@ -210,6 +210,13 @@ async fn main() -> anyhow::Result<()> {
                     state.add_log("Heure donnée par l'horloge matérielle (RTC)".into()).await;
                 }
             }
+            // Wake-up test (Raspberry Pi 5) pending: did the board start by itself?
+            #[cfg(feature = "rpi")]
+            if let Some(uptime) = std::fs::read_to_string("/proc/uptime").ok().and_then(|u| u.split_whitespace().next()?.parse::<f64>().ok()) {
+                if let Some(v) = aurion::web::selftest::check_wake_marker(&state.paths, jiff::Timestamp::now().as_second(), uptime) {
+                    state.add_log(format!("Test de rallumage : {} {}", if v.ok { "réussi." } else { "échec." }, v.detail)).await;
+                }
+            }
 
             // Hardware adapters
             #[cfg(feature = "rpi")]

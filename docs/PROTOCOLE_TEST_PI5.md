@@ -1,11 +1,12 @@
 # Protocole de test : Raspberry Pi 5 en expédition (V8)
 
 But : vérifier sur le vrai matériel ce que les tests automatiques ne peuvent pas prouver. Le Pi 5 s'éteint, se
-rallume seul à l'heure prévue, garde l'heure sans téléphone, et la batterie le laisse faire. À la fin, la fiche de
-résultats (dernière section) permet de mettre à jour le README et le guide expédition avec des faits, pas des
-suppositions.
+rallume seul à l'heure prévue, garde l'heure sans téléphone, et la batterie le laisse faire. Aurion fait lui-même
+les vérifications (carte *Vérification d'Aurion*, test de rallumage en 3 minutes) : il reste environ 35 minutes de
+manipulations, plus deux nuits de répétition. À la fin, le rapport téléchargé depuis *Diagnostics* permet de mettre à
+jour le README et le guide expédition avec des faits, pas des suppositions.
 
-Version : Aurion **1.13.9** ou plus récente. Aucun terminal, aucun réglage caché : tout se fait depuis le téléphone.
+Version : Aurion **1.14.0** ou plus récente. Aucun terminal, aucun réglage caché : tout se fait depuis le téléphone.
 
 ---
 
@@ -58,74 +59,52 @@ arrêter des nuits, changer les réglages, mettre à jour depuis le téléphone 
 - **Pile d'horloge officielle ML-2020** branchée.
 - Carte SD **TEST** gravée avec Aurion 1.13.9 et clé USB de test.
 - Alimentation secteur officielle 27 W, et la batterie UGREEN chargée à 100 %.
-- Le téléphone, une montre, cette fiche imprimée ou ouverte à côté.
+- Le téléphone et une montre.
 - Fortement conseillé : un **testeur USB-C** (petit afficheur qui se branche entre la batterie et le câble, une
   quinzaine d'euros). C'est le seul moyen sûr de voir si le Pi est vraiment éteint (presque 0 W) ou planté
   (plusieurs watts). Il servira aussi à mesurer la consommation (test E1).
 
 ---
 
-## Étape 1 : au bureau, sur secteur (15 minutes)
+## Étape 1 : brancher, ouvrir la page, c'est vérifié (5 minutes)
 
-But : le Pi 5 démarre, voit la caméra, et sait qu'il peut se réveiller seul.
+But : tout le matériel fonctionne, sans rien tester à la main. Aurion se vérifie seul.
 
-1. Pi **débranché**. Brancher la pile d'horloge sur son connecteur, la nappe, la carte SD TEST, la clé USB de test.
+1. Pi **débranché**. Brancher la pile d'horloge, la nappe, la carte SD TEST, la clé USB de test.
 2. Brancher l'alimentation secteur 27 W. Attendre 3 à 5 minutes.
-3. Téléphone sur le Wi-Fi **Aurion**, page d'accueil.
-4. Vérifier dans **Prêt pour la nuit ?** : caméra OK, clé USB OK, heure OK.
-5. Cocher **Plusieurs nuits (expédition)**. Le texte doit dire : « Le matin, il s'éteint et se rallume seul le soir
-   suivant ». S'il dit « rebranchez la batterie le soir », Aurion ne voit pas l'alarme de réveil : **arrêter là** et
-   me l'écrire.
-6. *Diagnostics* : noter la version affichée (1.13.9 attendu) et l'heure système.
+3. Téléphone sur le Wi-Fi **Aurion** : la page s'ouvre.
+4. La carte **Vérification d'Aurion** se lance seule (environ une minute) : une vraie photo avec son RAW,
+   enregistrée sur la clé et relue, la mémoire, l'heure, l'alimentation. Attendu : **Prêt** ou **Prêt, avec
+   conseils**. Si elle affiche **À corriger**, chaque ligne rouge dit quoi faire.
 
-## Étape 2 : rallumage seul, sur secteur (environ 2 h 30)
+## Étape 2 : rallumage seul, sur secteur (5 minutes)
 
-But : le Pi s'éteint, puis se rallume seul 10 minutes avant le début de la nuit.
+But : le Pi s'éteint et se rallume seul par son horloge.
 
-Aurion éteint un Pi 5 quand la nuit commence dans **plus de 2 heures**. On règle donc une nuit courte qui commence
-dans 2 h 20.
-
-1. Noter l'heure actuelle, par exemple 14:00.
-2. Menu, **Réglages photo** : **Début** = maintenant + 2 h 20 (ici 16:20), **Fin** = début + 30 min (ici 16:50).
-   Enregistrer, revenir à l'accueil. Choisir le mode *Toute la nuit*, la durée **De 16:20 à 16:50**, et laisser
-   *Plusieurs nuits (expédition)* coché.
-3. Appuyer sur **Lancer la nuit**. Le Wi-Fi se coupe au bout de 15 secondes, c'est normal.
-4. Dans les 2 minutes : le Pi doit **s'éteindre** (testeur USB-C proche de 0 W, le Wi-Fi Aurion disparaît).
-5. Heure de réveil attendue : début moins 10 minutes (ici **16:10**). Vers cette heure, le Wi-Fi **Aurion** doit
-   réapparaître sur le téléphone (compter 1 à 3 minutes de démarrage).
-6. Ne rien toucher : la nuit doit démarrer seule et photographier de 16:20 à 16:50.
-7. Après 16:50 : le Pi range les photos, programme le réveil du lendemain et s'éteint seul (testeur proche de 0 W).
-   Pi éteint, retirer la clé USB et l'ouvrir sur l'ordinateur : le dossier `sessions/<nuit>/JPG` ou `RAW` doit
-   contenir des photos datées de 16:20 à 16:50 (l'heure est dans le nom de chaque fichier).
-
-Noter dans la fiche : heure d'extinction, heure de réapparition du Wi-Fi, heures de la première et de la dernière
-photo.
+1. Menu, **Diagnostics**, **Tester le rallumage (3 minutes)**, confirmer.
+2. Aurion s'éteint (le Wi-Fi Aurion disparaît, testeur proche de 0 W) et doit se rallumer seul 3 minutes plus tard.
+3. Environ 5 minutes après, se reconnecter au Wi-Fi Aurion et rouvrir **Diagnostics** : le résultat s'affiche
+   (« réussi » ou « échec » avec la raison). Si le Wi-Fi ne revient pas au bout de 10 minutes, débrancher et
+   rebrancher : la page indiquera l'échec.
 
 ## Étape 3 : l'heure sans téléphone, avec la pile (20 minutes)
 
 But : après une coupure totale de courant, le Pi connaît l'heure sans qu'un téléphone la lui donne.
 
-1. Pi allumé, page d'accueil ouverte : noter l'heure affichée.
-2. **Couper le téléphone du Wi-Fi Aurion** (mode avion, ou Wi-Fi coupé) et le garder coupé.
-3. Débrancher l'alimentation. Attendre **10 minutes**.
-4. Rebrancher. Attendre 5 minutes **sans connecter le téléphone**.
-5. Connecter le téléphone, puis aller tout de suite dans *Diagnostics*. Les logs doivent contenir « Heure donnée par
-   l'horloge matérielle (RTC) », et l'heure système doit être juste à la minute près.
+1. **Couper le téléphone du Wi-Fi Aurion** (mode avion) et le garder coupé.
+2. Débrancher l'alimentation. Attendre **10 minutes**. Rebrancher. Attendre 5 minutes **sans connecter le téléphone**.
+3. Connecter le téléphone, menu **Diagnostics**, **Vérifier Aurion** : la ligne de l'heure doit dire
+   « Horloge matérielle : juste même sans téléphone ».
 
-À refaire une fois **sans la pile** (Pi débranché pour la retirer) : l'heure doit alors être fausse ou non confirmée
-jusqu'à la connexion du téléphone. Cela prouve que c'est bien la pile qui fait le travail. Remettre la pile ensuite.
-
-## Étape 4 : rallumage seul, sur la batterie (environ 2 h 30)
+## Étape 4 : rallumage seul, sur la batterie (5 minutes)
 
 But : la batterie ne coupe pas sa sortie quand le Pi est éteint. Beaucoup de batteries s'arrêtent quand presque plus
 rien ne consomme, et le Pi 5 ne pourrait alors jamais se rallumer.
 
-Refaire exactement l'étape 2 en remplaçant l'alimentation secteur par la **batterie UGREEN** (chargée, câble court).
-Pendant que le Pi est éteint, regarder l'écran de la batterie et le testeur :
-
-- le Wi-Fi Aurion revient à l'heure prévue : la batterie convient ;
-- il ne revient pas, et la batterie ou le testeur affiche 0 : la batterie a coupé sa sortie. Noter au bout de
-  combien de temps, si possible. Ce n'est pas une panne d'Aurion : il faudra une autre batterie pour le Pi 5.
+Refaire l'étape 2 en remplaçant l'alimentation secteur par la **batterie UGREEN** (chargée, câble court).
+- « Réussi » : la batterie convient (l'étape 5 le confirme sur une journée entière).
+- « Échec » : la batterie a coupé sa sortie. Ce n'est pas une panne d'Aurion : il faudra une autre batterie pour le
+  Pi 5.
 
 ## Étape 5 : répétition générale (2 nuits, dehors ou sur un balcon)
 
@@ -143,21 +122,8 @@ batteries par nuit).
 
 ---
 
-## Fiche de résultats (à me renvoyer)
+## Le retour : un seul fichier
 
-Recopiez ce tableau dans un message, même incomplet. Une case « non fait » est aussi une information.
-
-| Étape | Ce qu'on regarde | Attendu | Résultat |
-|---|---|---|---|
-| 1 | version dans *Diagnostics* | 1.13.9 | |
-| 1 | texte du mode expédition | « se rallume seul le soir suivant » | |
-| 2 | heure de **Lancer la nuit** / heure d'extinction | moins de 2 min d'écart | |
-| 2 | heure de réapparition du Wi-Fi | début moins 10 min (+ 1 à 3 min) | |
-| 2 | première et dernière photo | début et fin de la plage | |
-| 2 | consommation éteint (si testeur) | proche de 0 W | |
-| 3 | heure juste sans téléphone, avec pile | oui, message « horloge matérielle (RTC) » | |
-| 3 | sans pile | heure fausse ou à confirmer | |
-| 4 | la batterie reste allumée, Pi éteint | Wi-Fi revenu à l'heure | |
-| 5 | batterie au départ, après nuit 1, après nuit 2 | à mesurer | |
-| 5 | la nuit 2 a démarré seule | oui | |
-| tout | quelque chose d'inattendu | | |
+Après les étapes, menu **Diagnostics**, **Télécharger le rapport**, et envoyez-moi ce fichier. Il contient les
+versions, la dernière vérification, le résultat du test de rallumage et le journal : pas de fiche à remplir. Ajoutez
+seulement ce que la caméra ne peut pas mesurer elle-même : le pourcentage de la batterie chaque matin de l'étape 5.

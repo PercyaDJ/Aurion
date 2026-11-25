@@ -17,6 +17,7 @@ pub mod api;
 pub mod captive;
 pub mod gallery;
 pub mod security;
+pub mod selftest;
 pub mod static_files;
 pub mod signing;
 pub mod update;
@@ -45,6 +46,10 @@ pub struct Paths {
     pub night_marker: PathBuf,
     /// Darks to take after the last night (home screen reminder).
     pub dark_reminder: PathBuf,
+    /// Results of the built-in check and of the wake-up test.
+    pub selftest: PathBuf,
+    /// Wake-up test in progress (Raspberry Pi 5), verdict at the next boot.
+    pub wake_test: PathBuf,
 }
 
 impl Paths {
@@ -57,6 +62,8 @@ impl Paths {
             tmp_dir: std::env::temp_dir(),
             night_marker: config_dir.join("night.json"),
             dark_reminder: config_dir.join("dark_reminder.json"),
+            selftest: config_dir.join("selftest.json"),
+            wake_test: config_dir.join("wake_test.json"),
         }
     }
 }
@@ -256,6 +263,9 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/storage/format", post(api::format_usb))
         .route("/api/logs", get(api::get_logs))
         .route("/api/diagnostics", get(api::get_diagnostics))
+        .route("/api/selftest", get(selftest::get_selftest).post(selftest::run_selftest))
+        .route("/api/selftest/wake", post(selftest::start_wake_test))
+        .route("/api/report", get(selftest::get_report))
         .route("/api/system/time", post(api::set_system_time))
         .route("/api/system/shutdown", post(api::system_shutdown))
         .route("/api/system/update/online", post(update::start_online_update))
