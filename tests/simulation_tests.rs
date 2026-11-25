@@ -505,13 +505,18 @@ async fn raw_only_during_auroras_saves_the_key() {
 async fn resumed_night_continues_in_the_same_folder_and_numbering() {
     let (night, _) = setup(|_| {});
     let clock = clock();
-    let previous = night.capture.join("sessions/2026-01-15_20-00");
+    // Names in local time, like the camera writes them (any TZ of the machine)
+    let now = clock.now_local();
+    let started = plus_secs(&now, -3600);
+    let session = started.strftime("%Y-%m-%d_%H-%M").to_string();
+    let saved = plus_secs(&now, -60).strftime("%Y%m%d_%H%M%S").to_string();
+    let partial = plus_secs(&now, -50).strftime("%Y%m%d_%H%M%S").to_string();
+    let previous = night.capture.join("sessions").join(&session);
     std::fs::create_dir_all(previous.join("JPG")).unwrap();
-    std::fs::write(previous.join("JPG/aurora_20260115_205900_00041.jpg"), b"x").unwrap();
-    std::fs::write(previous.join("JPG/.aurora_20260115_205910_00042.jpg.part"), b"half").unwrap();
-    let started = plus_secs(&clock.now_local(), -3600);
+    std::fs::write(previous.join(format!("JPG/aurora_{saved}_00041.jpg")), b"x").unwrap();
+    std::fs::write(previous.join(format!("JPG/.aurora_{partial}_00042.jpg.part")), b"half").unwrap();
     let mut marker = NightMarker::new(started, Some(1.5));
-    marker.session = Some("2026-01-15_20-00".into());
+    marker.session = Some(session);
     marker.save(&night.state.paths.night_marker).unwrap();
 
     let storage = StorageMock::new(night.capture.clone());
@@ -522,7 +527,7 @@ async fn resumed_night_continues_in_the_same_folder_and_numbering() {
     tokio::time::timeout(std::time::Duration::from_secs(48 * 3600), orch.run()).await.unwrap().unwrap();
 
     assert_eq!(std::fs::read_dir(night.capture.join("sessions")).unwrap().count(), 1, "no second folder");
-    assert!(!previous.join("JPG/.aurora_20260115_205910_00042.jpg.part").exists(), "power-cut leftovers cleaned");
+    assert!(!previous.join(format!("JPG/.aurora_{partial}_00042.jpg.part")).exists(), "power-cut leftovers cleaned");
     let files = images(&night.capture);
     let numbers: Vec<u64> = files.iter().map(|f| aurion::core::layout::parse_frame_number(f).unwrap()).collect();
     assert_eq!(numbers[0], 41);
