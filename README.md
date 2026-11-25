@@ -36,14 +36,15 @@ Les deux font exactement les mêmes photos. La différence est ailleurs :
 | | Raspberry Pi 4 | Raspberry Pi 5 |
 |---|---|---|
 | Pour qui | une nuit à la fois, ou plusieurs nuits en rebranchant la batterie chaque soir | partir plusieurs nuits sans revenir à la caméra |
-| Ce qui est testé | **une nuit d'hiver complète sur une batterie UGREEN Nexode 25 000 mAh** | les mêmes photos ; le rallumage automatique est prévu mais **pas encore vérifié sur le matériel** |
+| Ce qui est testé | **une nuit d'hiver complète, avec la HQ Camera en version M12 et une batterie UGREEN Nexode 25 000 mAh** | les mêmes photos ; le rallumage automatique est prévu mais **pas encore vérifié sur le matériel** |
 | Le soir suivant | il faut rebrancher la batterie (ou appuyer sur son bouton) | il doit se rallumer seul, avec une batterie qui reste allumée quand le Pi est éteint (beaucoup se coupent) |
 | L'heure sans téléphone | perdue à chaque coupure : le téléphone la remet en se connectant | gardée par sa pile d'horloge (option à 6 €) |
 | Consommation | plus faible : la batterie dure plus | plus élevée |
 | Montage | la nappe de la caméra suffit | une nappe plus petite à acheter (1,32 €) |
 | Budget de la liste 1.2 (sans l'alimentation secteur) | environ 335 € | environ 350 € (355 € avec la pile d'horloge) |
 
-**En résumé** : vous débutez ou vous sortez une nuit à la fois, prenez le **Pi 4**, c'est la configuration éprouvée.
+**En résumé** : vous débutez ou vous sortez une nuit à la fois, prenez le **Pi 4**, c'est la configuration éprouvée
+(Pi 4, HQ Camera M12, batterie UGREEN 25 000 mAh).
 Vous voulez laisser la caméra plusieurs nuits seule et acceptez d'essuyer les plâtres, prenez le **Pi 5**.
 
 ### 1.2 Liste d'achat (HBOM)
@@ -53,8 +54,8 @@ Une ligne = un article à commander, en un exemplaire. « Pareil » : le même a
 | Élément | Avec un Raspberry Pi 4 | Avec un Raspberry Pi 5 |
 |---|---|---|
 | **Raspberry Pi** | [Raspberry Pi 4 Model B 4 Go](https://www.kubii.com/en/nano-computers/2772-raspberry-pi-4-model-b-4gb-5056561800349.html) (124,80 €). La version 2 Go suffit aussi | [Raspberry Pi 5 4 Go](https://www.kubii.com/fr/cartes-nano-ordinateurs/4106-1831-raspberry-pi-5-3272496315938.html) (137,40 €). La version 2 Go suffit aussi |
-| **Caméra** | [Raspberry Pi HQ Camera, version C/CS](https://www.kubii.com/en/cameras-sensors/2950-official-hq-camera-c-to-cs-mount-5056561800127.html) (57,00 €) | pareil |
-| **Objectif** | [objectif grand angle officiel 6 mm, f/1.2](https://www.kubii.com/en/objectives-supports/2952-official-6mm-wide-angle-lens-3272496301498.html) (28,80 €) | pareil |
+| **Caméra** | [Raspberry Pi HQ Camera, version M12](https://www.kubii.com/en/cameras-sensors/3880-official-hq-camera-m12-mount-5056561803227.html) (58,50 €), celle de la configuration testée. Autre choix : la [version C/CS](https://www.kubii.com/en/cameras-sensors/2950-official-hq-camera-c-to-cs-mount-5056561800127.html) (57,00 €), voir 1.3 | pareil |
+| **Objectif** | pour la version M12 : [objectif M12 2,7 mm f/2.5 pour HQ Camera](https://www.kubii.com/en/objectives-supports/3881-1694-m12-mount-lenses-for-official-hq-camera-3272496313767.html) (28,20 €, fisheye 140°). Pour la version C/CS : [objectif officiel 6 mm f/1.2](https://www.kubii.com/en/objectives-supports/2952-official-6mm-wide-angle-lens-3272496301498.html) (28,80 €) | pareil |
 | **Nappe caméra** | rien à acheter : fournie avec la caméra | [nappe caméra 200 mm pour Pi 5, réf. SC1128](https://www.kubii.com/en/cables-adapters-converters/4116-1859-csi-mipi-camera-cable-for-raspberry-pi-5-3272496316669.html) (1,32 €) |
 | **Carte micro-SD** | [carte SD officielle Raspberry Pi 32 Go](https://www.kubii.com/en/storage-device/4392-2099-official-raspberry-pi-sd-card-3272496319158.html) (33,60 €) | pareil |
 | **Clé USB** (les photos) | [SanDisk Ultra Fit 128 Go, USB 3.0](https://www.ldlc.com/fiche/PB00251354.html) (39,25 €) | pareil |
@@ -116,13 +117,13 @@ vendu pour la HQ Camera annonce 140° de large.
 
 « Idéal », « correct » et « à éviter » sont des conseils de photographe, pas des mesures faites avec Aurion.
 
-**Vous avez déjà une HQ Camera M12 ?** Gardez-la. Regardez son objectif dans les deux tableaux : vers 2 à 4 mm et
+**Vous avez déjà une HQ Camera M12 ?** Gardez-la : c'est la version de la configuration testée. Regardez son objectif dans les deux tableaux : vers 2 à 4 mm et
 f/2.5 ou moins, il convient. Sinon, l'objectif M12 [2,7 mm f/2.5 pour HQ Camera](https://www.kubii.com/en/objectives-supports/3881-1694-m12-mount-lenses-for-official-hq-camera-3272496313767.html)
 (28,20 €, fisheye 140°) est fait pour elle.
 
-**Vous achetez ?** La version C/CS avec l'objectif officiel 6 mm f/1.2 (liste 1.2) reçoit le plus de lumière, avec un
-champ plus serré. La version M12 avec l'objectif 2,7 mm voit beaucoup plus de ciel, avec moins de lumière. Les deux
-conviennent.
+**Vous achetez ?** La version **M12** est celle de la configuration testée ; avec l'objectif 2,7 mm, elle voit beaucoup
+de ciel, avec un peu moins de lumière. La version C/CS avec l'objectif officiel 6 mm f/1.2 reçoit plus de
+lumière, avec un champ plus serré, mais n'a pas encore été essayée avec Aurion. Les deux conviennent sur le papier.
 
 Dans Aurion, indiquez la focale de votre objectif : menu, cocher **Mode expert**, **Réglages experts**,
 **Longueur focale (mm)**. Elle sert seulement à vous prévenir si la pose fait filer les étoiles : une erreur ne bloque
