@@ -420,3 +420,43 @@ async fn prepare_usb_key_is_guarded() {
     *t.state.phase.write().await = aurion::core::models::Phase::Run;
     post(json!({"device": "sda", "confirm": "EFFACER"})).await.assert_status(StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn selftest_checks_the_chain_and_feeds_the_report() {
+    let t = common::env();
+    std::fs::create_dir_all(t.capture_dir()).unwrap();
+    // Nothing before the first check
+    let st = t.server.get("/api/selftest").await.json::<Value>();
+    assert!(st["test"].is_null());
+
+    let res = t.server.post("/api/selftest").await;
+    res.assert_status_ok();
+    let st = res.json::<Value>();
+    let steps = st["test"]["steps"].as_array().unwrap();
+    let level = |id: &str| steps.iter().find(|s| s["id"] == id).map(|s| s["level"].as_str().unwrap().to_string());
+    assert_eq!(level("camera").as_deref(), Some("ok"), "{steps:?}");
+    assert_eq!(level("usb").as_deref(), Some("ok"), "{steps:?}");
+    assert!(level("clock").is_some());
+    assert!(!t.capture_dir().join(".aurion_autotest.bin").exists(), "test file removed from the key");
+    // Kept for the next visit
+    assert_eq!(t.server.get("/api/selftest").await.json::<Value>()["test"]["at"], st["test"]["at"]);
+
+    // The wake-up test needs the real board
+    t.server.post("/api/selftest/wake").await.assert_status(StatusCode::NOT_IMPLEMENTED);
+
+    let report = t.server.get("/api/report").await;
+    report.assert_status_ok();
+    let text = report.text();
+    assert!(text.contains("Rapport Aurion"));
+    assert!(text.contains("Photo pleine résolution"), "{text}");
+    assert!(text.contains("Rallumage automatique"));
+}
+
+#[tokio::test]
+async fn selftest_reports_a_missing_key() {
+    let t = common::env_with(|c| c.storage.mount_point = "/nonexistent/aurion-key".into());
+    let st = t.server.post("/api/selftest").await.json::<Value>();
+    assert_eq!(st["test"]["level"], "error");
+    let usb = st["test"]["steps"].as_array().unwrap().iter().find(|s| s["id"] == "usb").unwrap().clone();
+    assert_eq!(usb["level"], "error");
+}

@@ -181,7 +181,12 @@ Au premier démarrage, le Pi s'installe tout seul et peut redémarrer une fois. 
    minimum). Faites-le : le mot de passe d'origine est public. Le Wi-Fi Aurion redémarre, reconnectez-vous avec le
    nouveau mot de passe.
 
-L'heure du Pi se règle automatiquement sur celle du téléphone à chaque connexion. C'est tout : Aurion est prêt.
+L'heure du Pi se règle automatiquement sur celle du téléphone à chaque connexion.
+
+À la première ouverture, la carte **Vérification d'Aurion** se lance seule (environ une minute) : une vraie photo avec
+son RAW, enregistrée sur la clé USB et relue, plus la mémoire, l'heure et l'alimentation. Quand elle affiche **Prêt**,
+c'est tout : Aurion est opérationnel. Sinon, chaque ligne rouge dit quoi faire. En cas de souci,
+*Diagnostics*, **Télécharger le rapport** donne un fichier à envoyer pour obtenir de l'aide.
 
 > **Clé USB neuve ou illisible** : si l'accueil affiche le point rouge « Clé USB à préparer », appuyez sur
 > **Préparer la clé**. Attention, tout son contenu est effacé.

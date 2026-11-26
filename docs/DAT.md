@@ -260,6 +260,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET/POST /api/darks` | série de darks |
 | `GET /api/darks/reminder`, `POST /api/darks/reminder/dismiss` | rappel des darks de la dernière nuit (ou `null`), l'ignorer |
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
+| `GET/POST /api/selftest`, `POST /api/selftest/wake`, `GET /api/report` | vérification complète du matériel, test de rallumage (Pi 5), rapport texte |
 | `POST /api/system/time`, `/api/system/shutdown`, `/api/system/update` | heure, arrêt, mise à jour par fichier |
 | `GET /api/storage/usb`, `POST /api/storage/format` | clés USB branchées ; préparation d'une clé (effacement, exFAT), confirmation `EFFACER` exigée, jamais pendant une nuit |
 | `POST /api/system/update/online`, `GET /api/system/update/status`, `POST /api/system/rollback` | mise à jour depuis GitHub (stable ou `edge`), résultat et version du helper, retour à la version précédente |

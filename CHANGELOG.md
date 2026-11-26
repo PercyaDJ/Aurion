@@ -1,5 +1,20 @@
 # Journal des versions
 
+## 1.14.0
+
+Objectif : brancher, ouvrir la page, et savoir tout de suite que la caméra est opérationnelle, sans protocole de test
+à suivre à la main.
+
+- **Vérification d'Aurion** : à la première ouverture de l'accueil, une vérification complète se lance seule (environ
+  une minute). Elle prend une vraie photo pleine résolution avec son RAW, l'enregistre sur la clé USB puis la relit, et
+  contrôle la mémoire libre, l'heure et l'alimentation. Résultat : **Prêt**, **Prêt, avec conseils** ou **À corriger**,
+  chaque problème avec quoi faire. Elle se relance depuis l'accueil ou *Diagnostics*, jamais pendant une nuit.
+- **Test de rallumage** (Raspberry Pi 5, *Diagnostics*) : Aurion s'éteint et doit se rallumer seul 3 minutes plus tard
+  par son horloge. Le verdict s'affiche à la reconnexion. Fait sur batterie, il vérifie aussi qu'elle reste allumée
+  quand le Pi dort. Remplace deux essais de 2 h 30 du protocole de test du Pi 5.
+- **Rapport** (*Diagnostics*, *Télécharger le rapport*) : un fichier texte avec les versions, les vérifications, le
+  dernier test de rallumage et le journal, à envoyer en cas de souci.
+
 ## 1.13.9
 
 Objectif : quitter chrono, bibliothèque de dates qui n'est plus maintenue (RUSTSEC-2026-0543, plan Lysbor du 23/11/2026).

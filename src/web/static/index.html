@@ -86,6 +86,18 @@
                     Oubli ? Posez un fichier <code>aurion-reset-wifi.txt</code> sur la clé USB et rallumez.</p>
             </section>
 
+            <!-- Vérification complète du matériel (autotest) -->
+            <section class="card" id="selftestCard">
+                <div class="card-header">
+                    <span class="card-title">Vérification d'Aurion</span>
+                    <span class="badge" id="selftestBadge">…</span>
+                </div>
+                <p class="muted small" id="selftestText">Une vraie photo avec son RAW, enregistrée sur la clé et relue,
+                    plus l'heure et l'alimentation : environ une minute.</p>
+                <ul class="checklist" id="selftestSteps" hidden></ul>
+                <button class="btn btn-outline btn-sm" id="selftestBtn" onclick="runSelftest()" style="margin-top:0.75rem;">Vérifier maintenant</button>
+            </section>
+
             <!-- Vérifications avant la nuit -->
             <section class="card">
                 <div class="card-header">
@@ -251,11 +263,75 @@
             fmtSel.value = cfg.capture.output_format;
         }
 
+        // ─── Vérification d'Aurion (autotest) ───
+        let selftestRunning = false, selftestAsked = false, selftestNeeded = false;
+        const SELFTEST_BADGE = { ok: ['Prêt', 'badge-ok'], warn: ['Prêt, avec conseils', 'badge-warning'], error: ['À corriger', 'badge-danger'] };
+
+        function renderSelftest(st) {
+            const t = st && st.test;
+            const badge = document.getElementById('selftestBadge');
+            const ul = document.getElementById('selftestSteps');
+            if (!t) {
+                badge.textContent = 'À faire';
+                badge.className = 'badge';
+                ul.hidden = true;
+                return;
+            }
+            const [label, cls] = SELFTEST_BADGE[t.level] || SELFTEST_BADGE.warn;
+            badge.textContent = label;
+            badge.className = 'badge ' + cls;
+            document.getElementById('selftestText').textContent = t.level === 'ok'
+                ? `Tout fonctionne (vérifié le ${t.at}). Aurion est prêt.`
+                : `Vérifié le ${t.at} : regardez les points ci-dessous.`;
+            ul.innerHTML = t.steps.map(s => `<li class="check-item ${aurionEscape(s.level)}"><span class="dot"></span><span><b>${aurionEscape(s.title)}</b>` +
+                (s.detail ? `<small>${aurionEscape(s.detail)}</small>` : '') + '</span></li>').join('');
+            // Everything green: keep the card short
+            ul.hidden = t.level === 'ok';
+            document.getElementById('selftestBtn').textContent = 'Vérifier à nouveau';
+        }
+
+        async function runSelftest() {
+            if (selftestRunning) return;
+            selftestRunning = true;
+            const btn = document.getElementById('selftestBtn');
+            btn.disabled = true;
+            document.getElementById('selftestBadge').textContent = 'En cours…';
+            document.getElementById('selftestText').textContent = 'Vérification en cours : photo, clé USB, heure, alimentation (environ une minute)…';
+            try {
+                renderSelftest(await (await apiFetch('/api/selftest', { method: 'POST' })).json());
+            } catch (e) {
+                document.getElementById('selftestText').textContent = 'Vérification impossible pour l\'instant : ' + e.message;
+                document.getElementById('selftestBadge').textContent = 'À faire';
+            } finally {
+                selftestRunning = false;
+                btn.disabled = false;
+            }
+        }
+
+        // First visit: the check runs by itself, once the Pi has finished
+        // starting (never during a night)
+        function maybeAutoSelftest() {
+            if (selftestNeeded && !selftestAsked && phase === 'ARM') {
+                selftestAsked = true;
+                runSelftest();
+            }
+        }
+
+        async function loadSelftest() {
+            try {
+                const st = await (await apiFetch('/api/selftest')).json();
+                renderSelftest(st);
+                selftestNeeded = !st.test;
+                maybeAutoSelftest();
+            } catch (_) { /* Aurion injoignable : loadPreflight le signale */ }
+        }
+
         async function loadPreflight() {
             try {
                 preflight = await (await apiFetch('/api/preflight')).json();
                 showPhase(preflight.phase);
                 renderChecks(preflight);
+                maybeAutoSelftest();
                 // The Pi is not sure of its clock (rebooted since): send it again
                 if (preflight.checks.some(c => c.id === 'clock' && c.level !== 'ok') && !clockRetry) {
                     clockRetry = true;
@@ -515,7 +591,7 @@
 
         document.addEventListener('aurion-clock', loadPreflight);
         loadConfig();
-        loadPreflight();
+        loadPreflight().then(loadSelftest);
         loadLastNight();
         loadDarkReminder();
         aurionPoll(loadPreflight, 10000);

@@ -343,6 +343,20 @@ try {
     assert(res.status === 307 && res.headers.get('location').startsWith('http://192.168.4.1:'), 'status ' + res.status);
   });
 
+  await step('vérification d\'Aurion lancée seule à la première visite, rapport téléchargeable', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForFunction(() => {
+      const b = document.getElementById('selftestBadge');
+      return b && !['…', 'À faire', 'En cours…'].includes(b.textContent);
+    }, null, { timeout: 30000 });
+    assert(fs.existsSync(path.join(configDir, 'selftest.json')), 'result kept on the SD card');
+    const res = await page.request.get(base + '/api/report');
+    assert(res.ok(), 'report served');
+    assert((await res.text()).includes('Dernière vérification'), 'report has the check');
+    await page.goto(base + '/diagnostics.html');
+    await page.waitForFunction(() => document.getElementById('diagSelftestResult').textContent.includes('Dernière vérification'));
+  });
+
   await step('accueil : mode expédition et RAW par défaut', async () => {
     await page.goto(base + '/index.html');
     await page.waitForSelector('#checks [data-check=usb]');
