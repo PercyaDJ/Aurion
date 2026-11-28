@@ -392,7 +392,7 @@
             const stat = (v, l) => `<div class="stat"><div class="stat-value">${aurionEscape(v)}</div><div class="stat-label">${l}</div></div>`;
             document.getElementById('darkNight').textContent = fmtNight(r);
             document.getElementById('darkStats').innerHTML = stat(r.iso, 'ISO') + stat(secs(r.shutter_us), 'pose')
-                + (r.temp_c != null ? stat(Math.round(r.temp_c) + ' °C', 'processeur') : '');
+                + (r.temp_c != null ? stat(Math.round(r.temp_c) + ' °C', r.temp_source === 'capteur' ? 'capteur' : 'processeur') : '');
             const notes = [`Moyenne de ${r.frames} photo${r.frames > 1 ? 's' : ''}.`];
             if (r.shutter_min_us !== r.shutter_max_us || r.iso_min !== r.iso_max) {
                 notes.push(`Réglages variables cette nuit (ISO ${r.iso_min} à ${r.iso_max}, pose ${secs(r.shutter_min_us)} à ${secs(r.shutter_max_us)}).`);
@@ -432,13 +432,19 @@
             document.getElementById('darkReminderBtn').disabled = d.running;
             const wasRunning = darksRunning;
             darksRunning = d.running;
-            if (d.running) {
+            const m = d.master;
+            if (d.running && m && m.state === 'running') {
+                const pct = m.rows_total ? Math.round(100 * m.rows_done / m.rows_total) : 0;
+                el.textContent = `Calcul du master dark : ${pct} %. Le bouchon peut être retiré.`;
+                setTimeout(pollReminderDarks, 3000);
+            } else if (d.running) {
                 el.textContent = `Darks en cours : ${d.done}/${d.total}. Gardez le bouchon.`;
                 setTimeout(pollReminderDarks, 3000);
             } else if (d.error) {
                 el.textContent = 'Darks interrompus : ' + d.error;
             } else if (wasRunning) {
-                showToast(`${d.done} darks enregistrés dans darks/ sur la clé`, 'success');
+                const master = m && m.state === 'done' ? ' et master dark' : '';
+                showToast(`${d.done} darks${master} enregistrés dans darks/ sur la clé`, 'success');
                 loadDarkReminder();
             }
         }

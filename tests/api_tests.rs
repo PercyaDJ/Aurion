@@ -126,7 +126,7 @@ async fn night_does_not_start_while_the_camera_or_an_update_is_busy() {
     let t = common::env();
     // A darks series is running
     *t.state.darks.write().await = Some(aurion::web::DarkProgress {
-        done: 2, total: 10, iso: 800, shutter_us: 1_000_000, running: true, error: None,
+        done: 2, total: 10, iso: 800, shutter_us: 1_000_000, running: true, error: None, temp_c: None, temp_source: None, master: None,
     });
     t.server.post("/api/disconnect").await.assert_status(StatusCode::CONFLICT);
     t.state.darks.write().await.as_mut().unwrap().running = false;

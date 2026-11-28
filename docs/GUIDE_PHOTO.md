@@ -31,8 +31,9 @@ post-traitement, elles retirent pixels chauds et bruit thermique des DNG. À fai
 caméra à la même température.
 
 **Rappel automatique après la nuit.** En fin de nuit, Aurion calcule les réglages moyens des photos enregistrées
-(ISO, temps de pose et température du processeur, voisine de celle du capteur, quand elle est disponible) et les
-écrit dans `session.log`. Au prochain allumage, l'accueil affiche l'encadré **Faites vos darks** avec ces valeurs :
+(ISO, temps de pose et température) et les écrit dans `session.log`. La température est celle du capteur, lue dans
+les métadonnées de chaque photo (`SensorTemperature`, depuis la version 1.16.0) ; si la caméra ne la donne pas, Aurion
+prend celle du processeur, voisine, et l'encadré l'indique (*capteur* ou *processeur*). Au prochain allumage, l'accueil affiche l'encadré **Faites vos darks** avec ces valeurs :
 bouchon sur l'objectif, le bouton *Lancer 10 darks* les enregistre dans `darks/` à ces réglages exacts. L'encadré
 disparaît dès que la série est terminée, ou avec *Ignorer*. Une série faite depuis la page *Cadrage* à d'autres
 réglages ne l'efface pas. Si l'exposition a varié pendant la nuit (exposition non verrouillée), l'encadré le signale
@@ -45,10 +46,43 @@ sert de repère ; elle n'est pas disponible sur un PC ou en simulation.
 
 Logiciels qui les utilisent : Sequator (Windows), Siril (Windows, macOS, Linux), PixInsight, Starry Landscape Stacker (macOS).
 
+**Master dark calculé par Aurion** (depuis la version 1.16.0). À la fin d'une série réussie, Aurion calcule sur le
+Pi, à partir des DNG de la série :
+- `darks/master/master_dark_ISO<iso>_<pose>s_T<température>.fits` : la médiane pixel à pixel des darks, en valeurs
+  brutes du capteur (niveau de noir compris, comme dans les DNG), avant tout dématriçage. La température du nom est
+  celle du capteur arrondie à 5 °C (`T35`), `Tinconnue` si elle n'est pas connue. L'en-tête FITS contient `EXPTIME`,
+  `ISOSPEED`, `CCD-TEMP`, `DATE-OBS` (UTC), `BAYERPAT`, `INSTRUME`, `STACKCNT` (nombre de darks) et `ROWORDER`.
+- `darks/master/hot_pixels_ISO<iso>_<pose>s_T<température>.txt` : la liste des pixels chauds, ceux dont la valeur
+  dépasse la médiane de l'image + k fois l'écart absolu médian (MAD, au moins 1). k vaut 6 par défaut (paramètre
+  `hot_k` de `POST /api/darks`, de 2 à 50). Format texte : lignes de commentaire commençant par `#` (règle, médiane,
+  seuil, nombre), puis une ligne `x y value` par pixel, coordonnées dans le DNG depuis le coin haut gauche.
+
+Les DNG d'origine ne sont jamais modifiés. Le calcul se lit sur la page (*Calcul du master dark : x %*) ; le bouchon
+peut être retiré dès que les poses sont terminées. En cas d'échec du calcul, les DNG restent utilisables comme avant.
+
+**Utiliser le master dark dans Siril.** Le FITS s'utilise comme un master dark déjà empilé : il n'est pas nécessaire
+de réempiler les DNG de `darks/`.
+- Il ne convient qu'aux images prises au même ISO, au même temps de pose et à une température proche (le nom du
+  fichier les donne).
+- Siril accepte un master dark avec la commande `calibrate` et son option `-dark=` (fichier du master), et sait
+  détecter les pixels chauds à partir de ce master avec l'option `-cc=dark`. Options vérifiées dans le code source de
+  Siril (`src/core/command_def.h`, novembre 2026) ; pour la syntaxe complète d'un script, se reporter à la
+  documentation de Siril. Dans l'interface graphique, le master dark se choisit dans l'étape de prétraitement ; les
+  libellés dépendent de la version de Siril.
+- Le fichier des pixels chauds d'Aurion n'est pas au format « bad pixel map » de Siril (option `-cc=bpm`) : il sert
+  de rapport lisible et pour de futurs traitements d'Aurion.
+- Sens de l'image : le FITS est écrit lignes du bas vers le haut, avec `ROWORDER = 'BOTTOM-UP'`, comme Siril range
+  lui-même un RAW qu'il ouvre (lecture vérifiée dans son code source). Le master doit donc se superposer aux images
+  que Siril convertit depuis les DNG. **À valider** sur une vraie nuit : après calibration, les pixels chauds doivent
+  disparaître et non se dédoubler.
+
 ### Levier 4 : empilement au post-traitement
 Pour une image fixe très propre : empiler 4 à 8 RAW consécutifs dans Sequator ou Siril (le bruit baisse d'environ √N).
-Aurion peut aussi produire un JPEG empilé (`_STACKn.jpg`, réglage *Empilement JPEG*) pour un aperçu immédiat, avec
-rejet des valeurs extrêmes : avions et satellites disparaissent. Désactivé par défaut (calcul et batterie).
+Aurion peut aussi produire un JPEG empilé (`_STACKn.jpg`, réglage *Empilement JPEG*) pour un aperçu immédiat.
+Depuis la version 1.16.0, la moyenne se fait en lumière linéaire et rejette, pour chaque pixel, la valeur la plus
+haute puis la plus basse seulement si elles s'écartent de plus de 2,5 écarts types des autres : avions et satellites
+disparaissent sans jeter les bonnes images. Les images ne sont pas recalées sur les étoiles (prévu au lot 2b) : avec
+des poses longues, les étoiles de l'image empilée sont filées. Désactivé par défaut (calcul, mémoire et batterie).
 
 ## 2. Réglages timelapse
 

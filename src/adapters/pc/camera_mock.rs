@@ -38,6 +38,10 @@ pub struct CameraMock {
     real_exposure: bool,
     /// RAW captures requested (shared with the test).
     raw_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// RAW captures are real (small) DNG files instead of the RGB pixels.
+    dng_output: bool,
+    /// Camera metadata reported with every frame (sensor temperature).
+    reported_temp_c: Option<f64>,
 }
 
 /// Size of the full-resolution JPEG produced in `jpeg_output` mode.
@@ -58,7 +62,53 @@ impl CameraMock {
             jpeg_output: false,
             real_exposure: false,
             raw_calls: Default::default(),
+            dng_output: false,
+            reported_temp_c: None,
         }
+    }
+
+    /// RAW captures are readable DNG files (CFA mosaic built from the
+    /// synthetic frame, 12-bit values, black level 256), like rpicam-still.
+    pub fn with_dng_output(mut self) -> Self {
+        self.dng_output = true;
+        self
+    }
+
+    /// Every frame reports camera metadata, like `rpicam-still --metadata`:
+    /// exposure and gains as requested, this sensor temperature.
+    pub fn with_reported_metadata(mut self, sensor_temp_c: f64) -> Self {
+        self.reported_temp_c = Some(sensor_temp_c);
+        self
+    }
+
+    fn frame_metadata(&self, exposure: &ExposureSettings) -> FrameMetadata {
+        let m = FrameMetadata::requested(exposure);
+        match self.reported_temp_c {
+            None => m,
+            Some(t) => m.with_reported(crate::core::rpicam_metadata::RpicamMetadata {
+                exposure_time_us: Some(exposure.shutter_us),
+                analogue_gain: Some(exposure.iso as f64 / 100.0),
+                digital_gain: Some(1.0),
+                sensor_temp_c: Some(t),
+            }),
+        }
+    }
+
+    /// RGGB mosaic of an RGB frame as a DNG.
+    fn synthetic_dng(frame: &CaptureFrame) -> Vec<u8> {
+        let (w, h) = (frame.width, frame.height);
+        let px: Vec<u16> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                let c = match (y % 2, x % 2) {
+                    (0, 0) => 0,
+                    (1, 1) => 2,
+                    _ => 1,
+                };
+                256 + frame.data[(i * 3 + c) as usize] as u16 * 14
+            })
+            .collect();
+        crate::core::dng::test_dng_bytes(w, h, &px, &crate::core::dng::TestDngOptions::default())
     }
 
     /// Captures take their exposure time, like the real sensor.
@@ -176,11 +226,7 @@ impl CameraMock {
             width,
             height,
             format: CaptureFormat::Jpg,
-            metadata: FrameMetadata {
-                iso: exposure.iso,
-                shutter_us: exposure.shutter_us,
-                timestamp: crate::core::time::Timestamp::now(),
-            },
+            metadata: self.frame_metadata(exposure),
             raw_bytes: vec![],
         }
     }
@@ -244,11 +290,7 @@ impl CameraPort for CameraMock {
                 width: w,
                 height: h,
                 format: CaptureFormat::Jpg,
-                metadata: FrameMetadata {
-                    iso: exposure.iso,
-                    shutter_us: exposure.shutter_us,
-                    timestamp: crate::core::time::Timestamp::now(),
-                },
+                metadata: self.frame_metadata(exposure),
                 raw_bytes: vec![],
             })
         } else {
@@ -264,6 +306,9 @@ impl CameraPort for CameraMock {
         self.raw_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut frame = self.capture_jpg(exposure, tmp_dir).await?;
         frame.format = CaptureFormat::RawDng;
+        if self.dng_output {
+            frame.raw_bytes = Self::synthetic_dng(&frame);
+        }
         Ok(frame)
     }
 
@@ -272,15 +317,14 @@ impl CameraPort for CameraMock {
         exposure: &ExposureSettings,
         tmp_dir: &std::path::Path,
     ) -> Result<(CaptureFrame, CaptureFrame), CameraError> {
-        let raw = self.capture_raw(exposure, tmp_dir).await?;
-        let jpg = CaptureFrame {
-            data: raw.data.clone(),
-            width: raw.width,
-            height: raw.height,
-            format: CaptureFormat::Jpg,
-            metadata: raw.metadata.clone(),
-            raw_bytes: raw.raw_bytes.clone(),
-        };
+        // One capture gives both, like `rpicam-still --raw`
+        self.raw_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let jpg = self.capture_jpg(exposure, tmp_dir).await?;
+        let mut raw = jpg.clone();
+        raw.format = CaptureFormat::RawDng;
+        if self.dng_output {
+            raw.raw_bytes = Self::synthetic_dng(&jpg);
+        }
         Ok((raw, jpg))
     }
 

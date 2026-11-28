@@ -54,7 +54,7 @@ sur le terrain ou un appareil de test à l'atelier.
 
 | Dossier | Rôle | Fichiers clés |
 |---|---|---|
-| `src/core/` | règles métier pures, testables sans matériel | `orchestrator.rs` (déroulé de la nuit), `exposure.rs`, `detection.rs`, `denoise.rs`, `jpeg.rs` (EXIF), `night.rs` (reprise après coupure), `config.rs`, `validate.rs`, `session_logger.rs`, `state_machine.rs`, `models.rs` |
+| `src/core/` | règles métier pures, testables sans matériel | `orchestrator.rs` (déroulé de la nuit), `exposure.rs`, `detection.rs`, `denoise.rs`, `jpeg.rs` (EXIF), `dng.rs` (lecture des RAW), `fits.rs` (écriture FITS), `master_dark.rs`, `rpicam_metadata.rs`, `night.rs` (reprise après coupure), `config.rs`, `validate.rs`, `session_logger.rs`, `state_machine.rs`, `models.rs` |
 | `src/ports/` | contrats | `camera`, `storage`, `clock`, `network`, `system` |
 | `src/adapters/rpi/` | matériel réel | `camera_rpi.rs` (`rpicam-still`), `storage_rpi.rs` (fsync), `network_rpi.rs` et `system_rpi.rs` (via le helper) |
 | `src/adapters/pc/` | simulateurs | `CameraMock` (ciels synthétiques, pannes), `StorageMock`, `NetworkMock`, `SystemMock`, `TokioClock` (temps virtuel) |
@@ -148,11 +148,12 @@ Points clés :
 | `sessions/…/RAW/aurora_….dng` | DNG natifs, même nom que leur JPEG |
 | `sessions/…/JPG/aurora_…_STACK.jpg` | JPEG empilé (si activé) |
 | `sessions/…/thumbs/` | miniatures de galerie |
-| `sessions/…/event.jsonl` | un événement JSON par image (phase, exposition, score, numéro d'image) |
+| `sessions/…/event.jsonl` | un événement JSON par image (phase, exposition demandée, score, numéro d'image ; pose appliquée, gains analogique et numérique, température capteur quand la caméra les donne) |
 | `sessions/…/session.log` | journal lisible de la nuit (config effective, erreurs) |
 | `sessions/…/aurores.csv` | images avec aurore triées par score (image, heure, score, couleur, JPG, RAW), écrit en fin de nuit |
 | `aurora_*.jpg|dng`, `thumbs/` à la racine | captures des versions antérieures à 1.7, toujours affichées par la galerie |
-| `darks/` | séries de darks |
+| `darks/` | séries de darks (DNG d'origine, jamais modifiés) |
+| `darks/master/` | master dark FITS 16 bits et carte des pixels chauds de chaque série (`master_dark_ISO…_…s_T….fits`, `hot_pixels_….txt`) |
 | `aurion-reglages.json` | copie des réglages (sans le mot de passe du partage de connexion), reprise au premier démarrage d'une carte SD neuve |
 | `aurion-reset-wifi.txt` | déposé par l'utilisateur : remet le mot de passe Wi-Fi d'usine au démarrage (renommé `.done`) |
 
@@ -257,7 +258,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET/POST /api/config` | configuration (mot de passe masqué) |
 | `GET/POST /api/presets`, `POST /api/presets/:name/apply`, `DELETE /api/presets/:name` | presets |
 | `GET /api/preview`, `POST /api/preview/capture` | aperçu |
-| `GET/POST /api/darks` | série de darks |
+| `GET/POST /api/darks` | série de darks, puis calcul du master dark (progression dans `master`) |
 | `GET /api/darks/reminder`, `POST /api/darks/reminder/dismiss` | rappel des darks de la dernière nuit (ou `null`), l'ignorer |
 | `GET /api/storage`, `/api/logs`, `/api/diagnostics` | supervision |
 | `GET/POST /api/selftest`, `POST /api/selftest/wake`, `GET /api/report` | vérification complète du matériel, test de rallumage (Pi 5), rapport texte |

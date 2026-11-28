@@ -240,6 +240,24 @@ try {
     await page.waitForSelector('.toast.error');
   });
 
+  await step('preview : progression puis résultat du master dark', async () => {
+    // Simulated answers of GET /api/darks: no camera on the test machine
+    let answer = {
+      done: 10, total: 10, iso: 800, shutter_us: 5000000, running: true, error: null, temp_c: 33, temp_source: 'capteur',
+      master: { state: 'running', rows_done: 1520, rows_total: 3040 },
+    };
+    await page.route('**/api/darks', route => route.request().method() === 'GET'
+      ? route.fulfill({ contentType: 'application/json', body: JSON.stringify(answer) })
+      : route.continue());
+    await page.goto(base + '/preview.html');
+    await page.waitForFunction(() => document.getElementById('darkStatus').textContent.includes('master dark : 50 %'));
+    answer = { ...answer, running: false, master: { state: 'done', rows_done: 3040, rows_total: 3040, hot_pixels: 12,
+      fits: 'darks/master/master_dark_ISO800_5.0s_T35.fits' } };
+    await page.evaluate(() => pollDarks());
+    await page.waitForFunction(() => document.getElementById('darkStatus').textContent.includes('master dark (12 pixels chauds)'));
+    await page.unroute('**/api/darks');
+  });
+
   await step('presets : créer, appliquer, supprimer', async () => {
     await page.goto(base + '/presets.html');
     await page.waitForSelector('.preset-card');

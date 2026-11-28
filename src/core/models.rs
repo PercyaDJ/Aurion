@@ -90,9 +90,41 @@ pub enum CaptureFormat {
 
 #[derive(Debug, Clone)]
 pub struct FrameMetadata {
+    /// Requested ISO and exposure time (what Aurion asked for).
     pub iso: u32,
     pub shutter_us: u64,
     pub timestamp: crate::core::time::Timestamp,
+    /// Values reported by the camera (`rpicam-still --metadata`), None when
+    /// unknown (PC, older rpicam-apps, missing key).
+    pub exposure_time_us: Option<u64>,
+    pub analogue_gain: Option<f64>,
+    pub digital_gain: Option<f64>,
+    /// Sensor temperature (°C) from the camera module itself.
+    pub sensor_temp_c: Option<f64>,
+}
+
+impl FrameMetadata {
+    /// Requested settings only, nothing reported by the camera yet.
+    pub fn requested(exposure: &ExposureSettings) -> Self {
+        Self {
+            iso: exposure.iso,
+            shutter_us: exposure.shutter_us,
+            timestamp: crate::core::time::Timestamp::now(),
+            exposure_time_us: None,
+            analogue_gain: None,
+            digital_gain: None,
+            sensor_temp_c: None,
+        }
+    }
+
+    /// Add the values read from the rpicam-still metadata file.
+    pub fn with_reported(mut self, m: crate::core::rpicam_metadata::RpicamMetadata) -> Self {
+        self.exposure_time_us = m.exposure_time_us;
+        self.analogue_gain = m.analogue_gain;
+        self.digital_gain = m.digital_gain;
+        self.sensor_temp_c = m.sensor_temp_c;
+        self
+    }
 }
 
 // ─── Exposure ──────────────────────────────────────────────
@@ -220,7 +252,7 @@ impl DetectionResult {
 
 // ─── Session Event (NDJSON logging) ─────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionEvent {
     pub timestamp: String,
     pub phase: String,
@@ -242,6 +274,17 @@ pub struct SessionEvent {
     /// the real overhead of `rpicam-still` beyond the exposure itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_ms: Option<u64>,
+    /// Values reported by the camera for this frame (`rpicam-still
+    /// --metadata`): exposure time really applied (µs), analogue and digital
+    /// gains, sensor temperature (°C). Absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure_applied_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analogue_gain: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digital_gain: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_temp_c: Option<f64>,
 }
 
 // ─── Time Range ────────────────────────────────────────────

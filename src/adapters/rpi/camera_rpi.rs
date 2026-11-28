@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
@@ -75,10 +75,14 @@ impl CameraRpi {
         exposure: &ExposureSettings,
         output_path: &str,
         raw: bool,
+        metadata_path: &std::path::Path,
     ) -> Command {
         let mut cmd = Command::new("rpicam-still");
         cmd.arg("--nopreview");
         cmd.arg("-o").arg(output_path);
+        // Values really applied (exposure, gains) and sensor temperature
+        cmd.arg("--metadata").arg(metadata_path);
+        cmd.arg("--metadata-format").arg("json");
 
         // Exposure settings
         let shutter_us = exposure.shutter_us;
@@ -118,6 +122,21 @@ impl CameraRpi {
         let shutter_secs = exposure.shutter_us.div_ceil(1_000_000);
         shutter_secs * 3 + 20
     }
+
+    /// Metadata file of the current capture (removed before each capture).
+    fn metadata_path() -> std::path::PathBuf {
+        std::path::Path::new("/tmp").join(format!("aurion_{}_metadata.json", std::process::id()))
+    }
+
+    /// Requested settings plus what the camera reported. A missing or
+    /// unreadable metadata file only leaves the reported fields empty.
+    fn frame_metadata(exposure: &ExposureSettings) -> FrameMetadata {
+        let reported = crate::core::rpicam_metadata::read(&Self::metadata_path());
+        if reported.is_empty() {
+            warn!("CameraRpi: no camera metadata for this frame");
+        }
+        FrameMetadata::requested(exposure).with_reported(reported)
+    }
 }
 
 #[async_trait]
@@ -134,11 +153,12 @@ impl CameraPort for CameraRpi {
         let tmp_path = std::path::Path::new("/tmp").join(format!("aurion_{}_capture.jpg", pid));
         let tmp_path_str = tmp_path.to_string_lossy().to_string();
         let _ = std::fs::remove_file(&tmp_path); // never re-read a previous frame
+        let _ = std::fs::remove_file(Self::metadata_path());
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
         let output = timeout(
             Duration::from_secs(timeout_secs),
-            self.build_capture_command(exposure, &tmp_path_str, false).kill_on_drop(true).output(),
+            self.build_capture_command(exposure, &tmp_path_str, false, &Self::metadata_path()).kill_on_drop(true).output(),
         )
         .await
         .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still timeout after {}s", timeout_secs)))?
@@ -165,11 +185,7 @@ impl CameraPort for CameraRpi {
             width: w,
             height: h,
             format: CaptureFormat::Jpg,
-            metadata: FrameMetadata {
-                iso: exposure.iso,
-                shutter_us: exposure.shutter_us,
-                timestamp: crate::core::time::Timestamp::now(),
-            },
+            metadata: Self::frame_metadata(exposure),
             raw_bytes: data, // original JPEG bytes — used for lossless save
         })
     }
@@ -187,13 +203,14 @@ impl CameraPort for CameraRpi {
         // Never re-read the files of a previous frame if this capture fails.
         let _ = std::fs::remove_file(&tmp_jpg);
         let _ = std::fs::remove_file(&tmp_dng);
+        let _ = std::fs::remove_file(Self::metadata_path());
 
         let timeout_secs = Self::capture_timeout_secs(exposure);
 
         // rpicam-still --raw produces a DNG alongside the JPG
         let output = timeout(
             Duration::from_secs(timeout_secs),
-            self.build_capture_command(exposure, &tmp_jpg_str, true).kill_on_drop(true).output(),
+            self.build_capture_command(exposure, &tmp_jpg_str, true, &Self::metadata_path()).kill_on_drop(true).output(),
         )
         .await
         .map_err(|_| CameraError::CaptureFailed(format!("rpicam-still RAW timeout after {}s", timeout_secs)))?
@@ -219,11 +236,7 @@ impl CameraPort for CameraRpi {
             width: 0,
             height: 0,
             format: CaptureFormat::RawDng,
-            metadata: FrameMetadata {
-                iso: exposure.iso,
-                shutter_us: exposure.shutter_us,
-                timestamp: crate::core::time::Timestamp::now(),
-            },
+            metadata: Self::frame_metadata(exposure),
             raw_bytes: dng_data, // original DNG bytes — used for lossless save
         })
     }

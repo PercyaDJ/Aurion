@@ -166,6 +166,7 @@ mod tests {
             moon_mask_active: false,
             frame_number: None,
             capture_ms: None,
+            ..Default::default()
         };
 
         logger.log_event(&event).unwrap();
@@ -203,6 +204,7 @@ mod tests {
                 moon_mask_active: false,
                 frame_number: Some(0),
                 capture_ms: None,
+                ..Default::default()
             };
             // Only 1 line (below flush threshold of 10) — relies on Drop to flush
             logger.log_event(&event).unwrap();

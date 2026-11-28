@@ -12,3 +12,7 @@ pub mod night;
 pub mod layout;
 pub mod dark_reminder;
 pub mod time;
+pub mod rpicam_metadata;
+pub mod dng;
+pub mod fits;
+pub mod master_dark;
