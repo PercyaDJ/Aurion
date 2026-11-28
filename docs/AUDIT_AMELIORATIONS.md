@@ -101,7 +101,17 @@ que de 5 à 10 %. Restent : la soustraction du master dark sur la vignette d'ana
 d'aurore sur le RAW binné (IQ-6, point 4), un modèle de recalage sur la sphère avec calibration de l'objectif si les
 résidus réels l'exigent. Points à valider sur le matériel : format réel du DNG, clés de métadonnées, temps de calcul du
 master dark sur Pi 4, nombre d'étoiles détectées et résidus du recalage avec l'objectif 2,7 mm, temps de recalage et
-mémoire sur Pi 4, rendu des aurores mobiles dans l'image empilée.
+mémoire sur Pi 4, rendu des aurores mobiles dans l'image empilée. Lot 3a réalisé en version 1.18.0 (étapes A et C
+de l'annexe A, 2.3) : score de surface sur une grille de 16 x 12 cases, fond du ciel retiré, étalement relatif au
+fond (D-8, D-3) ; tampon de pré-déclenchement de 3 images et vignettes de surveillance avec leur score dans
+`event.jsonl` (D-9) ; étiquetage en un geste dans la galerie (`labels.csv`) ; lieu choisi une fois (I-5) ;
+éphémérides du Soleil et de la Lune en Rust pur, portes crépusculaire et lunaire, masque des taches blanches
+saturées (D-4, D-5) ; plage horaire « du crépuscule à l'aube ». Restent du lot 3 : soustraction du master dark réduit
+sur la vignette d'analyse (IQ-6, point 4), ciel clair par comptage d'étoiles avec `stars.rs` (il faut décoder
+l'image pleine résolution, coût à mesurer dans `aurion bench`), masque lunaire géométrique (orientation de la caméra
+à connaître), étiquetage des vignettes de surveillance, étapes B, D, E et F. Points à valider sur le matériel :
+seuils du score de surface sur de vraies nuits, taux de faux positifs au crépuscule et sous la Lune, facteurs des
+portes, place réelle des vignettes par nuit, taille réelle du JPEG gardé par le tampon.
 
 | Lot | Contenu | Matériel | Effort |
 |---|---|---|---|

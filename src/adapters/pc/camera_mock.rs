@@ -17,6 +17,12 @@ pub enum SkyPattern {
     Aurora,
     /// Aurora on camera frames `from..to` only (one aurora episode).
     Burst { from: usize, to: usize },
+    /// Bright twilight sky, purple under a daylight white balance (red and
+    /// blue above the green): looks violet to the colour rules, no aurora.
+    Twilight,
+    /// Faint aurora low on the horizon: grey sky (luminance 40) with a band
+    /// of green dominance 20 on the lowest 20 % of the 65 % sky zone.
+    LowBand,
 }
 
 /// PC mock camera: reads JPG files from a test data directory.
@@ -192,6 +198,32 @@ impl CameraMock {
         let height = 240u32;
         let mut data = Vec::with_capacity((width * height * 3) as usize);
 
+        match self.pattern {
+            SkyPattern::Twilight | SkyPattern::LowBand => {
+                for y in 0..height {
+                    let f = y as f64 / height as f64;
+                    let px: [u8; 3] = match self.pattern {
+                        SkyPattern::Twilight => [90, 60, 110],
+                        _ if (0.52..0.65).contains(&f) => [30, 50, 30],
+                        _ if f >= 0.65 => [12, 12, 12], // ground
+                        _ => [40, 40, 40],
+                    };
+                    for _ in 0..width {
+                        data.extend_from_slice(&px);
+                    }
+                }
+                return CaptureFrame {
+                    data,
+                    width,
+                    height,
+                    format: CaptureFormat::Jpg,
+                    metadata: self.frame_metadata(exposure),
+                    raw_bytes: vec![],
+                };
+            }
+            _ => {}
+        }
+
         for y in 0..height {
             for x in 0..width {
                 // Base: dark sky with slight gradient
@@ -203,6 +235,7 @@ impl CameraMock {
                     SkyPattern::Dark => false,
                     SkyPattern::Aurora => true,
                     SkyPattern::Burst { from, to } => (from..to).contains(&index),
+                    SkyPattern::Twilight | SkyPattern::LowBand => false,
                 };
 
                 if is_aurora_frame && y < height * 65 / 100 {

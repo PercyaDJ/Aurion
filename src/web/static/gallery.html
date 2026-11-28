@@ -179,6 +179,32 @@
             gap: 0.75rem;
         }
 
+        .lightbox-labels {
+            margin-top: 0.75rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.4rem;
+            max-width: 95%;
+        }
+
+        .label-btn.active {
+            background: var(--accent, #3fb68b);
+            color: #000;
+            border-color: transparent;
+        }
+
+        .label-badge {
+            position: absolute;
+            top: 0.3rem;
+            left: 0.3rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            font-size: 0.6rem;
+        }
+
         .empty-state {
             text-align: center;
             padding: 3rem 1rem;
@@ -335,6 +361,13 @@
         <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
         <img id="lightboxImg" src="" alt="Preview">
         <div class="lightbox-info" id="lightboxInfo"></div>
+        <div class="lightbox-labels" id="lightboxLabels" onclick="event.stopPropagation()">
+            <button class="btn btn-outline btn-sm label-btn" data-label="aurore">Aurore</button>
+            <button class="btn btn-outline btn-sm label-btn" data-label="pas_aurore">Pas d'aurore</button>
+            <button class="btn btn-outline btn-sm label-btn" data-label="nuages">Nuages</button>
+            <button class="btn btn-outline btn-sm label-btn" data-label="lune">Lune</button>
+            <button class="btn btn-outline btn-sm label-btn" data-label="lumiere_parasite">Lumière parasite</button>
+        </div>
         <div class="lightbox-actions">
             <a class="btn btn-primary btn-sm" id="lightboxDownload" href="#" download>
                 ⬇️ Télécharger
@@ -559,7 +592,58 @@
         let selectedFiles = new Set();
         let selectMode = false;
 
+        // ── Labels (labels.csv of each night) ─────────────────
+        const LABEL_NAMES = { aurore: 'Aurore', pas_aurore: "Pas d'aurore", nuages: 'Nuages', lune: 'Lune', lumiere_parasite: 'Lumière parasite' };
+        let labels = {};
+
+        async function loadLabels() {
+            try { labels = await (await fetch('/api/gallery/labels')).json(); } catch (_) { labels = {}; }
+        }
+
+        function labelBadge(filename) {
+            const l = labels[filename];
+            return l ? `<span class="label-badge" data-label="${l}">${aurionEscape(LABEL_NAMES[l] || l)}</span>` : '';
+        }
+
+        function showLabelButtons(filename) {
+            document.querySelectorAll('#lightboxLabels .label-btn').forEach(b =>
+                b.classList.toggle('active', labels[filename] === b.dataset.label));
+        }
+
+        /** One gesture: label the image shown, then show the next one. */
+        async function labelCurrent(label) {
+            const filename = currentLightboxFile;
+            const value = labels[filename] === label ? '' : label; // second tap removes it
+            try {
+                await apiFetch('/api/gallery/labels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename, label: value }),
+                });
+            } catch (e) {
+                showToast('Étiquette non enregistrée : ' + e.message, 'error');
+                return;
+            }
+            if (value) labels[filename] = value; else delete labels[filename];
+            const item = document.querySelector(`.gallery-item[data-filename="${CSS.escape(filename)}"]`);
+            if (item) {
+                item.querySelector('.label-badge')?.remove();
+                if (value) item.querySelector('.select-checkbox').insertAdjacentHTML('afterend', labelBadge(filename));
+            }
+            showLabelButtons(filename);
+            if (!value) return;
+            const i = allImages.findIndex(im => im.filename === filename);
+            const next = i >= 0 ? allImages[i + 1] : null;
+            if (next) {
+                const ext = next.filename.split('.').pop().toLowerCase();
+                openLightbox(next.filename, next.size_display, next.modified, ext === 'dng' || ext === 'raw');
+            }
+        }
+
+        document.querySelectorAll('#lightboxLabels .label-btn').forEach(b => b.onclick = () => labelCurrent(b.dataset.label));
+
         async function loadGallery() {
+            await loadLabels();
             try {
                 const res = await fetch('/api/gallery');
                 const data = await res.json();
@@ -608,7 +692,7 @@
                     html += `
                         <div class="gallery-item${selectedClass}" data-filename="${img.filename}"
                              onclick="handleItemClick(event, '${img.filename}', '${img.size_display}', '${img.modified}', true)">
-                            <div class="select-checkbox">✓</div>
+                            <div class="select-checkbox">✓</div>${labelBadge(img.filename)}
                             <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
                                  onload="if (!this.naturalWidth) this.onerror()"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -623,7 +707,7 @@
                     html += `
                         <div class="gallery-item${selectedClass}" data-filename="${img.filename}"
                              onclick="handleItemClick(event, '${img.filename}', '${img.size_display}', '${img.modified}', false)">
-                            <div class="select-checkbox">✓</div>
+                            <div class="select-checkbox">✓</div>${labelBadge(img.filename)}
                             <img src="/api/gallery/thumbnail/${img.filename}" alt="${img.filename}" loading="lazy"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                             <div class="raw-placeholder" style="display:none;">
@@ -862,6 +946,7 @@
             download.href = `/api/gallery/${filename}`;
             download.download = filename;
             deleteBtn.onclick = () => { closeLightbox(); confirmDeleteSingle(filename); };
+            showLabelButtons(filename);
 
             lightbox.classList.add('active');
         }

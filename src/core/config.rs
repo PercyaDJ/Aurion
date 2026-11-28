@@ -59,6 +59,29 @@ pub struct AppConfig {
     /// Wi-Fi used for updates from GitHub (phone hotspot or home Wi-Fi).
     #[serde(default)]
     pub online_update: OnlineUpdateConfig,
+    /// Place of the camera (Sun and Moon gates, automatic night). `None`:
+    /// not chosen yet, no gate.
+    #[serde(default)]
+    pub location: Option<LocationConfig>,
+}
+
+/// Place chosen once in *Réglages* (list of sites, or latitude/longitude).
+/// The browser geolocation needs HTTPS, absent on `http://192.168.4.1`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocationConfig {
+    /// Site name shown to the user ("Tromsø", or "Autre lieu").
+    #[serde(default)]
+    pub name: String,
+    /// Degrees, north positive.
+    pub latitude: f64,
+    /// Degrees, east positive.
+    pub longitude: f64,
+}
+
+impl LocationConfig {
+    pub fn place(&self) -> crate::core::sky::Place {
+        crate::core::sky::Place { latitude: self.latitude, longitude: self.longitude }
+    }
 }
 
 /// Network the Pi joins for a few minutes to download an update.
@@ -159,7 +182,21 @@ pub struct DetectionConfig {
     /// Pixel luminance above which it is considered "moon" (default 240.0)
     #[serde(default = "default_moon_lum")]
     pub moon_luminance_threshold: f64,
+    /// *Aurores seulement*: last watch frames kept in memory and written to
+    /// the key when the aurora is confirmed (start of the aurora kept).
+    /// 0 = off. Default 3.
+    #[serde(default = "default_pretrigger_frames")]
+    pub pretrigger_frames: u32,
+    /// Save the analysis thumbnail of the watch frames (about one per
+    /// minute) in `sessions/<night>/watch/`: material for a data set.
+    #[serde(default = "default_true")]
+    pub watch_thumbnails: bool,
 }
+
+fn default_pretrigger_frames() -> u32 { 3 }
+fn default_true() -> bool { true }
+/// Most watch frames kept before the confirmation (memory: one full JPEG each).
+pub const MAX_PRETRIGGER_FRAMES: u32 = 10;
 
 fn default_area_min() -> f64 { 1.0 }
 fn default_hysteresis_on() -> f64 { 1.0 }
@@ -251,6 +288,13 @@ pub struct TimeRangeConfig {
     /// If set, use timer mode: detect for N hours then shutdown. Overrides start/end.
     #[serde(default)]
     pub duration_hours: Option<f64>,
+    /// "Du crépuscule à l'aube": the range is computed each night from the
+    /// place (Sun below -12°); start/end are the fallback when no place is
+    /// chosen or the Sun never goes that low. Ignored by the timer mode.
+    /// Written only when on: the format of the files already on cameras
+    /// stays the same (tests/time_contract.rs).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_twilight: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,6 +369,7 @@ impl AppConfig {
             preset_name: preset_name.to_string(),
             expedition: self.expedition.clone(),
             online_update: self.online_update.clone(),
+            location: self.location.clone(),
         }
     }
 
@@ -416,6 +461,23 @@ impl AppConfig {
             return Err(ConfigError::ValidationError(
                 "Les seuils de détection doivent être ≥ 0".into(),
             ));
+        }
+
+        if self.detection.pretrigger_frames > MAX_PRETRIGGER_FRAMES {
+            return Err(ConfigError::ValidationError(format!(
+                "Le tampon de pré-déclenchement compte au plus {} images",
+                MAX_PRETRIGGER_FRAMES
+            )));
+        }
+        if let Some(ref l) = self.location {
+            if !(-90.0..=90.0).contains(&l.latitude) || !(-180.0..=180.0).contains(&l.longitude) {
+                return Err(ConfigError::ValidationError(
+                    "Lieu : latitude entre -90 et 90°, longitude entre -180 et 180°".into(),
+                ));
+            }
+            if l.name.chars().count() > 60 || l.name.chars().any(|c| c.is_control()) {
+                return Err(ConfigError::ValidationError("Nom du lieu trop long ou invalide".into()));
+            }
         }
 
         // ─── Capture ─────────────────────────────────────────
@@ -544,6 +606,8 @@ impl Default for AppConfig {
                 blue_threshold: 8.0,
                 moon_mask_enabled: true,
                 moon_luminance_threshold: 240.0,
+                pretrigger_frames: default_pretrigger_frames(),
+                watch_thumbnails: true,
             },
             capture: CaptureConfig {
                 watch_interval_secs: 60,
@@ -559,6 +623,7 @@ impl Default for AppConfig {
                 start: hm(21, 0),
                 end: hm(6, 0),
                 duration_hours: None,
+                auto_twilight: false,
             },
             storage: StorageConfig {
                 mount_point: "/mnt/capture".into(),
@@ -574,6 +639,7 @@ impl Default for AppConfig {
             preset_name: "FullDark".into(),
             expedition: ExpeditionConfig::default(),
             online_update: OnlineUpdateConfig::default(),
+            location: None,
         }
     }
 }

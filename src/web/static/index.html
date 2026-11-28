@@ -33,6 +33,7 @@
             <div class="night-moon">🌌</div>
             <h1 id="runningTitle">Nuit en cours</h1>
             <p id="runningText"></p>
+            <p id="gateText" class="gate-text" hidden></p>
             <ul class="plain-list">
                 <li>Laissez Aurion allumé et ne touchez plus à la caméra.</li>
                 <li>Il s'éteindra seul à la fin de la nuit.</li>
@@ -219,6 +220,14 @@
                     b.onclick = () => aurionPrepareUsbKey(loadPreflight);
                     li.lastChild.appendChild(b);
                 }
+                if (c.action === 'choose_place') {
+                    const a = document.createElement('a');
+                    a.className = 'btn btn-outline btn-sm check-action';
+                    a.id = 'choosePlaceBtn';
+                    a.href = '/settings.html#lieu';
+                    a.textContent = 'Choisir le lieu';
+                    li.lastChild.appendChild(a);
+                }
                 ul.appendChild(li);
             }
             const badge = document.getElementById('readyBadge');
@@ -330,6 +339,9 @@
             try {
                 preflight = await (await apiFetch('/api/preflight')).json();
                 showPhase(preflight.phase);
+                const gate = document.getElementById('gateText');
+                gate.hidden = !preflight.detection_gate;
+                gate.textContent = preflight.detection_gate ? 'Détection : ' + preflight.detection_gate : '';
                 renderChecks(preflight);
                 maybeAutoSelftest();
                 // The Pi is not sure of its clock (rebooted since): send it again

@@ -558,6 +558,54 @@ pub async fn get_best_auroras(State(state): State<AppState>, Query(q): Query<Bes
     Json(tokio::task::spawn_blocking(move || best_auroras(&mount, limit)).await.unwrap_or_default())
 }
 
+// ─── Labels (data set) ─────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LabelRequest {
+    pub filename: String,
+    /// One of [`crate::core::labels::LABELS`], or empty to remove.
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Labels of every night: image name → label.
+pub fn all_labels(mount: &FsPath) -> BTreeMap<String, String> {
+    session_names(mount)
+        .into_iter()
+        .flat_map(|s| crate::core::labels::read(&layout::night_dir(mount, &s)))
+        .map(|(image, (label, _))| (image, label))
+        .collect()
+}
+
+pub async fn get_labels(State(state): State<AppState>) -> Json<BTreeMap<String, String>> {
+    let mount = mount_point(&state).await;
+    Json(tokio::task::spawn_blocking(move || all_labels(&mount)).await.unwrap_or_default())
+}
+
+/// Label one image: written in `labels.csv` of its night folder.
+pub async fn set_label(State(state): State<AppState>, Json(req): Json<LabelRequest>) -> Response {
+    if !validate::is_safe_image_name(&req.filename) {
+        return bad_request("Nom de fichier invalide");
+    }
+    let mount = mount_point(&state).await;
+    let now = crate::core::time::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let image = resolve_image(&mount, &req.filename).ok_or((StatusCode::NOT_FOUND, "Image introuvable".to_string()))?;
+        let session = image.info.session.ok_or((
+            StatusCode::BAD_REQUEST,
+            "Image hors d'un dossier de nuit (version antérieure à 1.7) : pas d'étiquette".to_string(),
+        ))?;
+        crate::core::labels::set(&layout::night_dir(&mount, &session), &req.filename, &req.label, &now)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))
+    })
+    .await
+    .unwrap_or_else(|e| Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())));
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err((code, msg)) => (code, msg).into_response(),
+    }
+}
+
 // ─── Single image ──────────────────────────────────────────
 
 fn content_type_for(name: &str) -> &'static str {
@@ -917,10 +965,23 @@ pub async fn download_gallery_session_zip(
             (format!("{}/{}/{}", session, sub, f.info.filename), f.path)
         })
         .collect();
-    for log in ["event.jsonl", "session.log", layout::AURORA_INDEX] {
+    for log in ["event.jsonl", "session.log", layout::AURORA_INDEX, layout::LABELS_FILE] {
         let p = session_dir.join(log);
         if p.is_file() {
             entries.push((format!("{}/{}", session, log), p));
+        }
+    }
+    // Watch thumbnails of the night (data set, 1.18)
+    if only.is_none() {
+        if let Ok(rd) = std::fs::read_dir(session_dir.join(layout::WATCH_DIR)) {
+            let mut watch: Vec<(String, PathBuf)> = rd
+                .filter_map(|e| e.ok())
+                .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+                .filter(|(n, p)| validate::is_safe_image_name(n) && p.is_file())
+                .map(|(n, p)| (format!("{}/{}/{}", session, layout::WATCH_DIR, n), p))
+                .collect();
+            watch.sort();
+            entries.extend(watch);
         }
     }
     if entries.is_empty() {

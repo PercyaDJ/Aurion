@@ -60,6 +60,8 @@ pub struct StatusResponse {
     pub time_synced: bool,
     /// Seconds before an interrupted night resumes on its own.
     pub resume_in_secs: Option<u64>,
+    /// Sun/Moon gate of the detection in force (night in progress).
+    pub detection_gate: Option<String>,
 }
 
 pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
@@ -106,7 +108,37 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         default_password: config.network.password == DEFAULT_WIFI_PASSWORD,
         time_synced: state.time_synced.load(std::sync::atomic::Ordering::Relaxed),
         resume_in_secs: resume_in_secs(&state).await,
+        detection_gate: state.detection_gate.read().await.clone(),
     })
+}
+
+/// Home screen check of the place and of the coming night (Sun, Moon).
+pub fn sky_check(config: &AppConfig, now: &crate::core::time::ZonedDateTime) -> Check {
+    let Some(loc) = &config.location else {
+        let mut c = check("sky", "warn", "Lieu non choisi",
+            "Choisissez le lieu dans Réglages : la détection tiendra compte du crépuscule et de la Lune, \
+             et la nuit peut aller du crépuscule à l'aube.");
+        c.action = Some("choose_place");
+        return c;
+    };
+    let s = crate::core::sky::night_summary(now, loc.place());
+    let dark = match &s.dark {
+        Some((d, e)) => format!("ciel noir (Soleil sous {}°) de {} à {}", crate::core::sky::TWILIGHT_GATE_DEG,
+            d.strftime("%H:%M"), e.strftime("%H:%M")),
+        None => format!("le Soleil ne descend pas sous {}° : détection aux seuils relevés toute la nuit", crate::core::sky::TWILIGHT_GATE_DEG),
+    };
+    let moon = if s.moon_up_hours < 0.2 {
+        "Lune sous l'horizon".to_string()
+    } else {
+        format!("Lune levée environ {} sur cette période, éclairée à {:.0} %", fmt_hours(s.moon_up_hours), s.moon_illumination * 100.0)
+    };
+    let place = if loc.name.is_empty() { format!("{:.2}, {:.2}", loc.latitude, loc.longitude) } else { loc.name.clone() };
+    let mut detail = format!("{}. Lieu : {}.", moon, place);
+    if config.time_range.auto_twilight && config.time_range.duration_hours.is_none() {
+        detail.push_str(" La nuit suivra cette plage (du crépuscule à l'aube).");
+    }
+    let title = format!("Ce soir : {}", dark);
+    check("sky", "ok", title, detail)
 }
 
 /// USB keys plugged into the Pi, and the state of the capture drive.
@@ -207,6 +239,8 @@ pub struct Preflight {
     pub nights_capacity: Option<f64>,
     /// The board can switch itself on for the next night (Raspberry Pi 5).
     pub wake_capable: bool,
+    /// Sun/Moon gate of the detection in force (night in progress).
+    pub detection_gate: Option<String>,
 }
 
 fn check(id: &'static str, level: &'static str, title: impl Into<String>, detail: impl Into<String>) -> Check {
@@ -385,6 +419,9 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         }
     }
 
+    // Place, Sun and Moon of the coming night
+    checks.push(sky_check(&config, &crate::core::time::now_local()));
+
     // Security
     if config.network.password == DEFAULT_WIFI_PASSWORD {
         checks.push(check("password", "warn", "Mot de passe Wi-Fi d'usine",
@@ -428,6 +465,7 @@ pub async fn get_preflight(State(state): State<AppState>) -> Json<Preflight> {
         auto_start_blocked,
         nights_capacity,
         wake_capable,
+        detection_gate: state.detection_gate.read().await.clone(),
     })
 }
 

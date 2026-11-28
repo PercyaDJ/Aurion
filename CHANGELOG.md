@@ -1,5 +1,46 @@
 # Journal des versions
 
+## 1.18.0
+
+Objectif : une détection qui ne manque plus les aurores faibles sur l'horizon, qui ne se déclenche plus au
+crépuscule, et dont chaque nuit laisse de quoi mesurer sa justesse (lot 3a de
+[l'audit de novembre 2026](docs/AUDIT_AMELIORATIONS.md)).
+
+- **Aurores faibles sur l'horizon détectées** : le ciel est découpé en 192 cases. Le score mesure les cases plus
+  colorées que le fond du ciel, au lieu de faire la moyenne sur tout le ciel, partie noire comprise. Exemple : une
+  bande verte faible sur le bas du ciel (20 % de la zone analysée) obtenait un score de 0,27, sous le seuil. Elle
+  obtient maintenant 1,33 et déclenche.
+- **Fond du ciel retiré** : une légère teinte uniforme (pollution lumineuse, lueur du ciel) est mesurée sur le quart
+  le moins coloré du ciel, puis retirée de chaque case. Une aurore qui couvre tout le ciel est toujours vue. Le
+  contrôle d'étalement compte les cases en excès par rapport à ce fond, et non plus un seuil fixe.
+- **Lieu de la caméra** (*Réglages*, choisi une fois) : liste de sites d'aurores, ou latitude et longitude. La
+  position du téléphone n'est pas utilisable sur le Wi-Fi Aurion, faute de HTTPS. L'accueil affiche le ciel du
+  soir : heures de ciel noir et Lune (durée levée, part éclairée).
+- **Pas de fausse aurore au crépuscule** (une fois le lieu choisi) : quand le Soleil est au-dessus de -6°, la détection est suspendue. Entre
+  -6° et -12°, il faut une aurore deux fois plus forte. Un ciel violet de crépuscule ne lance plus la capture en
+  mode *Aurores seulement*.
+- **Lune** : quand la Lune est levée, les seuils sont relevés selon la part éclairée (jusqu'à 1,5 fois à la pleine
+  Lune). Les taches blanches saturées (la Lune et son halo, les lampadaires) sont masquées. La raison de chaque
+  porte est écrite dans `session.log` et affichée sur l'accueil pendant la nuit.
+- **Du crépuscule à l'aube** (case à cocher dans *Réglages*) : la plage horaire se calcule chaque soir d'après le
+  lieu (Soleil sous -12°). Les heures réglées servent de secours quand le lieu n'est pas choisi, ou quand le ciel ne
+  devient pas assez noir (été aux hautes latitudes).
+- **Début de l'aurore gardé en mode *Aurores seulement*** : les 3 dernières images de surveillance restent en
+  mémoire, environ 13 Mo avec des JPEG de 4 Mo (taille type, à mesurer). À la confirmation, elles sont écrites sur
+  la clé en JPEG, numérotées avant la première image de capture. Avant, les 2 à 3 premières minutes de l'aurore
+  étaient perdues. Le nombre d'images se règle dans la configuration (`pretrigger_frames`, de 0 à 10).
+- **Vignettes de surveillance** : une par minute environ, dans `sessions/<nuit>/watch/`, avec leur score, la part de
+  ciel en excès, le fond, et les hauteurs du Soleil et de la Lune dans `event.jsonl`. Elles sont la matière du futur
+  jeu de données. Place prévue : environ 1 Mo par heure de surveillance, à mesurer sur une vraie nuit.
+- **Étiquetage dans *Photos*** : dans l'image agrandie, un bouton par étiquette (Aurore, Pas d'aurore, Nuages, Lune,
+  Lumière parasite). Un appui enregistre l'étiquette et passe à l'image suivante. Les étiquettes vont dans
+  `sessions/<nuit>/labels.csv`, sont incluses dans le ZIP de la nuit, et un second appui retire l'étiquette.
+- **Éphémérides sans dépendance** : position du Soleil et de la Lune par les formules de faible précision de
+  l'*Astronomical Almanac*, vérifiées sur les exemples du livre de Meeus (écart de 0,006° pour le Soleil, de 0,1°
+  pour la Lune).
+- **Seuils à valider sur de vraies nuits** : score de surface, facteurs du crépuscule et de la Lune, taille réelle
+  des vignettes.
+
 ## 1.17.0
 
 Objectif : des étoiles ponctuelles dans le JPEG empilé, grâce au recalage des images sur les étoiles, et un RAW plus

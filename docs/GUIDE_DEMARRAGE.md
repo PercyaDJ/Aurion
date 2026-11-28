@@ -47,6 +47,11 @@ Le Pi s'installe tout seul au premier démarrage, il peut redémarrer une fois. 
    connexion du téléphone ou sur le Wi-Fi de la maison : iPhone, iPad, Android 12 et plus.
 3. Un encadré **Protégez votre caméra** propose de choisir votre mot de passe Wi-Fi (10 caractères minimum).
    Le Wi-Fi Aurion redémarre aussitôt : reconnectez-vous avec le nouveau mot de passe.
+4. Une seule fois : **Réglages**, carte **Lieu**, choisissez le site le plus proche, ou **Autre lieu** pour saisir la
+   latitude et la longitude (une carte en ligne les donne, avant de partir). Le téléphone ne peut pas donner sa
+   position sur le Wi-Fi Aurion. Avec le lieu, Aurion ne prend pas le ciel du crépuscule pour une aurore, demande une
+   aurore plus forte quand la Lune est levée, et peut faire la nuit **du crépuscule à l'aube** (case à cocher sous la
+   plage horaire). L'accueil affiche alors les heures de ciel noir et la Lune du soir.
 
 L'heure du Pi se règle automatiquement sur celle du téléphone à chaque connexion.
 
@@ -78,6 +83,16 @@ la nuit jusqu'à l'heure de fin prévue.
 - **Sur l'ordinateur** : accueil, **Éteindre Aurion**, attendez 20 secondes, puis branchez la clé USB sur
   l'ordinateur : chaque nuit a son dossier dans `sessions/` (sous-dossiers `RAW` et `JPG`, et `aurores.csv`
   qui liste les images avec aurore, de la plus forte à la plus faible).
+- **En mode *Aurores seulement*** : les 3 images de surveillance d'avant la confirmation sont aussi enregistrées
+  (en JPEG), pour garder le début de l'aurore. Le dossier `watch/` contient une petite vignette par minute de
+  surveillance, avec son score dans `event.jsonl`.
+
+## Étiqueter les photos (aide à améliorer la détection)
+
+Dans *Photos*, touchez une image : sous l'image agrandie, cinq boutons **Aurore**, **Pas d'aurore**, **Nuages**,
+**Lune**, **Lumière parasite**. Un appui enregistre l'étiquette et passe à l'image suivante ; un second appui sur
+la même étiquette la retire. Les étiquettes sont écrites dans `sessions/<nuit>/labels.csv` sur la clé (et dans le
+ZIP de la nuit). Elles serviront à mesurer la justesse de la détection et, plus tard, à entraîner un classifieur.
 
 ## Mettre à jour
 

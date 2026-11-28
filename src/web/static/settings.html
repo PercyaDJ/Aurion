@@ -153,6 +153,31 @@
             </div>
         </div>
 
+        <!-- Place (Sun and Moon gates, dusk to dawn) -->
+        <div class="card fade-in" id="lieu">
+            <div class="card-header">
+                <span class="card-title">Lieu <span class="tooltip-icon"
+                        onclick="event.stopPropagation(); showTooltip(this, 'Choisi une fois. Aurion calcule la hauteur du Soleil et de la Lune : pas de fausse alerte au crépuscule, seuils relevés sous la Lune, nuit du crépuscule à l\'aube.')">❓</span></span>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="placeSelect">Site</label>
+                <select class="form-select" id="placeSelect" onchange="onPlaceChange()"></select>
+            </div>
+            <div id="placeCustom" class="info-grid" hidden>
+                <div class="form-group">
+                    <label class="form-label" for="placeLat">Latitude (°, nord +)</label>
+                    <input type="number" class="form-input" id="placeLat" min="-90" max="90" step="0.01" inputmode="decimal">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="placeLon">Longitude (°, est +)</label>
+                    <input type="number" class="form-input" id="placeLon" min="-180" max="180" step="0.01" inputmode="decimal">
+                </div>
+            </div>
+            <span class="form-hint">La position du téléphone n'est pas disponible sur le Wi-Fi Aurion (page sans HTTPS) :
+                choisissez le site le plus proche ou saisissez les coordonnées (une carte en ligne les donne). Un écart
+                de quelques kilomètres ne change rien.</span>
+        </div>
+
         <!-- Time Range / Timer -->
         <div class="card fade-in">
             <div class="card-header">
@@ -176,6 +201,11 @@
                         <input type="time" class="form-input" id="timeEnd" value="06:00">
                     </div>
                 </div>
+                <label class="form-check">
+                    <input type="checkbox" id="autoTwilight">
+                    Du crépuscule à l'aube (calculé chaque soir d'après le lieu ; les heures ci-dessus servent si le
+                    lieu n'est pas choisi ou si le ciel ne devient pas assez noir)
+                </label>
             </div>
 
             <div id="timerSection" style="display: none;">
@@ -206,6 +236,54 @@
     </div>
 
     <script>
+
+        // Aurora sites: city centre, rounded to 0.01° (about 1 km)
+        const PLACES = [
+            ['Tromsø (Norvège)', 69.65, 18.96],
+            ['Alta (Norvège)', 69.97, 23.27],
+            ['Abisko (Suède)', 68.35, 18.83],
+            ['Kiruna (Suède)', 67.86, 20.23],
+            ['Rovaniemi (Finlande)', 66.50, 25.73],
+            ['Reykjavik (Islande)', 64.15, -21.94],
+            ['Fairbanks (Alaska)', 64.84, -147.72],
+            ['Yellowknife (Canada)', 62.45, -114.37],
+            ['Paris (France)', 48.86, 2.35],
+            ['Grenoble (France)', 45.19, 5.72],
+        ];
+
+        function fillPlaces() {
+            const sel = document.getElementById('placeSelect');
+            sel.innerHTML = '<option value="">Non choisi</option>'
+                + PLACES.map((p, i) => `<option value="${i}">${aurionEscape(p[0])}</option>`).join('')
+                + '<option value="custom">Autre lieu (latitude, longitude)</option>';
+        }
+
+        function onPlaceChange() {
+            document.getElementById('placeCustom').hidden = document.getElementById('placeSelect').value !== 'custom';
+        }
+
+        function showPlace(loc) {
+            const sel = document.getElementById('placeSelect');
+            if (!loc) { sel.value = ''; onPlaceChange(); return; }
+            const i = PLACES.findIndex(p => p[0] === loc.name && p[1] === loc.latitude && p[2] === loc.longitude);
+            sel.value = i >= 0 ? String(i) : 'custom';
+            document.getElementById('placeLat').value = loc.latitude;
+            document.getElementById('placeLon').value = loc.longitude;
+            onPlaceChange();
+        }
+
+        /** Place to save, or throws with a message. */
+        function readPlace() {
+            const v = document.getElementById('placeSelect').value;
+            if (v === '') return null;
+            if (v !== 'custom') { const p = PLACES[+v]; return { name: p[0], latitude: p[1], longitude: p[2] }; }
+            const lat = parseFloat(document.getElementById('placeLat').value);
+            const lon = parseFloat(document.getElementById('placeLon').value);
+            if (!(lat >= -90 && lat <= 90) || !(lon >= -180 && lon <= 180)) {
+                throw new Error('latitude entre -90 et 90, longitude entre -180 et 180');
+            }
+            return { name: '', latitude: Math.round(lat * 1000) / 1000, longitude: Math.round(lon * 1000) / 1000 };
+        }
 
         function updateVal(id, val) {
             document.getElementById(id).textContent = val;
@@ -281,6 +359,8 @@
 
                 document.getElementById('timeStart').value = cfg.time_range.start.substring(0, 5);
                 document.getElementById('timeEnd').value = cfg.time_range.end.substring(0, 5);
+                document.getElementById('autoTwilight').checked = !!cfg.time_range.auto_twilight;
+                showPlace(cfg.location);
 
                 // Timer mode
                 if (cfg.time_range.duration_hours) {
@@ -311,6 +391,8 @@
                 cfg.capture.capture_interval_secs = parseInt(document.getElementById('captureInterval').value);
                 cfg.time_range.start = document.getElementById('timeStart').value + ':00';
                 cfg.time_range.end = document.getElementById('timeEnd').value + ':00';
+                cfg.time_range.auto_twilight = document.getElementById('autoTwilight').checked;
+                cfg.location = readPlace();
 
                 // Timer mode
                 const isTimer = document.getElementById('modeTimer').classList.contains('active');
@@ -331,6 +413,7 @@
             }
         }
 
+        fillPlaces();
         loadConfig();
     </script>
     <script src="/js/toast.js"></script>

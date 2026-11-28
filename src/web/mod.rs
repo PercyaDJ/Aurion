@@ -139,6 +139,9 @@ pub struct AppState {
     /// Why the Aurion Wi-Fi did not start at boot (None: it did). A version on
     /// trial is not confirmed then (update::startup_checks).
     pub hotspot_error: Arc<std::sync::Mutex<Option<String>>>,
+    /// Sun/Moon gate of the detection in force during the night (reason),
+    /// `None` when there is none.
+    pub detection_gate: Arc<RwLock<Option<String>>>,
 }
 
 /// Automatic start of the night (expedition mode), shown on the home screen.
@@ -214,6 +217,7 @@ impl AppState {
             online_update_running: Arc::new(AtomicBool::new(false)),
             hotspot_ready_at: Arc::new(std::sync::Mutex::new(None)),
             hotspot_error: Arc::new(std::sync::Mutex::new(None)),
+            detection_gate: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -312,6 +316,7 @@ pub fn build_router(state: AppState) -> Router<()> {
         .route("/api/gallery/sessions", get(gallery::get_gallery_sessions))
         .route("/api/gallery/stats", get(gallery::get_gallery_stats))
         .route("/api/gallery/best", get(gallery::get_best_auroras))
+        .route("/api/gallery/labels", get(gallery::get_labels).post(gallery::set_label))
         .route("/api/gallery/delete", post(gallery::delete_gallery_images))
         .route("/api/gallery/download-zip", post(gallery::download_gallery_zip))
         .route("/api/gallery/sessions/:name/download", get(gallery::download_gallery_session_zip))
