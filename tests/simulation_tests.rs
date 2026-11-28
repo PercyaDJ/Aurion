@@ -253,6 +253,12 @@ async fn raw_night_dngs_are_readable_and_camera_metadata_is_logged() {
     let r = aurion::core::dark_reminder::DarkReminder::load(&night.state.paths.dark_reminder).unwrap();
     assert_eq!(r.temp_c, Some(28.0));
     assert_eq!(r.temp_source.as_deref(), Some("capteur"));
+    // Siril script of the night, pointing to the master dark to make
+    let name = std::fs::read_dir(night.capture.join("sessions")).unwrap().next().unwrap().unwrap().file_name();
+    let script = std::fs::read_to_string(night.capture.join("sessions").join(&name).join("calibrer.ssf")).unwrap();
+    let dark = format!("master_dark_ISO{}_{}_T30.fits", r.iso, aurion::core::master_dark::shutter_label(r.shutter_us));
+    assert!(script.contains(&format!("-dark=../../../darks/master/{} -cc=dark -cfa", dark)), "{}", script);
+    assert!(script.contains("n'existe pas encore"), "{}", script);
 }
 
 #[tokio::test(start_paused = true)]
@@ -363,6 +369,12 @@ async fn stacking_produces_one_extra_image_every_n_frames() {
     assert_eq!(stacks.len(), singles / 4, "{} stacks for {} frames", stacks.len(), singles);
     let img = image::load_from_memory(&saved_jpeg(&night.capture, stacks[0])).unwrap();
     assert_eq!(img.width(), 1280);
+    // The mock sky has no stars: every stack is built without alignment,
+    // and session.log says why
+    let name = std::fs::read_dir(night.capture.join("sessions")).unwrap().next().unwrap().unwrap().file_name();
+    let log = std::fs::read_to_string(night.capture.join("sessions").join(&name).join("session.log")).unwrap();
+    assert!(log.contains("étoiles (8 minimum), pile empilée sans recalage"), "{}", log);
+    assert!(log.contains("_STACK4_AURORA.jpg : 4 images sur 4"), "{}", log);
 }
 
 #[tokio::test(start_paused = true)]

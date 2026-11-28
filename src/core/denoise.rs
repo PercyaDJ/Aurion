@@ -20,8 +20,12 @@
 //!    cosmic-ray hits present on a single frame without throwing away good
 //!    frames, unlike the former min/max rejection which always dropped 2.
 //!    Limit: one high and one low outlier per sub-pixel at most. Memory:
-//!    10 bytes per sub-pixel (4056×3040 → 370 MB), whatever N (up to
-//!    [`MAX_STACK`]). No alignment on the stars: see lot 2b.
+//!    10 bytes per sub-pixel plus 1 byte per pixel (frames covering it):
+//!    4056×3040 → 370 MB + 12 MB, whatever N (up to [`MAX_STACK`]).
+//!    Frames can be added resampled on a [`Transform`] found from the stars
+//!    ([`Stacker::add_warped`], see `core::align`): pixels whose source falls
+//!    outside the sky of the frame are left out of the mean of that pixel,
+//!    which is why the number of frames is kept per pixel.
 //!
 //! The sensor ISP denoise (`rpicam-still --denoise cdn_hq`) is configured
 //! separately in the camera adapter.
@@ -94,7 +98,7 @@ pub fn remove_hot_pixels(rgb: &mut [u8], width: u32, height: u32, threshold: u8)
 pub const SIGMA_REJECT: f32 = 2.5;
 
 /// sRGB transfer function (IEC 61966-2-1), code 0..255 → linear 0..1.
-fn srgb_to_linear(c: f32) -> f32 {
+pub(crate) fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
@@ -103,7 +107,7 @@ fn linear_to_srgb(l: f32) -> f32 {
 }
 
 /// Linear light of each 8-bit sRGB code.
-fn to_linear_lut() -> &'static [f32; 256] {
+pub(crate) fn to_linear_lut() -> &'static [f32; 256] {
     static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
     LUT.get_or_init(|| std::array::from_fn(|v| srgb_to_linear(v as f32 / 255.0)))
 }
@@ -114,7 +118,7 @@ fn to_srgb_lut() -> &'static [u8] {
     LUT.get_or_init(|| (0..=u16::MAX).map(|i| (linear_to_srgb(i as f32 / 65535.0) * 255.0).round().clamp(0.0, 255.0) as u8).collect())
 }
 
-fn encode_linear(l: f32) -> u8 {
+pub(crate) fn encode_linear(l: f32) -> u8 {
     to_srgb_lut()[(l.clamp(0.0, 1.0) * 65535.0).round() as usize]
 }
 
@@ -129,10 +133,12 @@ pub struct Stacker {
     /// Darkest and brightest sRGB code seen (rejection candidates).
     min: Vec<u8>,
     max: Vec<u8>,
+    /// Frames that covered each pixel (all of them without resampling).
+    n: Vec<u8>,
     count: u32,
 }
 
-/// Maximum number of frames of one stack.
+/// Maximum number of frames of one stack (the per-pixel count is a `u8`).
 pub const MAX_STACK: u32 = 255;
 
 /// Count, sum and sum of squares of `n` values once `x` is taken out, and
@@ -144,10 +150,55 @@ fn without(n: f32, sum: f32, sumsq: f32, x: f32) -> (f32, f32, f32, f32) {
     (n1, s1, q1, var.sqrt())
 }
 
+/// Affine map from the pixels of the stack (reference frame) to the pixels
+/// of a new frame: `x' = a·x + b·y + tx`, `y' = c·x + d·y + ty`. Pixel
+/// centres are at integer coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    pub a: f64,
+    pub b: f64,
+    pub c: f64,
+    pub d: f64,
+    pub tx: f64,
+    pub ty: f64,
+}
+
+impl Transform {
+    pub const IDENTITY: Transform = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 };
+
+    /// Rotation by `angle` radians around `(cx, cy)`.
+    pub fn rotation_about(angle: f64, cx: f64, cy: f64) -> Transform {
+        let (s, c) = angle.sin_cos();
+        Transform { a: c, b: -s, c: s, d: c, tx: cx - c * cx + s * cy, ty: cy - s * cx - c * cy }
+    }
+
+    pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+        (self.a * x + self.b * y + self.tx, self.c * x + self.d * y + self.ty)
+    }
+
+    /// Rotation angle (radians) of the linear part.
+    pub fn angle(&self) -> f64 {
+        (self.c - self.b).atan2(self.a + self.d)
+    }
+
+    /// Fixed point of the map (the centre of the rotation), None for a pure
+    /// translation or a degenerate map.
+    pub fn fixed_point(&self) -> Option<(f64, f64)> {
+        // (I − M)·p = t
+        let (m11, m12, m21, m22) = (1.0 - self.a, -self.b, -self.c, 1.0 - self.d);
+        let det = m11 * m22 - m12 * m21;
+        if det.abs() < 1e-9 {
+            return None;
+        }
+        Some(((self.tx * m22 - m12 * self.ty) / det, (m11 * self.ty - m21 * self.tx) / det))
+    }
+}
+
 impl Stacker {
     pub fn new(width: u32, height: u32) -> Self {
-        let n = (width * height * 3) as usize;
-        Self { width, height, mean: vec![0.0; n], m2: vec![0.0; n], min: vec![u8::MAX; n], max: vec![0; n], count: 0 }
+        let px = (width * height) as usize;
+        let n = px * 3;
+        Self { width, height, mean: vec![0.0; n], m2: vec![0.0; n], min: vec![u8::MAX; n], max: vec![0; n], n: vec![0; px], count: 0 }
     }
 
     pub fn count(&self) -> u32 {
@@ -158,6 +209,17 @@ impl Stacker {
         (self.width, self.height)
     }
 
+    /// Welford update of sub-pixel `i` with linear value `x` (code `v`),
+    /// `inv_n` = 1 / frames now covering its pixel.
+    #[inline]
+    fn update(&mut self, i: usize, x: f32, v: u8, inv_n: f32) {
+        let d = x - self.mean[i];
+        self.mean[i] += d * inv_n;
+        self.m2[i] += d * (x - self.mean[i]);
+        self.min[i] = self.min[i].min(v);
+        self.max[i] = self.max[i].max(v);
+    }
+
     /// Add a frame. Returns false (and ignores it) if the size differs or the
     /// stack is full.
     pub fn add(&mut self, rgb: &[u8]) -> bool {
@@ -166,34 +228,90 @@ impl Stacker {
         }
         let lut = to_linear_lut();
         self.count += 1;
-        let inv_n = 1.0 / self.count as f32;
-        for (i, &v) in rgb.iter().enumerate() {
-            let x = lut[v as usize];
-            let d = x - self.mean[i];
-            self.mean[i] += d * inv_n;
-            self.m2[i] += d * (x - self.mean[i]);
-            self.min[i] = self.min[i].min(v);
-            self.max[i] = self.max[i].max(v);
+        for p in 0..self.n.len() {
+            self.n[p] += 1;
+            let inv_n = 1.0 / self.n[p] as f32;
+            for c in 0..3 {
+                let i = p * 3 + c;
+                let v = rgb[i];
+                self.update(i, lut[v as usize], v, inv_n);
+            }
         }
         true
     }
 
+    /// Add a frame resampled into the geometry of the stack: the stack pixel
+    /// `(x, y)` takes the frame at `t.apply(x, y)` (bilinear interpolation,
+    /// in linear light). Only the first `sky_rows` rows are resampled, and
+    /// only from the sky of the frame; the rows below (the ground, which does
+    /// not turn with the sky) are added as they are. Stack pixels whose
+    /// source falls outside the sky of the frame are left out for this frame.
+    /// Returns the number of pixels left out, None if the size differs or
+    /// the stack is full.
+    pub fn add_warped(&mut self, rgb: &[u8], t: &Transform, sky_rows: u32) -> Option<usize> {
+        if rgb.len() != self.mean.len() || self.count >= MAX_STACK {
+            return None;
+        }
+        let lut = to_linear_lut();
+        self.count += 1;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let sky = (sky_rows as usize).min(h);
+        let (xmax, ymax) = (w as f64 - 1.0, sky as f64 - 1.0);
+        let mut left_out = 0;
+        for y in 0..h {
+            let (mut sx, mut sy) = t.apply(0.0, y as f64);
+            for x in 0..w {
+                let p = y * w + x;
+                if y >= sky {
+                    self.n[p] += 1;
+                    let inv_n = 1.0 / self.n[p] as f32;
+                    for c in 0..3 {
+                        let v = rgb[p * 3 + c];
+                        self.update(p * 3 + c, lut[v as usize], v, inv_n);
+                    }
+                    continue;
+                }
+                let (fx, fy) = (sx, sy);
+                sx += t.a;
+                sy += t.c;
+                if !(0.0..=xmax).contains(&fx) || !(0.0..=ymax).contains(&fy) {
+                    left_out += 1;
+                    continue;
+                }
+                let (x0, y0) = ((fx as usize).min(w.saturating_sub(2)), (fy as usize).min(sky.saturating_sub(2)));
+                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(sky - 1));
+                let (ux, uy) = ((fx - x0 as f64) as f32, (fy - y0 as f64) as f32);
+                self.n[p] += 1;
+                let inv_n = 1.0 / self.n[p] as f32;
+                for c in 0..3 {
+                    let s = |xx: usize, yy: usize| lut[rgb[(yy * w + xx) * 3 + c] as usize];
+                    let top = s(x0, y0) * (1.0 - ux) + s(x1, y0) * ux;
+                    let bottom = s(x0, y1) * (1.0 - ux) + s(x1, y1) * ux;
+                    let l = top * (1.0 - uy) + bottom * uy;
+                    self.update(p * 3 + c, l, encode_linear(l), inv_n);
+                }
+            }
+        }
+        Some(left_out)
+    }
+
     /// Average of the frames in linear light, extreme values rejected when
-    /// they are more than [`SIGMA_REJECT`] σ from the others (from 3 frames).
+    /// they are more than [`SIGMA_REJECT`] σ from the others (from 3 frames
+    /// covering the pixel). A pixel covered by no frame stays black.
     pub fn result(&self) -> Option<Vec<u8>> {
         if self.count == 0 {
             return None;
         }
         let lut = to_linear_lut();
-        let n = self.count as f32;
         Some(
             (0..self.mean.len())
                 .map(|i| {
                     let mean = self.mean[i];
-                    if self.count < 3 {
+                    let count = self.n[i / 3];
+                    if count < 3 {
                         return encode_linear(mean);
                     }
-                    let (mut n, mut sum) = (n, n * mean);
+                    let (mut n, mut sum) = (count as f32, count as f32 * mean);
                     let mut sumsq = self.m2[i] + n * mean * mean;
                     // Brightest value first (planes, satellites, cosmic rays),
                     // then the darkest one
@@ -225,6 +343,7 @@ impl Stacker {
         self.m2.iter_mut().for_each(|v| *v = 0.0);
         self.min.iter_mut().for_each(|v| *v = u8::MAX);
         self.max.iter_mut().for_each(|v| *v = 0);
+        self.n.iter_mut().for_each(|v| *v = 0);
         self.count = 0;
     }
 }

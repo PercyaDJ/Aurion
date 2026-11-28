@@ -16,3 +16,7 @@ pub mod rpicam_metadata;
 pub mod dng;
 pub mod fits;
 pub mod master_dark;
+pub mod stars;
+pub mod align;
+pub mod raw_bin;
+pub mod siril_script;

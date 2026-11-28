@@ -66,9 +66,16 @@ de réempiler les DNG de `darks/`.
   fichier les donne).
 - Siril accepte un master dark avec la commande `calibrate` et son option `-dark=` (fichier du master), et sait
   détecter les pixels chauds à partir de ce master avec l'option `-cc=dark`. Options vérifiées dans le code source de
-  Siril (`src/core/command_def.h`, novembre 2026) ; pour la syntaxe complète d'un script, se reporter à la
-  documentation de Siril. Dans l'interface graphique, le master dark se choisit dans l'étape de prétraitement ; les
-  libellés dépendent de la version de Siril.
+  Siril (`src/core/command_def.h`, novembre 2026). Dans l'interface graphique, le master dark se choisit dans l'étape
+  de prétraitement ; les libellés dépendent de la version de Siril.
+- **Script par nuit** (depuis la version 1.17.0) : à la fin d'une nuit avec des RAW, Aurion écrit
+  `sessions/<nuit>/calibrer.ssf`. Il convertit les DNG de `RAW/` en séquence Siril dans `siril/`, puis les calibre
+  avec le master dark aux ISO et pose moyens de la nuit et à la même tranche de 5 °C (à défaut, le plus proche en
+  température aux mêmes ISO et pose ; s'il n'existe pas encore, le script donne le nom du master à faire). Résultat :
+  la séquence `pp_brut` dans `siril/`. Un script Siril s'exécute dans le dossier courant de Siril et non dans celui du
+  script : choisir d'abord le dossier de la nuit comme dossier de travail, ou lancer
+  `siril-cli -d <dossier de la nuit> -s calibrer.ssf`. Commandes et options vérifiées dans le code source de Siril
+  1.4.0 (fichiers cités en tête du script). **À valider** avec de vraies nuits dans Siril.
 - Le fichier des pixels chauds d'Aurion n'est pas au format « bad pixel map » de Siril (option `-cc=bpm`) : il sert
   de rapport lisible et pour de futurs traitements d'Aurion.
 - Sens de l'image : le FITS est écrit lignes du bas vers le haut, avec `ROWORDER = 'BOTTOM-UP'`, comme Siril range
@@ -76,13 +83,39 @@ de réempiler les DNG de `darks/`.
   que Siril convertit depuis les DNG. **À valider** sur une vraie nuit : après calibration, les pixels chauds doivent
   disparaître et non se dédoubler.
 
-### Levier 4 : empilement au post-traitement
+### Levier 4 : empilement
 Pour une image fixe très propre : empiler 4 à 8 RAW consécutifs dans Sequator ou Siril (le bruit baisse d'environ √N).
 Aurion peut aussi produire un JPEG empilé (`_STACKn.jpg`, réglage *Empilement JPEG*) pour un aperçu immédiat.
-Depuis la version 1.16.0, la moyenne se fait en lumière linéaire et rejette, pour chaque pixel, la valeur la plus
-haute puis la plus basse seulement si elles s'écartent de plus de 2,5 écarts types des autres : avions et satellites
-disparaissent sans jeter les bonnes images. Les images ne sont pas recalées sur les étoiles (prévu au lot 2b) : avec
-des poses longues, les étoiles de l'image empilée sont filées. Désactivé par défaut (calcul, mémoire et batterie).
+Désactivé par défaut (calcul, mémoire et batterie).
+
+- **Moyenne** (depuis 1.16.0) : en lumière linéaire, avec rejet, pour chaque pixel, de la valeur la plus haute puis de
+  la plus basse seulement si elles s'écartent de plus de 2,5 écarts types des autres : avions et satellites
+  disparaissent sans jeter les bonnes images.
+- **Recalage sur les étoiles** (depuis 1.17.0) : le ciel tourne autour du pôle céleste. Avec l'objectif 2,7 mm, un
+  pixel couvre environ 118" et le ciel tourne de 15"/s à l'équateur céleste : sans recalage, 8 poses de 30 s filent les
+  étoiles sur une trentaine de pixels au plus. Aurion repère les étoiles de la première image de la pile (la
+  référence) et de chaque image suivante, les apparie par triangles et tourne l'image pour la superposer à la
+  référence avant de l'ajouter. Seule la zone ciel (réglage *Zone analysée*, 65 % du haut par défaut) est tournée :
+  le sol reste en place.
+- Chaque image est décrite dans `session.log` : `EMPILEMENT image 00042 : recalée, rotation 0.125°, centre (…),
+  31 étoiles appariées sur 50, résidu 0.40 px`, ou la raison pour laquelle elle est ignorée.
+
+Limites :
+- **Peu d'étoiles** (nuages, Lune, crépuscule, ciel lumineux) : une image où Aurion ne trouve pas 8 étoiles, ou ne
+  peut pas apparier au moins 6 d'entre elles, est **ignorée** et la raison va dans `session.log`. Une pile se ferme
+  toujours après N images proposées : elle contient alors moins d'images (2 au minimum, sinon elle est abandonnée).
+  Si c'est la référence qui a moins de 8 étoiles, la pile entière est faite sans recalage (il n'y a pas d'étoiles à
+  filer) ; la pile suivante prend une nouvelle référence.
+- **Aurore qui bouge** : l'aurore n'est pas recalée, seules les étoiles le sont. Une aurore rapide reste floue dans
+  l'image empilée, comme sans recalage ; pour la garder nette, empiler peu d'images (2 à 4).
+- **Fisheye** : le recalage tourne l'image entière d'un même angle. C'est exact quand le pôle céleste est au centre
+  de l'image ; ailleurs, la projection du fisheye déforme la rotation. Un calcul sur un fisheye équidistant (le modèle
+  du vrai objectif 2,7 mm n'est pas connu) donne un écart de l'ordre de 0,75 px après 4 minutes et 1,5 px après
+  8 minutes, pôle à 15° du centre. Au-delà de 1,5 px d'écart moyen, l'image est ignorée : les piles longues
+  (beaucoup d'images ou un long intervalle) perdent leurs dernières images. **À mesurer sur une vraie nuit** :
+  les résidus sont dans `session.log`.
+- **Mémoire et temps** : environ 380 Mo en pleine résolution pendant la pile. Sur PC, le recalage d'une image
+  (détection des étoiles, appariement, rotation) prend environ 0,7 s ; `aurion bench` le mesure sur le Pi.
 
 ## 2. Réglages timelapse
 

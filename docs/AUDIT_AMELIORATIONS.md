@@ -91,11 +91,17 @@ Ordre conseillé : les lots 1 et 2 d'abord (sans achat), puis les autres selon l
 **État** : lot 1 réalisé en version 1.15.0 (voir le [journal des versions](../CHANGELOG.md)), sauf la traduction des
 erreurs caméra et le QR code Wi-Fi, reportés au lot 5. Lot 2 réalisé en version 1.16.0 pour sa partie simple :
 métadonnées réelles de la caméra (QW7), lecture du DNG, écriture FITS, master dark par série avec carte des pixels
-chauds (IQ-6, points 1 et 2), empilement en lumière linéaire avec rejet sigma (IQ-7). Restent : le binning 2x2 et
-l'alignement de l'empilement sur les étoiles (**lot 2b**, recalage par rotation autour du pôle à partir des étoiles de
-la vignette), le script Siril généré par nuit et la soustraction du dark sur la vignette d'analyse (IQ-6, points 3
-et 4). Points à valider sur le matériel : format réel du DNG, clés de métadonnées, temps de calcul du master dark sur
-Pi 4.
+chauds (IQ-6, points 1 et 2), empilement en lumière linéaire avec rejet sigma (IQ-7). Lot 2b réalisé en version
+1.17.0 : recalage de l'empilement sur les étoiles (IQ-7 ; étoiles cherchées sur l'image pleine résolution binnée 2x2
+et non sur la vignette, qui en montre trop peu ; appariement par triangles, transformation rigide estimée par RANSAC,
+zone sol jamais tournée), binning 2x2 des RAW par couleur (IQ-6, annexe C 4.3 ; utilisé pour l'aperçu galerie des DNG
+sans vignette) et script Siril par nuit `calibrer.ssf` (IQ-6, point 3, syntaxe vérifiée dans le code source de
+Siril 1.4.0). Le modèle rigide a été retenu sur calcul (fisheye équidistant supposé) : une affine ne réduit le résidu
+que de 5 à 10 %. Restent : la soustraction du master dark sur la vignette d'analyse et le passage de la détection
+d'aurore sur le RAW binné (IQ-6, point 4), un modèle de recalage sur la sphère avec calibration de l'objectif si les
+résidus réels l'exigent. Points à valider sur le matériel : format réel du DNG, clés de métadonnées, temps de calcul du
+master dark sur Pi 4, nombre d'étoiles détectées et résidus du recalage avec l'objectif 2,7 mm, temps de recalage et
+mémoire sur Pi 4, rendu des aurores mobiles dans l'image empilée.
 
 | Lot | Contenu | Matériel | Effort |
 |---|---|---|---|

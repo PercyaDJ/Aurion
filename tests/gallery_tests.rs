@@ -82,9 +82,17 @@ async fn thumbnails_prefer_capture_thumbs_then_generate() {
     assert!(img.width() <= 320 && img.height() <= 240 && img.width() >= 200);
     assert!(t.dir.path().join("thumb_cache/aurora_20260305_213200_00001.jpg").exists());
 
-    // RAW has no thumbnail, corrupted JPEG is reported
+    // Unreadable RAW: no thumbnail; corrupted JPEG is reported
     t.add_file("aurora_20260305_213300_00002.dng", b"DNG");
     t.server.get("/api/gallery/thumbnail/aurora_20260305_213300_00002.dng").await.assert_status(StatusCode::NO_CONTENT);
+    // Valid DNG without capture thumbnail: preview binned from the raw data
+    let px: Vec<u16> = (0..1000u32 * 800).map(|i| 256 + (i % 1000) as u16).collect();
+    let dng = aurion::core::dng::test_dng_bytes(1000, 800, &px, &Default::default());
+    t.add_file("aurora_20260305_213350_00004.dng", &dng);
+    let res = t.server.get("/api/gallery/thumbnail/aurora_20260305_213350_00004.dng").await;
+    res.assert_status_ok();
+    let img = image::load_from_memory(res.as_bytes()).unwrap();
+    assert_eq!((img.width(), img.height()), (250, 200), "binned by 2: (1000 / 2 / 2) x (800 / 2 / 2)");
     t.add_file("aurora_20260305_213400_00003.jpg", b"not a jpeg");
     t.server.get("/api/gallery/thumbnail/aurora_20260305_213400_00003.jpg").await.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 }
