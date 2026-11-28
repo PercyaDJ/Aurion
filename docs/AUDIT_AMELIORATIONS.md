@@ -1,11 +1,12 @@
 # Audit d'amélioration et feuille de route (novembre 2026)
 
-Ce document rassemble trois études menées le 28/11/2026 sur Aurion 1.14.0 :
+Ce document rassemble quatre études menées le 28/11/2026 sur Aurion 1.14.0 :
 
 - **Annexe A**, audit du code : qualité d'image, détection, énergie, installation. Lecture du code uniquement, rien n'a
   été exécuté sur le matériel.
 - **Annexe B**, étude des capteurs : capteurs pour Raspberry Pi, caméras astronomiques USB, boîtiers plein format.
 - **Annexe C**, étude optique, embarqué, état de l'art de la détection et du débruitage.
+- **Annexe D**, étude chiffrée de la triangulation de l'altitude des aurores depuis la région de Grenoble.
 
 Chaque chiffre des annexes B et C cite sa source. Ce qui n'a pas pu être vérifié est marqué « non vérifié », ce qui
 est calculé est marqué « calcul ». Rien n'a encore été mesuré sur une caméra Aurion réelle : les gains annoncés sont des
@@ -74,18 +75,21 @@ choix des lots 1 à 5.
 
 | Exigence | Pourquoi | Piste |
 |---|---|---|
-| Horodatage commun précis | comparer la même aurore au même instant depuis plusieurs stations | module GPS avec signal PPS sur le Pi, ou synchronisation NTP quand un réseau existe ; précision visée à définir |
+| Horodatage commun précis | comparer la même aurore au même instant depuis plusieurs stations | module GPS avec signal PPS sur le Pi et chrony ; 10 ms ou mieux, cible 1 ms (annexe D 4.2). Aujourd'hui Aurion date l'image au lancement de `rpicam-still`, pas au début réel de la pose : à changer |
 | Position de la station | base de la triangulation | GPS du même module |
 | Calibration astrométrique | savoir quelle direction du ciel voit chaque pixel | résolution sur les étoiles (« plate solving », par exemple astrometry.net), refaite chaque nuit claire |
 | Calibration photométrique | comparer les intensités entre stations | darks, flats, même modèle de capteur et d'objectif partout |
 | Format de données | échange entre stations et outils scientifiques | FITS avec métadonnées complètes (heure, position, pose, gain, température) en plus du DNG |
 | Prises de vue synchronisées | images simultanées sur toutes les stations | départ de pose calé sur l'heure GPS |
 | Collecte centralisée | réunir les images des stations | envoi quand un réseau est disponible, ou relevé des clés USB |
-| Géométrie du réseau | précision de l'altitude | à étudier : vue de Grenoble, une aurore est basse sur l'horizon nord et lointaine ; l'écart entre stations, surtout nord-sud, fixe la précision (calcul à faire avant de choisir les sites) |
+| Géométrie du réseau | précision de l'altitude | **étudiée en annexe D** : une dizaine de stations sur 50 à 100 km autour de Grenoble ne suffit pas pour les aurores basses au nord (environ 10 km d'erreur sur un arc vert à 52°N, 86 km à 55°N, pour 1 mrad de pointage). Il faut une chaîne nord-sud de 250 à 400 km au moins (phase 1 minimale : Grenoble, Dijon ou Besançon, Nancy). Le groupe alpin reste utile au zénith (arcs SAR, STEVE) et contre les nuages |
 
 ## 5. Lots de travaux proposés
 
 Ordre conseillé : les lots 1 et 2 d'abord (sans achat), puis les autres selon les priorités de l'association.
+
+**État** : lot 1 réalisé en version 1.15.0 (voir le [journal des versions](../CHANGELOG.md)), sauf la traduction des
+erreurs caméra et le QR code Wi-Fi, reportés au lot 5.
 
 | Lot | Contenu | Matériel | Effort |
 |---|---|---|---|
@@ -110,7 +114,7 @@ Ordre conseillé : les lots 1 et 2 d'abord (sans achat), puis les autres selon l
 
 ## Annexe A : Audit d'amélioration : qualité d'image, détection, énergie, installation
 
-Dépôt audité : `/home/user/Aurion`, commit `7a9ea29` (version 1.14.0). Lecture seule, aucun fichier modifié.
+Dépôt audité : commit `7a9ea29` (version 1.14.0). Lecture seule, aucun fichier modifié.
 Toutes les références `fichier:ligne` renvoient à ce commit. Les comportements cités sont ceux du code ; ce qui
 dépend du matériel (temps de capture réel, consommation, comportement exact de `rpicam-still`) est marqué
 « à mesurer » et renvoie aux tâches de validation de `docs/PLAN_ACTION.md`.
@@ -1132,3 +1136,338 @@ Recommandation :
 6. Bruit : darks indexés par température capteur, DPC coupé, empilement court avec rejet sigma, Siril en post-traitement.
 
 ---
+
+## Annexe D : Étude chiffrée : triangulation de l'altitude des aurores avec un réseau Aurion autour de Grenoble
+
+Date : 28/11/2026. Document d'étude, aucun fichier du dépôt Aurion n'a été modifié.
+
+Conventions :
+- **[calcul]** : résultat obtenu par calcul dans cette étude (script Python reproductible : `/tmp/claude-0/-home-user-Aurion/b3b66ec5-0ade-59f0-9c66-ee5e0426ba07/scratchpad/calc.py` et `calc2.py`).
+- **[source]** : chiffre lu dans une source, URL donnée.
+- **[non vérifié]** : ordre de grandeur courant, sans source vérifiée pendant cette étude.
+
+Hypothèses communes : Terre sphérique de rayon R = 6371 km, Grenoble à 45,19°N 5,72°E, aurore placée au méridien de Grenoble (5,72°E), stations au niveau de la mer (l'altitude réelle des stations, 200 à 2000 m, change les résultats de moins de 1 %).
+
+---
+
+### 0. Synthèse
+
+1. Vue de Grenoble, une aurore verte (110 km) au-dessus de 50°N n'apparaît qu'à 9° d'élévation, à 52°N à 5°, à 55°N à moins de 1° : elle est pratiquement sur l'horizon, à 550 à 1100 km de distance oblique. Une aurore rouge à 300 km reste à 10 à 26° d'élévation. [calcul]
+2. Un pixel IMX477 vaut 0,57 mrad (1,97 arcmin) avec le 2,7 mm, 0,97 mrad (3,3 arcmin) avec un 1,6 mm ; le double en binning 2x2. La calibration astrométrique sur étoiles atteint 0,5 à 1 arcmin (0,15 à 0,3 mrad) dans les réseaux météores (GMN, FRIPON). [calcul, source]
+3. Mais pour une aurore, l'erreur dominante n'est pas l'astrométrie : c'est l'identification d'une même structure dans deux images (1 mrad pour un bord d'arc net ou un rai, 3 à 5 mrad ou plus pour une lueur rouge diffuse). [estimation argumentée]
+4. Résultat central [calcul] : l'aurore étant au nord et les arcs étant allongés est-ouest, **seule une ligne de base nord-sud mesure l'altitude d'un arc**. Une ligne de base est-ouest ne voit l'arc que glisser le long de lui-même et ne donne rien (sauf structures ponctuelles : rais, piquets de STEVE, taches pulsantes).
+5. Erreur d'altitude d'un arc vert à 110 km situé à 52°N, pour 1 mrad d'erreur de pointage : 96 km (base nord-sud 20 km), 36 km (50 km), 16 km (100 km), 6 km (200 km), 1,5 km (500 km). [calcul]
+6. Un groupe d'une dizaine de stations dans un rayon de 50 à 100 km autour de Grenoble **ne suffit pas** pour les aurores basses sur l'horizon nord (erreur 10 km par mrad à 52°N, 86 km par mrad à 55°N). Il est en revanche **efficace pour les arcs rouges SAR et STEVE proches du zénith** (1,5 à 2 km par mrad à 400 km). [calcul]
+7. Configuration minimale utile : Grenoble + une station 250 à 400 km plus au nord (Dijon, Besançon, Nancy). Grenoble-Nancy (391 km) donne 2,2 km par mrad pour l'arc vert à 52°N et 2,1 km par mrad pour le rouge à 300 km. Lyon n'apporte presque rien pour les arcs (base surtout est-ouest). [calcul]
+8. Horodatage : 0,1 s d'erreur suffit pour la plupart des formes ; viser 1 à 10 ms avec un GPS à sortie PPS, ce qui coûte peu. Le vrai point dur est de déclencher toutes les poses sur une grille UTC commune et de dater le début réel de la pose (pas l'heure de lancement de `rpicam-still`). [calcul]
+
+Recommandation : réseau hybride de 10 stations, 3 à 4 autour de Grenoble (zénith, redondance nuages) et 6 à 7 en chaîne nord-sud jusqu'en Lorraine ou en Alsace (Dijon ou Besançon, Nancy ou Strasbourg, et si possible Reims ou Lille par partenariat), toutes équipées d'un GPS PPS, poses synchronisées, images RAW en FITS avec calibration astrométrique ; la triangulation se fait ensuite sur un serveur, pas sur le Pi.
+
+---
+
+### 1. Géométrie d'observation depuis Grenoble
+
+#### 1.1 Formules [calcul]
+
+Soit θ l'angle au centre de la Terre entre Grenoble (45,2°N) et le pied de l'aurore (latitude L, même méridien) : θ = (L − 45,2°) en radians.
+
+- Distance au sol : D = R θ.
+- Élévation apparente géométrique e (sans réfraction) d'un point à l'altitude h :
+  tan e = (cos θ − R / (R + h)) / sin θ.
+- Distance oblique : s = √(R² + (R + h)² − 2 R (R + h) cos θ).
+- Portée maximale pour une élévation minimale e_min : θ_max = arccos(R cos e_min / (R + h)) − e_min.
+
+#### 1.2 Résultats [calcul]
+
+| Altitude h | Latitude L | Distance au sol | Élévation vue de Grenoble | Distance oblique |
+|---|---|---|---|---|
+| 110 km | 50°N | 534 km | 9,1° | 549 km |
+| 110 km | 52°N | 756 km | 4,8° | 770 km |
+| 110 km | 55°N | 1090 km | 0,8° | 1103 km |
+| 200 km | 50°N | 534 km | 17,8° | 578 km |
+| 200 km | 52°N | 756 km | 11,2° | 793 km |
+| 200 km | 55°N | 1090 km | 5,3° | 1123 km |
+| 300 km | 50°N | 534 km | 26,4° | 623 km |
+| 300 km | 52°N | 756 km | 17,8° | 829 km |
+| 300 km | 55°N | 1090 km | 10,1° | 1153 km |
+
+Latitude la plus au nord visible au-dessus d'une élévation donnée [calcul] :
+
+| h | élévation ≥ 0° | ≥ 5° | ≥ 10° |
+|---|---|---|---|
+| 110 km | 55,8°N (1175 km) | 51,9°N (743 km) | 49,7°N (502 km) |
+| 200 km | 59,4°N (1576 km) | 55,2°N (1113 km) | 52,5°N (810 km) |
+| 300 km | 62,4°N (1918 km) | 58,1°N (1439 km) | 55,1°N (1096 km) |
+
+Conséquences :
+- La partie verte (base des rais vers 100 à 120 km) d'une aurore centrée vers 52 à 55°N est sous 5° d'élévation, donc dans la zone où le relief (Chartreuse, Vercors, Bauges au nord de Grenoble), la brume et la pollution lumineuse de l'agglomération dominent. Une station grenobloise doit être en altitude avec un horizon nord dégagé.
+- Le sommet rouge des rais (200 à 400 km) monte à 10 à 25°. C'est souvent la seule partie visible depuis la France, ce qui est cohérent avec les aurores « rouges » rapportées en mai 2024 [source : Grandin et al., arXiv 2610.19929, https://arxiv.org/abs/2610.19929, couleurs rapportées majoritairement rouges et roses].
+
+#### 1.3 Réfraction et extinction près de l'horizon [calcul]
+
+Réfraction (formule de Bennett, R' en arcmin = 1 / tan(e + 7,31 / (e + 4,4)), e en degrés) et masse d'air (Kasten-Young) :
+
+| Élévation | Réfraction | en mrad | Masse d'air | Extinction (0,25 mag par masse d'air, hypothèse) |
+|---|---|---|---|---|
+| 1° | 24' | 7,1 | 26 | 6,6 mag |
+| 3° | 14' | 4,2 | 15 | 3,8 mag |
+| 5° | 10' | 2,9 | 10 | 2,6 mag |
+| 10° | 5,4' | 1,6 | 5,6 | 1,4 mag |
+| 20° | 2,7' | 0,8 | 2,9 | 0,7 mag |
+
+La réfraction à 5° (2,9 mrad) est plus grande que toute l'erreur de pointage visée : elle doit être corrigée. Une calibration sur étoiles faite jusqu'à basse élévation l'absorbe en grande partie (les étoiles sont réfractées comme l'aurore) ; le résidu dépend de la température et de la pression (quelques % de la valeur, soit environ 0,1 mrad à 5°). Sous 3°, l'extinction (4 à 7 magnitudes) rend la plupart des aurores invisibles ; on retient **e ≥ 3 à 5°** comme limite pratique.
+
+---
+
+### 2. Résolution angulaire et précision de pointage
+
+#### 2.1 Échelle pixel [calcul]
+
+Projection équidistante (fisheye) : r = f θ, donc un pixel de taille p vaut Δθ = p / f (constant du centre au bord, dans l'approximation).
+
+| Objectif | mrad/pixel | arcmin/pixel | deg/pixel | binning 2x2 | rayon image pour 90° |
+|---|---|---|---|---|---|
+| 2,7 mm | 0,574 | 1,97' | 0,033° | 3,95' | 4,24 mm |
+| 1,8 mm | 0,861 | 2,96' | 0,049° | 5,92' | 2,83 mm |
+| 1,6 mm | 0,969 | 3,33' | 0,056° | 6,66' | 2,51 mm |
+| 1,4 mm | 1,107 | 3,81' | 0,063° | 7,61' | 2,20 mm |
+
+Capteur IMX477 : 6,29 x 4,71 mm (demi-dimensions 3,14 et 2,36 mm, demi-diagonale 3,93 mm) [calcul à partir de 4056 x 3040 x 1,55 µm]. Avec le 2,7 mm, le champ couvert est d'environ 133° sur le grand axe et 100° sur le petit axe [calcul, approximation équidistante] : le « 140° » est atteint en diagonale seulement. Un 1,6 mm donne un cercle de 180° de rayon 2,51 mm, légèrement coupé en haut et en bas (2,36 mm) ; un 1,4 mm tient entièrement.
+
+Taille d'un pixel projetée sur l'aurore (distance oblique x Δθ) [calcul] :
+
+| Distance oblique | 2,7 mm | 2,7 mm binning 2x2 | 1,6 mm |
+|---|---|---|---|
+| 700 km | 0,40 km | 0,80 km | 0,68 km |
+| 1000 km | 0,57 km | 1,15 km | 0,97 km |
+| 1500 km | 0,86 km | 1,72 km | 1,45 km |
+
+L'échantillonnage n'est donc pas le facteur limitant : un pixel couvre moins d'un kilomètre alors que les arcs font 5 à 35 km de large [source : gamme de largeurs utilisée par Whiter et al. 2013, https://gi.copernicus.org/articles/2/131/2013/gi-2-131-2013.pdf].
+
+#### 2.2 Précision de pointage après calibration astrométrique [source]
+
+- Global Meteor Network (GMN) : résidus moyens de l'ajustement astrométrique de 0,19 pixel et 0,78 arcmin avec le modèle de distorsion radiale (termes impairs jusqu'à l'ordre 7) ; sur des images all-sky haute résolution, précision angulaire moyenne de 0,5 arcmin, limitée par la déformation de la PSF au bord du champ. Vida et al. 2021, MNRAS 506, 5046, https://arxiv.org/abs/2107.12335. Pour les objectifs 3,6 mm courants du GMN, environ 1 arcmin, https://arxiv.org/pdf/2206.11365.
+- FRIPON (réseau français de caméras fisheye) : modèle astrométrique par caméra précis à environ 2 arcmin (1σ), erreur externe 0,8 arcmin, et mesures possibles à 5° d'élévation avec 1 arcmin soit 0,1 pixel. Jeanne et al. 2019, A&A 627, A78, https://www.aanda.org/articles/aa/abs/2019/07/aa34990-18/aa34990-18.html.
+- MIRACLE : je n'ai pas trouvé de chiffre de précision astrométrique publié [non vérifié].
+
+Transposition à l'IMX477 + 2,7 mm [calcul] : 0,1 à 0,2 pixel = 0,06 à 0,11 mrad (0,2 à 0,4 arcmin) en théorie ; en pratique on retient **0,2 à 0,3 mrad (0,7 à 1 arcmin)** comme réaliste après calibration, et environ deux fois plus avec le 1,6 mm ou en binning 2x2.
+
+#### 2.3 Erreur totale de pointage sur une aurore (budget) [estimation argumentée]
+
+| Contribution | Structure fine (bord inférieur d'arc net, rai, piquet STEVE) | Lueur diffuse (rouge, SAR) |
+|---|---|---|
+| Astrométrie | 0,2 à 0,3 mrad | 0,2 à 0,3 mrad |
+| Réfraction résiduelle (e ≈ 5°) | 0,1 mrad | 0,1 mrad |
+| Localisation de la structure dans l'image (0,5 à 1 px binning 2x2 pour un bord net) | 0,5 à 1 mrad | 3 à 10 mrad (bord flou sur des dizaines de km) |
+| Désynchronisation et flou de pose (voir section 4) | 0,1 à 1 mrad | négligeable (structure lente) |
+| **Total retenu** | **≈ 1 mrad** | **≈ 3 à 5 mrad** |
+
+Les tables de la section 3 sont données pour 1 mrad ; elles sont linéaires : multiplier par 3 à 5 pour une lueur diffuse.
+
+---
+
+### 3. Précision d'altitude selon la ligne de base
+
+#### 3.1 Méthode [calcul]
+
+- Chaque station donne une direction de visée (vecteur unitaire u, distance oblique s). Une erreur angulaire σ se traduit par une erreur de position σ s dans les deux directions perpendiculaires à u.
+- **Cas « point »** (structure identifiable en deux dimensions : rai, piquet, tache) : chaque station apporte 2 équations ; on résout par moindres carrés pondérés l'inconnue 3D, covariance C = (Aᵀ W A)⁻¹, et on projette C sur la verticale locale pour obtenir σ_h.
+- **Cas « arc »** (arc allongé est-ouest, position le long de l'arc inconnue) : chaque station n'apporte qu'une équation, la composante perpendiculaire à l'arc dans le plan image ; les inconnues sont la position nord-sud et l'altitude.
+- Base nord-sud : seconde station B km au nord de Grenoble. Base est-ouest : deux stations à ±B/2 de part et d'autre de Grenoble.
+
+#### 3.2 Résultats pour σ = 1 mrad (cas « point ») [calcul]
+
+σ_h en km :
+
+| h, L | B = 20 km NS / EO | 50 km | 100 km | 200 km | 500 km |
+|---|---|---|---|---|---|
+| 110 km, 50°N | 31 / 5,2 | 11,5 / 2,1 | 5,1 / 1,1 | 2,1 / 0,7 | 0,6 / 0,5 |
+| 110 km, 52°N | 96 / 8,5 | 36 / 3,4 | 15,7 / 1,8 | 6,2 / 1,0 | 1,5 / 0,7 |
+| 110 km, 55°N | 1005 / 16 | 335 / 6,4 | 128 / 3,3 | 41 / 1,8 | 6,3 / 1,0 |
+| 200 km, 50°N | 29 / 9,1 | 10,8 / 3,7 | 4,9 / 1,9 | 2,1 / 1,0 | 0,7 / 0,6 |
+| 200 km, 52°N | 69 / 13,8 | 26 / 5,5 | 11,9 / 2,8 | 5,0 / 1,5 | 1,4 / 0,8 |
+| 200 km, 55°N | 242 / 23 | 91 / 9,4 | 41 / 4,7 | 17,1 / 2,5 | 4,2 / 1,3 |
+| 300 km, 50°N | 31 / 14,2 | 11,8 / 5,7 | 5,5 / 2,9 | 2,4 / 1,5 | 0,8 / 0,8 |
+| 300 km, 52°N | 65 / 20 | 25 / 8,1 | 11,4 / 4,1 | 5,0 / 2,1 | 1,5 / 1,1 |
+| 300 km, 55°N | 178 / 32 | 68 / 12,9 | 32 / 6,5 | 13,7 / 3,3 | 3,8 / 1,6 |
+
+#### 3.3 Résultats pour σ = 1 mrad (cas « arc est-ouest ») [calcul]
+
+- Base nord-sud : valeurs identiques à la colonne NS ci-dessus.
+- Base est-ouest : **erreur infinie** (système singulier) pour toutes les bases, car les deux stations voient l'arc se décaler le long de lui-même.
+
+Lecture : la colonne EO du cas « point » paraît meilleure parce qu'elle exploite la parallaxe en azimut, perpendiculaire à la ligne de visée ; mais cette parallaxe n'est mesurable que sur des structures ponctuelles (rais, piquets, extrémités d'arc, plis). Comme la majorité des arcs sont orientés est-ouest [source : Whiter et al. 2013, citant Syrjäsuo et Donovan 2005], **la base nord-sud est la base de dimensionnement**, la base est-ouest est un complément pour les rais.
+
+Ordre de grandeur utile : pour une base nord-sud, σ_h varie à peu près comme σ s² / B (s : distance oblique, B : base) ; doubler la distance de l'aurore impose de quadrupler la base pour garder la même précision [calcul, approximation de parallaxe].
+
+#### 3.4 Une seule station avec une hauteur supposée [calcul]
+
+C'est ce que fait une caméra isolée qui projette son image sur une carte. Erreur de position au sol pour 10 km d'erreur sur la hauteur supposée :
+
+| h supposée | L = 50°N | 52°N | 55°N |
+|---|---|---|---|
+| 110 km | 39 km | 47 km | 51 km |
+| 200 km | 23 km | 30 km | 35 km |
+| 300 km | 16 km | 21 km | 26 km |
+
+Pour l'aurore basse au nord, une incertitude de 30 km sur la hauteur (fréquente entre 100 et 130 km pour la raie verte) déplace l'aurore de 120 à 150 km vers le nord ou le sud sur une carte : c'est l'argument principal pour trianguler.
+
+#### 3.5 Configurations réelles [calcul]
+
+Distances depuis Grenoble : Chambéry 45 km, Lyon 93 km, Genève 117 km, Besançon 229 km, Dijon 243 km, Nancy 391 km, Strasbourg 407 km, Paris 481 km, Lille 636 km.
+
+σ_h en km pour σ = 1 mrad (multiplier par 3 à 5 pour une lueur diffuse). « Réseau local 5 » = Grenoble, Chambéry, Lyon, Valence, Genève.
+
+| Cible | G+Chambéry | G+Lyon | G+Dijon | G+Nancy | G+Lille | Réseau local 5 | G+Lyon+Dijon+Nancy |
+|---|---|---|---|---|---|---|---|
+| Arc vert 110 km, 52°N (e = 4,8°) | 43 | 25 | 4,8 | 2,2 | 1,1 | 10,3 | (point 0,8) |
+| Arc vert 110 km, 55°N (e = 0,8°) | 404 | 187 | 29 | 10,9 | 3,8 | 86 | (point 1,8) |
+| Arc rouge 300 km, 50°N (e = 26°) | 14 | 9,0 | 2,0 | 1,1 | 0,7 | 3,5 | (point 0,7) |
+| Arc rouge 300 km, 52°N (e = 18°) | 29 | 18,6 | 4,0 | 2,1 | 1,2 | 7,4 | (point 1,3) |
+| Arc SAR 400 km au zénith (45,2°N) | 5,4 | n.c. | 1,2 | n.c. | n.c. | 1,5 | (point 2,5 avec G+Lyon) |
+| Arc SAR 400 km à 48°N | 8,7 | n.c. | 1,3 | n.c. | n.c. | 2,2 | (point 3,3 avec G+Lyon) |
+| STEVE 250 km au-dessus de 46,5°N | 2,7 | n.c. | 0,5 | n.c. | n.c. | 0,7 | (point 1,1 avec G+Lyon) |
+
+(n.c. : non calculé.) Lyon se trouve surtout à l'ouest de Grenoble (0,57° de latitude d'écart seulement) : la paire Grenoble-Lyon est presque est-ouest, donc mauvaise pour les arcs.
+
+#### 3.6 Conclusion de la section 3
+
+- Une dizaine de stations réparties sur 50 à 100 km autour de Grenoble donne, pour un arc vert à 52°N, σ_h ≈ 10 km par mrad, soit 30 à 50 km pour une structure réelle : **insuffisant** pour distinguer 110 de 130 km. À 55°N, inutilisable.
+- Ce même groupe local est **adapté aux phénomènes de haute altitude proches du zénith** (SAR, STEVE, aurore rouge débordant jusqu'à 45 à 48°N lors des grandes tempêtes, comme en mai 2024) : 1,5 à 2 km par mrad.
+- **Configuration minimale pour l'aurore au nord** : Grenoble + une station 250 à 400 km au nord (Dijon ou Besançon, idéalement Nancy). Avec trois stations Grenoble, Dijon, Nancy, l'erreur est de 2 à 5 km par mrad pour la raie verte à 52°N et environ 2 km par mrad pour la raie rouge. Une station à Lille (636 km) ou en Belgique ramène l'erreur sous 1 à 2 km par mrad, mais l'aurore y est alors vue sous un angle très différent, ce qui complique l'appariement.
+- Le précédent historique va dans le même sens : Romick et Belon (1967) utilisaient deux photomètres séparés de 226 km, et MIRACLE travaille sur des paires de 108 km (Abisko-Kilpisjärvi) à 291 km (Kilpisjärvi-Sodankylä) [source pour 226 km et les coordonnées : Whiter et al. 2013 ; distances : calcul], mais avec l'aurore entre les stations, cas bien plus favorable que le nôtre.
+
+---
+
+### 4. Contraintes de mise en œuvre
+
+#### 4.1 Vitesses des structures [source]
+
+- Aurores pulsantes : période de quelques secondes à quelques dizaines de secondes (de moins de 1 s à plusieurs dizaines de s selon la définition), taches de 10 à 200 km, dérive de quelques centaines de m/s à 1 à 5 km/s selon le type et le secteur. Synthèse de recherche, sources : https://eprints.soton.ac.uk/437950/1/ISSIbook_pulsating_and_diffuse_aurora_revise3_nohighlight.pdf et https://arxiv.org/pdf/1806.09428.
+- Arcs actifs, rais, ondulations en sous-orage : quelques km/s le long de l'arc [non vérifié pour les valeurs exactes en sous-orage ; ordre de grandeur cohérent avec les 3 km/s d'un cas cité dans la synthèse ci-dessus].
+- SAR arcs : structures quasi stationnaires sur des minutes à heures [non vérifié].
+
+#### 4.2 Précision d'horodatage requise [calcul]
+
+Condition : le déplacement de la structure pendant l'écart d'horloge entre deux stations doit rester sous 0,5 mrad, soit Δt_max = 0,5 mrad x s / v.
+
+| Distance oblique | v = 0,3 km/s | 1 km/s | 3 km/s | 5 km/s |
+|---|---|---|---|---|
+| 550 km | 920 ms | 275 ms | 92 ms | 55 ms |
+| 800 km | 1330 ms | 400 ms | 133 ms | 80 ms |
+| 1100 km | 1830 ms | 550 ms | 183 ms | 110 ms |
+
+Pour les aurores pulsantes (allumage et extinction en une fraction de seconde), il faut aussi que les poses des différentes stations se recouvrent : décalage des débuts de pose ≪ durée de pose.
+
+Exigence retenue : **écart entre stations ≤ 10 ms**, avec une cible de 1 ms, soit un facteur 5 à 50 de marge. NTP sur Internet donne quelques ms quand il fonctionne, et se dégrade sans réseau [source : https://manual.raspberryshake.org/ntp.html] ; un GPS avec sortie PPS sur un GPIO du Pi, avec chrony, donne une précision de l'ordre de la microseconde [source : https://austinsnerdythings.com/2021/04/19/microsecond-accurate-ntp-with-a-raspberry-pi-and-pps-gps/]. Un GPS USB sans PPS plafonne vers 0,1 ms selon un commentaire non relu [source faible : https://hackaday.com/2022/01/20/ntp-server-gets-time-from-space]. Le GPS est donc recommandé moins pour la précision que pour l'autonomie (sites sans Internet fiable) et la traçabilité.
+
+Point dur logiciel : aujourd'hui Aurion lance `rpicam-still` pour chaque image (`src/adapters/rpi/camera_rpi.rs`) ; l'heure de lancement du processus n'est pas l'heure du début de la pose (délai de démarrage de libcamera, de plusieurs centaines de ms à quelques secondes en pose longue) [non vérifié en mesure, à mesurer sur Pi]. Il faut dater chaque image avec l'horodatage capteur fourni par libcamera (métadonnée SensorTimestamp) converti en UTC, ou déclencher la pose par le signal matériel de déclenchement externe que la documentation Raspberry Pi décrit pour la HQ Camera [non vérifié pendant cette étude, à confirmer]. Le capteur IMX477 est à obturateur déroulant : le décalage entre la première et la dernière ligne, de l'ordre de 0,1 s en pleine définition [non vérifié], est faible devant des poses de 1 à 5 s mais doit être noté dans les métadonnées.
+
+#### 4.3 Durée de pose et flou de mouvement [calcul]
+
+Flou angulaire = v x T_pose / s. Pour une pose de 2 s :
+
+| Distance oblique | v = 0,3 km/s | 1 km/s | 3 km/s | 5 km/s |
+|---|---|---|---|---|
+| 550 km | 1,1 mrad (1,9 px) | 3,6 mrad (6,3 px) | 10,9 mrad (19 px) | 18 mrad (32 px) |
+| 800 km | 0,8 mrad (1,3 px) | 2,5 mrad (4,4 px) | 7,5 mrad (13 px) | 12,5 mrad (22 px) |
+| 1100 km | 0,5 mrad (1,0 px) | 1,8 mrad (3,2 px) | 5,5 mrad (9,5 px) | 9,1 mrad (16 px) |
+
+(px : pixels de l'objectif 2,7 mm sans binning.) Le flou est plus gênant que la désynchronisation. Conséquences :
+- Poses de **1 à 2 s maximum** pendant une aurore active, 5 à 10 s seulement pour les SAR arcs et lueurs rouges lentes. MIRACLE utilisait 1 s pour le vert et 2 s pour le rouge et le bleu, avec une séquence synchronisée entre stations et une image verte au moins toutes les 20 s [source : Whiter et al. 2013].
+- Un objectif plus ouvert (f/1,4 à f/1,2) et le binning 2x2 permettent de raccourcir les poses ; le binning double le pixel (0,57 à 1,15 mrad), ce qui reste en dessous du flou.
+- Le flou étant symétrique autour du milieu de pose si la vitesse est constante, l'heure de référence d'une image doit être **le milieu de la pose**, avec la même convention partout.
+
+#### 4.4 Mise en correspondance des images
+
+Méthode de Whiter et al. 2013 [source : https://gi.copernicus.org/articles/2/131/2013/gi-2-131-2013.pdf, FMI, réseau MIRACLE] :
+- **Méthode 1, plan horizontal** (reprise d'Ashrafi et al. 2005) : on projette les deux images sur un plan horizontal à l'altitude h, on calcule le coefficient de corrélation de Pearson 2D entre les deux projections, on teste h de 80 à 270 km par pas de 10 km puis par pas de 1 km autour du maximum ; la hauteur retenue est celle qui maximise la corrélation. Biais d'environ 2 km (écart type 1,3 km) sur images synthétiques.
+- **Méthode 2, lignes de champ** (nouvelle) : on projette les deux images sur des lignes de champ géomagnétique (IGRF) tirées au hasard (espacement d'environ 5 km à 100 km), on garde les lignes où les deux profils d'émission sont corrélés (r > 0,5 puis r > 0,7 et écart des barycentres < 1 km), on moyenne les profils et on prend le pic. Correcte en moyenne, écart type 4,8 km ; 0,7 km (méthode 1) et 2,9 km (méthode 2) si on exclut les arcs orientés le long de la base (angles 15 à 75°).
+- **Hypothèse de hauteur unique par image** (méthode 1) : une seule valeur de hauteur par paire d'images. Les auteurs recommandent la méthode 1 pour les arcs proches de l'horizon ou dans le zénith magnétique d'une station, et pour les aurores larges et plates ; la méthode 2 pour les arcs entre les stations. Ils notent aussi qu'il n'est pas possible d'analyser des arcs situés loin au nord ou au sud des deux stations, et que les échecs correspondent aux arcs alignés avec la base (ambiguïté hauteur-longueur).
+- Temps de calcul : 5 à 10 s par paire sur un ordinateur de 2012, compatible avec un traitement serveur.
+
+Application au cas grenoblois [analyse] :
+- Notre cas (aurore 500 à 1000 km au nord, basse sur l'horizon, hors de la zone entre les stations) est exactement celui que Whiter et al. jugent difficile. La méthode 1 (plan horizontal, hauteur unique) est la seule transposable, à condition d'une base nord-sud de plusieurs centaines de km ; pour un arc rouge, la corrélation portera sur le bord inférieur ou les rais, pas sur la lueur.
+- Pour les structures fines (rais, piquets de STEVE, extrémités d'arcs), la triangulation de points appariés à la main ou par détection de caractéristiques suffit, comme l'ont fait les citoyens pour STEVE (piquets 95 à 150 km, STEVE 130 à 270 km, photos orientées sur les étoiles) [source : Archer et al. 2019, GRL, https://ui.adsabs.harvard.edu/abs/2019GeoRL..4610719A] et pour les « dunes » (couche fine vers 100 km, deux photographes à environ 120 km l'un de l'autre, images prises à la même seconde) [sources : https://doaj.org/article/761ca33eaebb4cec952da0c322a5fa30 et https://www.npr.org/2020/01/30/801195065/a-new-form-of-northern-lights-discovered-in-finland-by-amateur-sky-watchers].
+- L'hypothèse de hauteur unique est fausse dans le détail (un rai s'étend de 100 à 300 km et plus) ; il faut publier un résultat par raie (vert : canal G, rouge : canal R du capteur Bayer, avec la contamination croisée connue) et par structure, avec la corrélation obtenue comme indicateur de qualité.
+
+---
+
+### 5. Existant à mutualiser
+
+| Réseau, projet | Ce que c'est | Intérêt pour l'association | Source |
+|---|---|---|---|
+| MIRACLE (FMI) | 5 à 8 caméras all-sky en Fennoscandie et au Svalbard depuis 1996, filtres 557,7, 630, 427,8 nm, séquences synchronisées ; environ 4 x 10⁵ mesures de hauteur 1996-2007 | Méthode de référence (Whiter 2013), contact scientifique, comparaison | https://gi.copernicus.org/articles/2/131/2013/gi-2-131-2013.pdf ; https://en.ilmatieteenlaitos.fi/news/1216749 |
+| ALIS_4D (IRF, Suède) | 5 caméras sensibles espacées d'environ 50 km autour de Kiruna, tomographie, couplage EISCAT_3D | Exemple de conception multi-stations, données d'étalonnage | https://www.irf.se/en/forskning/kago/alis_4d/ |
+| FRIPON (France, Europe) | Plus de 100 caméras fisheye, distance médiane 80 km entre caméras, conçu pour les bolides ; calibration fisheye 1 à 2 arcmin | Réseau déjà installé sur toute la France, hébergeurs et calibration réutilisables ; un article de 2026 (Katz et al., Space Weather and Space Climate) l'a utilisé pour suivre l'ovale et un SAR arc en mai 2024 sur l'Europe du Sud | https://www.fripon.org/optic/ ; https://www.aanda.org/articles/aa/abs/2019/07/aa34990-18/aa34990-18.html ; https://www.swsc-journal.org/articles/swsc/abs/2026/01/swsc250042/swsc250042.html (texte complet non lu, accès refusé à l'outil) |
+| Global Meteor Network | Caméras Raspberry Pi bon marché, logiciel RMS ouvert, calibration 0,5 à 1 arcmin, triangulation multi-stations | Logiciel et modèle de distorsion directement réutilisables, culture de réseau citoyen | https://arxiv.org/abs/2107.12335 |
+| Aurorasaurus (NASA) | Signalements et photos citoyennes, plus de 5000 rapports validés de plus de 50 pays en mai 2024 ; reconstructions stéréoscopiques évoquées | Validation, diffusion grand public | https://meetingorganizer.copernicus.org/EGU26/EGU26-16003.html |
+| Skywarden (Taivaanvahti, Ursa, Finlande) | Catalogue d'observations citoyennes utilisé par la recherche (dunes, tempête de mai 2024) | Modèle de base de données citoyenne | https://angeo.copernicus.org/articles/44/855/2026/ ; https://arxiv.org/abs/2610.19929 |
+| AuroraWatch UK, BGS | Caméras all-sky Raspberry Pi au Royaume-Uni | Partenaires potentiels pour une base nord-sud très longue | https://aurorawatch.lancs.ac.uk/build ; https://geomag.bgs.ac.uk/education/aurora_cam.html |
+| ARCTICS (UNIS) | Coordination de la science citoyenne aurorale | Réseau de contacts | https://www.unis.no/project/arctics-auroral-research-coordination-towards-internationalised-citizen-science/ |
+| allskykamera.space | Réseau d'amateurs germanophones de caméras all-sky Raspberry Pi | Stations existantes au nord-est (Allemagne) | https://allskykamera.space/machmit.php?lang=en |
+| Triangulation citoyenne STEVE (M. Hunnekuhl) | Méthodes robustes de triangulation de photos citoyennes (étoiles, météores, repères) | Méthode pour photos non synchronisées | https://ui.adsabs.harvard.edu/abs/2021AGUFMSA35F1957H |
+
+Je n'ai pas trouvé de projet amateur européen de triangulation systématique de l'altitude des aurores aux latitudes françaises : le créneau semble libre [constat de recherche, non exhaustif].
+
+---
+
+### 6. Recommandations pour l'association
+
+#### 6.1 Nombre et position des stations
+
+Réseau cible de 10 stations, en deux groupes :
+
+| Rôle | Nombre | Positions types (indicatives) | Justification chiffrée |
+|---|---|---|---|
+| Groupe zénithal alpin | 3 à 4 | Grenoble (site en altitude, horizon nord dégagé), Chambéry ou Bauges, Valence ou Vercors, Genève ou Annecy | SAR, STEVE, aurore rouge au zénith : 0,5 à 2 km par mrad ; redondance contre les nuages ; vitrine grand public |
+| Chaîne nord-sud | 4 à 5 | Lyon nord ou Bourg-en-Bresse, Besançon ou Dijon (230 à 245 km), Nancy ou Strasbourg (390 à 410 km), Reims ou Metz | Aurore au nord : 2 à 5 km par mrad (vert 52°N), environ 2 km par mrad (rouge 300 km) |
+| Station lointaine en partenariat | 1 à 2 | Lille, Belgique, Royaume-Uni (AuroraWatch, BGS) ou stations FRIPON existantes | Base 600 km et plus : 1 km par mrad ; sert aussi d'étalon |
+
+Configuration minimale de départ (phase 1) : Grenoble + Dijon ou Besançon + Nancy, soit 3 stations, alignées à peu près nord-sud. Ajouter ensuite le groupe alpin et la station lointaine.
+
+Règles d'implantation : horizon nord dégagé jusqu'à 2 à 3°, faible pollution lumineuse vers le nord, alimentation et réseau stables, coordonnées GPS au mètre.
+
+#### 6.2 Matériel minimum par station (palier « association »)
+
+- Raspberry Pi 5 (ou 4) + HQ Camera IMX477, comme Aurion aujourd'hui.
+- **GPS avec sortie PPS** câblée sur un GPIO, antenne extérieure, chrony : horodatage à la microseconde, autonomie sans Internet.
+- **Objectif** : deux options.
+  - Objectif all-sky 1,4 à 1,8 mm f/1,4 pointé au zénith (champ complet, 0,86 à 1,1 mrad par pixel) : indispensable pour SAR et STEVE au zénith, acceptable au nord.
+  - Pour les stations de la chaîne nord-sud, un 2,7 mm (0,57 mrad par pixel) incliné vers le nord avec l'axe vers 30 à 35° d'élévation, pour que l'horizon nord tombe à 55 à 60° de l'axe, loin du bord où la PSF se dégrade (limite signalée par le GMN). Champ de 133° x 100° [calcul].
+- Dôme acrylique ou verre, chauffage anti-rosée, mesure température et pression (correction de réfraction).
+- Option palier scientifique : filtres interférentiels 557,7 et 630 nm (comme MIRACLE) ou deuxième caméra, pour séparer proprement les raies ; caméra refroidie si le budget de 20 à 50 k€ le permet.
+
+#### 6.3 Format de données
+
+- **Images RAW 12 bits** (pas de JPEG pour la science), en FITS, une extension par canal ou image Bayer brute.
+- En-tête FITS minimal : `DATE-OBS` (UTC, début de pose, à la microseconde), `DATE-AVG` (milieu de pose), `EXPTIME`, `GAIN`, `CCD-TEMP`, `SITELAT`, `SITELONG`, `SITEELEV` (WGS84), identifiant de station, objectif, orientation, `TIMESYNC` (source : PPS, NTP, aucune) et écart d'horloge mesuré par chrony, version logicielle, convention obturateur déroulant.
+- Fichier de calibration astrométrique par station et par nuit (JSON) : modèle de distorsion radiale impaire (type GMN ou FRIPON), résidus RMS, nombre d'étoiles, date, masque d'horizon.
+- Événements : paquet (images ± quelques minutes + métadonnées) envoyé à un serveur commun, plus des aperçus JPEG pour le public.
+
+#### 6.4 Ce qu'Aurion doit implémenter (sur le Pi)
+
+Par ordre de priorité, en gardant l'installation simple pour le grand public (fonctions activables) :
+1. **Horodatage fiable** : support chrony + GPS PPS, détection automatique, statut de synchronisation dans l'interface et dans chaque image ; datation par l'horodatage capteur libcamera (ou déclenchement externe), pas par l'heure de lancement de `rpicam-still`.
+2. **Poses synchronisées sur une grille UTC** commune (par exemple début de pose à chaque multiple de 5 ou 10 s), identiques sur toutes les stations du réseau, avec un mode « tempête » à poses courtes (1 à 2 s, binning 2x2).
+3. **Capture RAW en continu** (pas seulement à la demande) et écriture FITS avec l'en-tête ci-dessus ; sans doute via un pipeline libcamera persistant plutôt qu'un processus par image, ce qui réduit aussi la latence.
+4. **Calibration astrométrique automatique** sur étoiles par nuit claire (réutiliser le modèle et le code de RMS du GMN ou d'astrometry.net), avec correction de réfraction à partir de la température et de la pression.
+5. **Export réseau** : envoi des paquets d'événements vers un serveur de l'association, configuration de la station (coordonnées, orientation, masque d'horizon).
+
+Côté serveur (pas sur le Pi) : appariement multi-stations, triangulation de points (rais, piquets), méthode 1 de Whiter et al. adaptée (corrélation sur plan horizontal, balayage de 80 à 450 km pour inclure le rouge), estimation d'erreur par la propagation de la section 3, publication d'un catalogue de hauteurs par raie.
+
+#### 6.5 Pièges à anticiper
+
+- Les tempêtes visibles depuis la France sont rares (quelques nuits par cycle solaire) : il faut que tout le réseau fonctionne sans intervention le soir venu ; prévoir des tests avec les météores et les satellites, qui servent aussi à valider la synchronisation (un bolide FRIPON triangulé par deux stations Aurion donne une vérification indépendante).
+- La couverture nuageuse rend rare le ciel clair simultané sur Grenoble et Nancy : c'est une raison de plus d'avoir plusieurs stations par zone.
+- La partie verte basse de l'aurore est souvent masquée par le relief ou l'extinction : les résultats porteront surtout sur la partie rouge et le sommet des rais.
+
+---
+
+### Annexe : hypothèses et limites des calculs
+
+- Terre sphérique, pas d'ellipsoïde ni de géoïde ; erreur relative de l'ordre de 0,3 % sur les distances.
+- Erreurs angulaires gaussiennes, indépendantes entre stations et entre axes ; les erreurs systématiques (orientation de la caméra, réfraction) ne se moyennent pas avec le nombre d'images.
+- Le modèle « arc » suppose un arc parfaitement est-ouest au méridien de Grenoble ; un arc incliné rend une partie de la base est-ouest utile.
+- Les aurores sont des volumes émissifs transparents, pas des surfaces : la précision réelle d'un « pic d'émission » est limitée par l'épaisseur de la couche (dizaines de km), comme le soulignent Whiter et al.
+- Réfraction : formule de Bennett à 10 °C et 1010 hPa ; extinction 0,25 mag par masse d'air choisie comme hypothèse.

@@ -6,7 +6,7 @@ use tracing::{info, warn, error};
 use crate::core::config::{AppConfig, DenoiseConfig};
 use crate::core::denoise::Stacker;
 use crate::core::detection::AuroraDetector;
-use crate::core::exposure::{ExposureController, compute_histogram};
+use crate::core::exposure::{ExposureController, compute_histogram, CALIBRATION_MAX_FRAMES};
 use crate::core::models::{
     CaptureFrame, DetectionResult, ExposureSettings, OutputFormat, Phase, SessionEvent, StorageStatus, TimeRange,
 };
@@ -351,21 +351,30 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         files.text("=======================");
     }
 
-    /// CALIBRATION: 3 frames to stabilize exposure. Captured in /tmp (the
-    /// USB key may be slow at startup), never saved.
+    /// CALIBRATION: start from the middle of the exposure range and jump
+    /// towards the target, up to CALIBRATION_MAX_FRAMES frames, stopping as
+    /// soon as it converges (before 1.15.0: 3 frames from the minimum at
+    /// +15 % each, so the night started 5 to 6 stops underexposed). Captured
+    /// in /tmp (the USB key may be slow at startup), never saved.
     async fn calibrate(&self, config: &AppConfig, exposure: &mut ExposureController, files: &mut NightFiles) {
         let tmp_path = Path::new("/tmp");
-        info!("Orchestrator: calibrating exposure (3 frames)...");
-        for i in 0..3 {
+        let start = exposure.calibration_start();
+        info!("Orchestrator: calibrating exposure from ISO {} / {}µs...", start.iso, start.shutter_us);
+        let mut converged = false;
+        for i in 0..CALIBRATION_MAX_FRAMES {
             match self.camera.capture_jpg(&exposure.current(), tmp_path).await {
                 Ok(frame) => {
                     let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
                     let hist = compute_histogram(roi_data);
-                    let settings = exposure.update(&hist, Phase::Calibration);
+                    converged = exposure.calibration_step(&hist);
+                    let settings = exposure.current();
                     info!(
-                        "Orchestrator: calibration {}/3 → ISO {} / {}µs",
-                        i + 1, settings.iso, settings.shutter_us
+                        "Orchestrator: calibration {}/{} → ISO {} / {}µs",
+                        i + 1, CALIBRATION_MAX_FRAMES, settings.iso, settings.shutter_us
                     );
+                    if converged {
+                        break;
+                    }
                 }
                 Err(e) => {
                     warn!("Orchestrator: calibration capture failed: {}", e);
@@ -375,7 +384,12 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
 
         let settings = exposure.current();
-        let calib_msg = format!("Calibration done: ISO {} / {}µs", settings.iso, settings.shutter_us);
+        let calib_msg = format!(
+            "Calibration done: ISO {} / {}µs{}",
+            settings.iso,
+            settings.shutter_us,
+            if converged { "" } else { " (not converged: the exposure keeps adjusting, the lock waits)" }
+        );
         self.log(&calib_msg).await;
         files.text(&calib_msg);
     }
@@ -1055,8 +1069,10 @@ impl NightLoop {
         let roi_data = crop_roi(&frame.data, frame.width, frame.height, config.detection.roi_top_percent);
         let hist = compute_histogram(roi_data);
         // Timelapse: optionally freeze the exposure once capturing
-        // (zero flicker; ramping can be done in post-processing).
-        if !(phase == Phase::Run && config.exposure.lock_in_run) {
+        // (zero flicker; ramping can be done in post-processing). Only once
+        // the exposure has reached the target: before 1.15.0 the lock froze
+        // the underexposed end of the calibration for the whole night.
+        if !(phase == Phase::Run && config.exposure.lock_in_run && self.exposure.settled()) {
             self.exposure.update(&hist, phase);
         }
         // The detector extracts the ROI itself: give it the full frame
@@ -1527,7 +1543,17 @@ mod tests {
             wait_iters: 0,
         };
 
+        // Not settled yet (calibration did not converge): the lock waits
+        let mut unsettled = night(&config);
+        let before = unsettled.exposure.current();
+        unsettled.analyze(&frame, &config, Phase::Run);
+        assert_ne!(unsettled.exposure.current(), before, "RUN, lock but exposure not settled: still adjusting");
+
+        // Settled (calibration converged on a sky at the target): frozen
         let mut locked = night(&config);
+        let mut on_target = [0u32; 256];
+        on_target[config.exposure.target_brightness as usize] = 1000;
+        assert!(locked.exposure.calibration_step(&on_target));
         let before = locked.exposure.current();
         locked.analyze(&frame, &config, Phase::Run);
         assert_eq!(locked.exposure.current(), before, "RUN with the lock: frozen");

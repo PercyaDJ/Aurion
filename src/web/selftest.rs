@@ -173,7 +173,7 @@ async fn capture_pair(state: &AppState, awb: &str) -> Result<(Vec<u8>, Vec<u8>),
     let result = crate::sys::run(
         "rpicam-still",
         &["--nopreview", "-o", &out, "-t", "100", "--shutter", "10000", "--gain", "1", "--awb", awb,
-          "--thumb", "320:240:70", "--raw"],
+          "--thumb", "320:240:90", "--raw"],
         Duration::from_secs(40),
     )
     .await;

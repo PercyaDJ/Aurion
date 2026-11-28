@@ -454,7 +454,7 @@ async fn rpicam_still(
         "rpicam-still",
         // Small EXIF thumbnail: the auto-exposure meters it, not the 12 MP image
         &["--nopreview", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain, "--awb", awb,
-          "--thumb", "320:240:70"],
+          "--thumb", "320:240:90"],
         timeout,
     )
     .await?;
@@ -475,10 +475,9 @@ pub async fn capture_preview(State(state): State<AppState>) -> Response {
     let config = state.config.read().await.clone();
     let tmp_path = state.paths.tmp_dir.join("aurion_preview.jpg");
 
-    let mid_iso = ((config.exposure.iso_min as f64) * (config.exposure.iso_max as f64)).sqrt() as u32;
-    let mid_shutter = ((config.exposure.shutter_min_us as f64) * (config.exposure.shutter_max_us as f64)).sqrt() as u64;
+    // Same starting point as the night calibration (middle of the range)
     let mut expo = crate::core::exposure::ExposureController::from_config(&config.exposure);
-    expo.set(crate::core::models::ExposureSettings::new(mid_iso, mid_shutter));
+    expo.calibration_start();
 
     let mut last: Option<(Vec<u8>, crate::core::models::ExposureSettings)> = None;
     for i in 0..4 {

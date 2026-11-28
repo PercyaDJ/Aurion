@@ -95,7 +95,7 @@ impl CameraRpi {
         cmd.arg("--denoise").arg(&self.isp_denoise);
         // Small JPEG embedded in the EXIF block: analysed instead of the
         // 12 MP image (≈150× less CPU per frame, i.e. battery life)
-        cmd.arg("--thumb").arg("320:240:70");
+        cmd.arg("--thumb").arg("320:240:90");
 
         if raw {
             cmd.arg("--raw");

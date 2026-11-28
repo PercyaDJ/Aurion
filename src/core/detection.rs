@@ -25,6 +25,12 @@ pub struct AuroraDetector {
     was_detected: bool,
 }
 
+/// Colour dominance of a pixel: (green, red, blue) minus the mean of the
+/// two other channels.
+fn dominance(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
+    (g - (r + b) / 2.0, r - (g + b) / 2.0, b - (r + g) / 2.0)
+}
+
 impl AuroraDetector {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -107,15 +113,19 @@ impl AuroraDetector {
         };
         let moon_masked = moon_mask.iter().any(|&m| m);
 
-        // 3. Compute per-color scores + area on non-masked pixels
+        // 3. Compute per-color scores + area on non-masked pixels.
+        // Areas are counted at the trigger threshold and at the hold
+        // threshold (trigger × hysteresis_off / hysteresis_on).
         let eps = 1e-3_f64;
+        let hold = if self.hysteresis_on > 0.0 { (self.hysteresis_off / self.hysteresis_on).clamp(0.0, 1.0) } else { 1.0 };
         let mut green_total = 0.0_f64;
         let mut red_total = 0.0_f64;
         let mut blue_total = 0.0_f64;
         let mut lum_total = 0.0_f64;
-        let mut green_area = 0u32;
-        let mut red_area = 0u32;
-        let mut violet_area = 0u32;
+        // [trigger, hold] pixel counts per colour
+        let mut green_area = [0u32; 2];
+        let mut red_area = [0u32; 2];
+        let mut violet_area = [0u32; 2];
         let mut pixel_count = 0u32;
 
         for i in 0..total_roi_pixels {
@@ -134,10 +144,7 @@ impl AuroraDetector {
                 continue;
             }
 
-            // Color dominance scores
-            let gs = g - (r + b) / 2.0;
-            let rs = r - (g + b) / 2.0;
-            let bs = b - (r + g) / 2.0;
+            let (gs, rs, bs) = dominance(r, g, b);
 
             green_total += gs.max(0.0);
             red_total += rs.max(0.0);
@@ -145,16 +152,17 @@ impl AuroraDetector {
             lum_total += lum;
             pixel_count += 1;
 
-            // Area counting: pixels above respective thresholds
-            if gs > self.green_threshold {
-                green_area += 1;
-            }
-            if rs > self.red_threshold {
-                red_area += 1;
-            }
-            // Violet: moderate red AND blue, both above half their thresholds
-            if rs > self.red_threshold * 0.5 && bs > self.blue_threshold * 0.5 {
-                violet_area += 1;
+            for (k, f) in [1.0, hold].into_iter().enumerate() {
+                if gs > self.green_threshold * f {
+                    green_area[k] += 1;
+                }
+                if rs > self.red_threshold * f {
+                    red_area[k] += 1;
+                }
+                // Violet: moderate red AND blue, both above half their thresholds
+                if rs > self.red_threshold * 0.5 * f && bs > self.blue_threshold * 0.5 * f {
+                    violet_area[k] += 1;
+                }
             }
         }
 
@@ -167,53 +175,54 @@ impl AuroraDetector {
         let red_score = red_total / pf;
         let violet_score = blue_total / pf; // blue serves as violet proxy
         let luminosity = lum_total / pf;
+        let pct = |n: u32| n as f64 / pf * 100.0;
 
-        // Area percentages
-        let green_area_pct = green_area as f64 / pixel_count as f64 * 100.0;
-        let red_area_pct = red_area as f64 / pixel_count as f64 * 100.0;
-        let violet_area_pct = violet_area as f64 / pixel_count as f64 * 100.0;
-
-        // 4. Determine dominant color and score
-        let (aurora_score, aurora_color, area_percent) = {
-            let mut best_score = 0.0_f64;
-            let mut best_color = AuroraColor::None;
-            let mut best_area = 0.0_f64;
-
-            // Green
-            if green_score > self.green_threshold && green_area_pct > self.area_min_percent {
-                let s = green_score / (self.green_threshold + eps);
-                if s > best_score { best_score = s; best_color = AuroraColor::Green; best_area = green_area_pct; }
+        // 4. Dominant colour and continuous score: colour strength relative
+        // to its threshold (>= 1 for a clear aurora). Before 1.15.0 the score
+        // was 0 or > 1, so the hold threshold (hysteresis_off) had no effect.
+        // A colour only counts if enough sky shows it at the hold threshold.
+        let candidates = [
+            (green_score / (self.green_threshold + eps), AuroraColor::Green, pct(green_area[0]), pct(green_area[1])),
+            (red_score / (self.red_threshold + eps), AuroraColor::Red, pct(red_area[0]), pct(red_area[1])),
+            (violet_score / (self.blue_threshold + eps), AuroraColor::Violet, pct(violet_area[0]), pct(violet_area[1])),
+        ];
+        let mut best = (0.0_f64, AuroraColor::None, 0.0_f64, 0.0_f64);
+        for c in candidates {
+            if c.3 > self.area_min_percent && c.0 > best.0 {
+                best = c;
             }
-            // Red
-            if red_score > self.red_threshold && red_area_pct > self.area_min_percent {
-                let s = red_score / (self.red_threshold + eps);
-                if s > best_score { best_score = s; best_color = AuroraColor::Red; best_area = red_area_pct; }
-            }
-            // Violet
-            if violet_score > self.blue_threshold && violet_area_pct > self.area_min_percent {
-                let s = violet_score / (self.blue_threshold + eps);
-                if s > best_score { best_score = s; best_color = AuroraColor::Violet; best_area = violet_area_pct; }
-            }
+        }
+        let (aurora_score, mut aurora_color, area_percent, _) = best;
 
-            (best_score, best_color, best_area)
-        };
-
-        // 5. Spatial spread check
-        let is_spread = self.check_spatial_spread(roi_pixels, width, roi_height);
+        // 5. Spatial spread check, on the dominant colour (before 1.15.0 it
+        // tested raw green brightness > 60, which blocked red auroras)
+        let spread_threshold = match aurora_color {
+            AuroraColor::Red => self.red_threshold,
+            AuroraColor::Violet => self.blue_threshold * 0.5,
+            _ => self.green_threshold,
+        } * hold;
+        let is_spread = aurora_color != AuroraColor::None
+            && self.check_spatial_spread(roi_pixels, width, roi_height, aurora_color, spread_threshold);
 
         // 6. Hystérésis decision
         let detected = if self.was_detected {
             // Was detected: stay detected unless score drops below hysteresis_off
             aurora_score >= self.hysteresis_off && is_spread
         } else {
-            // Not detected: trigger only if score exceeds hysteresis_on
-            aurora_score >= self.hysteresis_on && is_spread
+            // Not detected: trigger only on a clear aurora over enough area
+            aurora_score >= self.hysteresis_on && area_percent > self.area_min_percent && is_spread
         };
         self.was_detected = detected;
+        // Below the hold threshold the dominant colour is noise, not aurora
+        if aurora_score < self.hysteresis_off {
+            aurora_color = AuroraColor::None;
+        }
 
-        // Confidence
+        // Confidence: 0 at the hold threshold, 1 at twice the trigger
+        // threshold (before 1.15.0 it was always 1.0 when detected).
         let confidence = if detected {
-            (aurora_score / self.hysteresis_on).min(1.0)
+            let span = (2.0 * self.hysteresis_on - self.hysteresis_off).max(1e-6);
+            ((aurora_score - self.hysteresis_off) / span).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -320,7 +329,7 @@ impl AuroraDetector {
     }
 
     /// Check if bright areas are spatially spread (not concentrated like headlights).
-    fn check_spatial_spread(&self, rgb_data: &[u8], width: u32, height: u32) -> bool {
+    fn check_spatial_spread(&self, rgb_data: &[u8], width: u32, height: u32, color: AuroraColor, threshold: f64) -> bool {
         if width == 0 || height == 0 {
             return false;
         }
@@ -335,7 +344,6 @@ impl AuroraDetector {
         }
 
         let mut bright_cells = 0u32;
-        let bright_threshold = 60.0;
 
         for gy in 0..grid_rows {
             for gx in 0..grid_cols {
@@ -346,14 +354,19 @@ impl AuroraDetector {
                     for x in (gx * cell_w)..((gx + 1) * cell_w).min(width) {
                         let idx = ((y * width + x) * 3) as usize;
                         if idx + 2 < rgb_data.len() {
-                            let g = rgb_data[idx + 1] as f64;
-                            cell_sum += g;
+                            let (gs, rs, bs) =
+                                dominance(rgb_data[idx] as f64, rgb_data[idx + 1] as f64, rgb_data[idx + 2] as f64);
+                            cell_sum += match color {
+                                AuroraColor::Red => rs,
+                                AuroraColor::Violet => rs.min(bs),
+                                _ => gs,
+                            };
                             cell_count += 1;
                         }
                     }
                 }
 
-                if cell_count > 0 && (cell_sum / cell_count as f64) > bright_threshold {
+                if cell_count > 0 && (cell_sum / cell_count as f64) > threshold {
                     bright_cells += 1;
                 }
             }
@@ -502,21 +515,46 @@ mod tests {
     #[test]
     fn test_hysteresis_stickiness() {
         let mut det = default_detector();
-        // First: strong aurora → detected
+        // Clear green aurora (dominance 95 for a threshold of 15): triggers
         let img = make_aurora_image(100, 100);
-        let _r1 = det.analyze(&img, 100, 100);
-        // Start with detection (may not trigger due to hysteresis_on)
-        // Force detection by analyzing twice
-        let _ = det.analyze(&img, 100, 100);
+        let r1 = det.analyze(&img, 100, 100);
+        assert!(r1.detected && r1.aurora_score >= 1.0, "{:?}", r1);
 
-        // Now: if detected, score > hysteresis_off should keep it
-        if det.was_detected {
-            // A slightly weaker but still present green image
-            let weak = make_uniform_image(100, 100, 40, 80, 40);
-            let _r2 = det.analyze(&weak, 100, 100);
-            // Should stay detected due to hysteresis
-            // (depends on exact thresholds vs image values)
-        }
+        // Fading aurora: dominance 12 (score 0.8, between 0.7 and 1.0)
+        let weak = make_uniform_image(100, 100, 50, 62, 50);
+        let held = det.analyze(&weak, 100, 100);
+        assert!(held.detected, "held by the hysteresis: {:?}", held);
+        assert!(held.aurora_score > 0.7 && held.aurora_score < 1.0);
+        assert!(held.confidence > 0.0 && held.confidence < r1.confidence);
+
+        // The same weak sky does not trigger from scratch
+        let mut fresh = default_detector();
+        assert!(!fresh.analyze(&weak, 100, 100).detected, "below the trigger threshold");
+
+        // Gone: dominance 5 (score 0.33) releases the detection
+        let gone = det.analyze(&make_uniform_image(100, 100, 50, 55, 50), 100, 100);
+        assert!(!gone.detected);
+        assert_eq!(gone.aurora_color, AuroraColor::None);
+    }
+
+    #[test]
+    fn confidence_grows_with_the_aurora_strength() {
+        let mut a = default_detector();
+        let mut b = default_detector();
+        let medium = a.analyze(&make_uniform_image(100, 100, 40, 60, 40), 100, 100); // score 1.33
+        let strong = b.analyze(&make_uniform_image(100, 100, 30, 80, 30), 100, 100); // score 3.33
+        assert!(medium.detected && strong.detected);
+        assert!(medium.confidence < strong.confidence, "{} < {}", medium.confidence, strong.confidence);
+        assert_eq!(strong.confidence, 1.0);
+    }
+
+    #[test]
+    fn red_aurora_is_not_blocked_by_the_green_spread_check() {
+        let mut det = default_detector();
+        // Red dominance 25 (threshold 10), green far below 60
+        let r = det.analyze(&make_uniform_image(100, 100, 70, 45, 45), 100, 100);
+        assert!(r.detected, "{:?}", r);
+        assert_eq!(r.aurora_color, AuroraColor::Red);
     }
 
     #[test]
