@@ -176,8 +176,7 @@ impl<R: Read + Seek> DngReader<R> {
                     *d = b as u16;
                 }
             } else {
-                for (d, b) in dst.iter_mut().zip(self.row_buf.chunks_exact(2)) {
-                    let pair = [b[0], b[1]];
+                for (d, &pair) in dst.iter_mut().zip(self.row_buf.as_chunks::<2>().0) {
                     *d = if self.info.little_endian { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) };
                 }
             }
