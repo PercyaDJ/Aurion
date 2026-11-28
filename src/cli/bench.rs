@@ -77,11 +77,46 @@ pub fn run_bench(width: u32, height: u32) -> anyhow::Result<()> {
         band_ms * height.div_ceil(BAND_ROWS) as f64,
     ));
 
+    // Stack alignment: synthetic star field, the same field turned by 0.25°
+    // (about 60 s of sky rotation) around a point above the frame
+    use crate::core::align::align;
+    use crate::core::denoise::Transform;
+    use crate::core::stars::{detect_stars, random_stars, render_stars, sky_rows};
+    let roi = cfg.detection.roi_top_percent;
+    let sky = sky_rows(height, roi);
+    let truth = random_stars(width, sky, 150, 12);
+    let turn = Transform::rotation_about(0.25f64.to_radians(), width as f64 / 2.0, -(height as f64));
+    let moved: Vec<_> = truth.iter().map(|&(x, y, p)| { let (x, y) = turn.apply(x, y); (x, y, p) }).collect();
+    let ref_rgb = render_stars(width, height, &truth, 3.0, 1.5, sky, 1);
+    let new_rgb = render_stars(width, height, &moved, 3.0, 1.5, sky, 2);
+    let ref_stars = detect_stars(&ref_rgb, width, height, roi);
+    let new_stars = time("Empilement aligné : détection des étoiles (1 image)", &mut rows, || detect_stars(&new_rgb, width, height, roi));
+    let alignment = time("Empilement aligné : appariement et recalage", &mut rows, || align(&ref_stars.stars, &new_stars.stars));
+    let mut aligned = Stacker::new(width, height);
+    aligned.add(&ref_rgb);
+    let t = alignment.as_ref().map(|a| a.transform).unwrap_or(Transform::IDENTITY);
+    time("Empilement aligné : rééchantillonnage et ajout (1 image)", &mut rows, || aligned.add_warped(&new_rgb, &t, sky));
+
+    // RAW binning 2x2 of a full DNG held in memory (reading from the key
+    // comes on top)
+    let px: Vec<u16> = (0..width * height).map(|i| 256 + (i % 1024) as u16).collect();
+    let dng = crate::core::dng::test_dng_bytes(width, height, &px, &Default::default());
+    drop(px);
+    let mut reader = crate::core::dng::DngReader::new(std::io::Cursor::new(dng))?;
+    time("RAW : binning 2x2 par couleur (DNG en mémoire)", &mut rows, || crate::core::raw_bin::bin_raw(&mut reader, 2))?;
+
     println!();
     for (label, ms) in &rows {
-        println!("  {:<52} {:>9.1} ms", label, ms);
+        println!("  {:<58} {:>9.1} ms", label, ms);
     }
     println!("\n  Pixels chauds corrigés : {}", fixed);
+    match &alignment {
+        Ok(a) => println!(
+            "  Recalage : {} étoiles détectées, {} appariées, rotation {:.3}° (vraie : 0.250°), résidu {:.2} px",
+            new_stars.stars.len(), a.matches, a.transform.angle().to_degrees(), a.rms_px
+        ),
+        Err(e) => println!("  Recalage impossible : {}", e),
+    }
     println!("  Coût par image enregistrée avec correction des pixels chauds ≈ décodage + correction + encodage.");
     Ok(())
 }

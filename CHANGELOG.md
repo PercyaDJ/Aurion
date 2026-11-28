@@ -1,5 +1,31 @@
 # Journal des versions
 
+## 1.17.0
+
+Objectif : des étoiles ponctuelles dans le JPEG empilé, grâce au recalage des images sur les étoiles, et un RAW plus
+facile à exploiter (binning, script Siril par nuit) (lot 2b de [l'audit de novembre 2026](docs/AUDIT_AMELIORATIONS.md)).
+
+- **Empilement recalé sur les étoiles** (`_STACKn.jpg`, toujours désactivé par défaut) : chaque image est tournée pour
+  se superposer à la première de la pile avant d'être moyennée. Avant, la rotation du ciel filait les étoiles sur une
+  trentaine de pixels au plus (8 poses de 30 s avec l'objectif 2,7 mm). Seule la zone ciel (réglage *Zone analysée*)
+  est tournée, le sol reste en place. Les bords qui sortent du champ ne comptent pas dans la moyenne.
+- **Recalage expliqué dans `session.log`** : pour chaque image, la rotation trouvée, le nombre d'étoiles appariées et
+  l'écart restant, ou la raison pour laquelle l'image est ignorée (moins de 8 étoiles, étoiles non appariées, écart
+  trop grand). Une pile sans étoiles sur sa première image (nuages, Lune, crépuscule) est faite sans recalage, comme
+  avant. Une pile se ferme toujours après N images, avec celles qui ont pu être recalées.
+- **Limites** : l'aurore elle-même n'est pas recalée (une aurore rapide reste floue) et la distorsion du fisheye
+  limite la durée d'une pile. Détails dans le [guide photo](docs/GUIDE_PHOTO.md), levier 4. Nombre d'étoiles trouvées
+  et écarts à mesurer sur une vraie nuit.
+- **Mémoire de l'empilement** : environ 380 Mo en pleine résolution (370 Mo avant), pour compter les images de chaque
+  pixel.
+- **Aperçu des DNG dans la galerie** : un DNG sans miniature de capture (copié sur la clé, par exemple) a maintenant un
+  aperçu, calculé par binning du RAW sans dématriçage (couleurs brutes du capteur). Avant, il n'en avait aucun.
+- **Script Siril par nuit** : une nuit avec des RAW laisse `sessions/<nuit>/calibrer.ssf`, qui convertit les DNG et
+  les calibre avec le master dark aux mêmes ISO, pose et température. Lancement : voir le guide photo. À valider dans
+  Siril avec de vraies nuits.
+- **`aurion bench`** mesure aussi la détection des étoiles, l'appariement, la rotation d'une image pleine résolution
+  et le binning d'un DNG.
+
 ## 1.16.0
 
 Objectif : exploiter le RAW 12 bits au lieu du seul JPEG, avec la vraie température du capteur, un master dark prêt

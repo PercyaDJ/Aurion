@@ -4,7 +4,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 
 use crate::core::config::{AppConfig, DenoiseConfig};
-use crate::core::denoise::Stacker;
+use crate::core::align::AlignedStack;
 use crate::core::detection::AuroraDetector;
 use crate::core::exposure::{ExposureController, compute_histogram, CALIBRATION_MAX_FRAMES};
 use crate::core::models::{
@@ -639,7 +639,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     async fn run_step(
         &self,
         config: &AppConfig,
-        files: &NightFiles,
+        files: &mut NightFiles,
         night: &mut NightLoop,
         shot: Shot<'_>,
     ) {
@@ -647,7 +647,10 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             night.last_aurora_at = Some(self.now());
         }
         let raw = shot.raw.filter(|_| keeps_raw(config.capture.output_format, night.last_aurora_at.clone(), self.now()));
-        self.save_frame(config, &files.layout, shot.frame, raw, night.frame_number, shot.detected, &mut night.stacker).await;
+        let lines = self.save_frame(config, &files.layout, shot.frame, raw, night.frame_number, shot.detected, &mut night.stacker).await;
+        for line in lines {
+            files.text(&line);
+        }
         night.frame_number += 1;
         // Sensor temperature from the camera metadata, processor as fallback
         let sensor = shot.raw.map(|r| &r.metadata).unwrap_or(&shot.frame.metadata).sensor_temp_c;
@@ -667,6 +670,20 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         // Darks reminder shown on the home screen at the next power-on
         let dark_path = self.state.paths.dark_reminder.clone();
         if let Some(reminder) = stats.reminder(name, self.now().timestamp().as_millisecond()) {
+            // Siril script of the night, with the master dark of its settings
+            if let Some(dir) = path.as_deref() {
+                let (iso, shutter_us, temp_c) = (reminder.iso, reminder.shutter_us, reminder.temp_c);
+                match crate::core::siril_script::write_for_night(dir, iso, shutter_us, temp_c) {
+                    Ok(Some(choice)) => {
+                        let line = format!("Script Siril : {} (master dark {})", crate::core::siril_script::SCRIPT_NAME, choice.file());
+                        if let Some(ref mut sl) = logger {
+                            sl.log_text(&line);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => warn!("Orchestrator: Siril script: {}", e),
+                }
+            }
             let reminder = reminder.merge(DarkReminder::load(&dark_path));
             let summary = reminder.summary();
             if let Err(e) = reminder.save(&dark_path) {
@@ -728,7 +745,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// its `raw_bytes` hold the original full-resolution JPEG on the Pi.
     /// `raw_frame` is the pre-captured DNG (Some for RawDng/RawAndJpg).
     /// `is_aurora` controls whether `_AURORA` is appended to the filename.
-    /// `stacker` accumulates frames when stacking is enabled.
+    /// `stacker` accumulates frames when stacking is enabled. Returns the
+    /// lines to write in `session.log` (alignment of the stack).
     #[allow(clippy::too_many_arguments)]
     async fn save_frame(
         &self,
@@ -738,8 +756,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         raw_frame: Option<&CaptureFrame>,
         frame_num: u64,
         is_aurora: bool,
-        stacker: &mut Option<Stacker>,
-    ) {
+        stacker: &mut Option<AlignedStack>,
+    ) -> Vec<String> {
         let timestamp = self.now().strftime("%Y%m%d_%H%M%S");
         let suffix = if is_aurora { "_AURORA" } else { "" };
         let base = format!("aurora_{}_{:05}{}", timestamp, frame_num, suffix);
@@ -784,19 +802,38 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         }
 
         // ─── Stacking: one extra, less noisy image every N frames ───
+        // Frames are aligned on the stars of the first one of the stack
+        // (core::align); a frame that cannot be aligned is left out, so a
+        // stack is closed every N frames offered, with the frames it holds.
+        let mut lines = Vec::new();
         if denoise.stack_frames >= 2 {
-            if let Some(p) = processed.and_then(|p| p.full) {
-                let (w, h, rgb) = p;
-                let st = stacker.get_or_insert_with(|| Stacker::new(w, h));
-                if st.dimensions() != (w, h) {
-                    *st = Stacker::new(w, h);
-                }
-                st.add(&rgb);
-                if st.count() >= denoise.stack_frames {
-                    let n = st.count();
-                    let result = st.result();
-                    st.reset();
-                    if let Some(stacked) = result {
+            if let Some((w, h, rgb)) = processed.and_then(|p| p.full) {
+                let roi = config.detection.roi_top_percent;
+                let mut st = match stacker.take() {
+                    Some(st) if st.dimensions() == (w, h) && st.roi_top_percent() == roi => st,
+                    _ => AlignedStack::new(w, h, roi),
+                };
+                let target = denoise.stack_frames;
+                let joined = tokio::task::spawn_blocking(move || {
+                    let outcome = st.add_frame(&rgb);
+                    let mut done = None;
+                    if st.seen() >= target {
+                        let n = st.count();
+                        done = Some((n, if n >= 2 { st.result() } else { None }));
+                        st.reset();
+                    }
+                    (st, outcome, done)
+                })
+                .await;
+                let Ok((st, outcome, done)) = joined else {
+                    error!("Orchestrator: stacking task failed");
+                    return lines;
+                };
+                *stacker = Some(st);
+                info!("Orchestrator: {}", outcome.describe(frame_num));
+                lines.push(outcome.describe(frame_num));
+                match done {
+                    Some((n, Some(stacked))) => {
                         let name = format!("aurora_{}_{:05}_STACK{}{}.jpg", timestamp, frame_num, n, suffix);
                         let original = analysis_frame.raw_bytes.clone();
                         let jpeg = tokio::task::spawn_blocking(move || {
@@ -810,14 +847,21 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                                 if self.storage.save_file(&night.image(&name), &j).await.is_ok() {
                                     self.save_thumbnail(night, analysis_frame, &name).await;
                                     info!("Orchestrator: saved {} ({} images empilées)", name, n);
+                                    lines.push(format!("EMPILEMENT {} : {} images sur {}", name, n, target));
                                 }
                             }
                             None => error!("Orchestrator: stack encoding failed"),
                         }
                     }
+                    Some((n, None)) => lines.push(format!(
+                        "EMPILEMENT abandonné : {} image(s) recalée(s) sur {}, 2 au minimum",
+                        n, target
+                    )),
+                    None => {}
                 }
             }
         }
+        lines
     }
 
     /// Prepare the JPEG to save: the original bytes when no treatment is
@@ -1056,7 +1100,7 @@ struct NightLoop {
     exposure: ExposureController,
     detector: AuroraDetector,
     confirmation: AuroraConfirmation,
-    stacker: Option<Stacker>,
+    stacker: Option<AlignedStack>,
     iterations: u64,
     frame_number: u64,
     stats: NightStats,

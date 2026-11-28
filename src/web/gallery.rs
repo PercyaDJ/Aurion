@@ -647,9 +647,8 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
     if let Ok(data) = tokio::fs::read(thumb_path(&mount, &image)).await {
         return jpeg(data);
     }
-    if layout::is_raw(&filename) {
-        return StatusCode::NO_CONTENT.into_response(); // a DNG is never decoded here
-    }
+    let raw = layout::is_raw(&filename);
+    // Cached under the name of the image (a DNG preview is a JPEG too)
     let cache_path = state.paths.thumb_cache_dir.join(&filename);
     if let Ok(data) = tokio::fs::read(&cache_path).await {
         return jpeg(data);
@@ -661,7 +660,7 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
     };
     let cache_dir = state.paths.thumb_cache_dir.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let data = make_thumbnail(&source)?;
+        let data = if raw { raw_preview(&source)? } else { make_thumbnail(&source)? };
         let _ = std::fs::create_dir_all(&cache_dir);
         let _ = std::fs::write(&cache_path, &data);
         trim_thumb_cache(&cache_dir, THUMB_CACHE_MAX_FILES);
@@ -671,8 +670,25 @@ pub async fn get_gallery_thumbnail(State(state): State<AppState>, Path(filename)
 
     match result {
         Ok(Some(data)) => jpeg(data),
+        // Unreadable DNG: no preview, as before
+        _ if raw => StatusCode::NO_CONTENT.into_response(),
         _ => (StatusCode::UNPROCESSABLE_ENTITY, "Image illisible").into_response(),
     }
+}
+
+/// Preview of a DNG without capture-time thumbnail (RAW file copied to the
+/// key, or whose thumbnail was lost): the CFA image binned by colour plane
+/// down to at most 320×240 (`core::raw_bin`), read by bands of rows, never
+/// demosaiced. Raw sensor colours, no white balance.
+fn raw_preview(source: &FsPath) -> Option<Vec<u8>> {
+    use crate::core::raw_bin;
+    let mut reader = crate::core::dng::DngReader::open(source).ok()?;
+    let (w, h) = (reader.info().width, reader.info().height);
+    let binned = raw_bin::bin_raw(&mut reader, raw_bin::factor_for(w, h, THUMB_WIDTH, THUMB_HEIGHT)).ok()?;
+    if binned.width == 0 || binned.height == 0 {
+        return None;
+    }
+    crate::core::orchestrator::encode_jpeg(&raw_bin::preview_rgb(&binned), binned.width, binned.height)
 }
 
 /// The cache lives in RAM (tmpfs of 200 MB shared with the capture files):
