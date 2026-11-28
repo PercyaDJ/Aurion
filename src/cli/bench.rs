@@ -60,6 +60,23 @@ pub fn run_bench(width: u32, height: u32) -> anyhow::Result<()> {
     }
     time("Empilement : calcul du résultat (4 images)", &mut rows, || stack.result());
 
+    // Master dark: median of 10 darks, one band timed, extrapolated to the
+    // whole frame (CPU only: reading the DNGs from the key comes on top)
+    use crate::core::master_dark::{median_band, BAND_ROWS};
+    let band_len = (width * BAND_ROWS.min(height)) as usize;
+    let mut rng = crate::core::denoise::XorShift::new(9);
+    let bands: Vec<Vec<u16>> = (0..10)
+        .map(|_| (0..band_len).map(|_| (256.0 + 3.0 * rng.gaussian()) as u16).collect())
+        .collect();
+    let mut out = vec![0u16; band_len];
+    let start = Instant::now();
+    median_band(&bands, &mut out);
+    let band_ms = start.elapsed().as_secs_f64() * 1000.0;
+    rows.push((
+        "Master dark : médiane de 10 darks (calcul seul)".to_string(),
+        band_ms * height.div_ceil(BAND_ROWS) as f64,
+    ));
+
     println!();
     for (label, ms) in &rows {
         println!("  {:<52} {:>9.1} ms", label, ms);

@@ -1,5 +1,32 @@
 # Journal des versions
 
+## 1.16.0
+
+Objectif : exploiter le RAW 12 bits au lieu du seul JPEG, avec la vraie température du capteur, un master dark prêt
+pour Siril et un empilement qui moyenne la lumière (lot 2 de [l'audit de novembre 2026](docs/AUDIT_AMELIORATIONS.md)).
+
+- **Réglages réellement appliqués** : chaque photo de la nuit, de la série de darks et de la vérification demande ses
+  métadonnées à la caméra. Pose appliquée, gain analogique, gain numérique et température du capteur sont écrits dans
+  `event.jsonl` (champs `exposure_applied_us`, `analogue_gain`, `digital_gain`, `sensor_temp_c`) quand la caméra les
+  donne. Clés à confirmer sur le matériel.
+- **Rappel des darks** : il utilise la température du capteur au lieu de celle du processeur, qui reste la solution de
+  repli. L'accueil indique laquelle est affichée (*capteur* ou *processeur*).
+- **Master dark** : à la fin d'une série de darks réussie, Aurion calcule la médiane pixel à pixel des DNG et l'écrit
+  en FITS 16 bits dans `darks/master/` (`master_dark_ISO800_5.0s_T35.fits` : ISO, pose, température du capteur
+  arrondie à 5 °C), avec ISO, pose, température, date UTC et matrice de Bayer dans l'en-tête. Le calcul se fait par
+  bandes de lignes, sans charger les fichiers entiers, et sa progression s'affiche sur l'accueil et la page *Cadrage*.
+  Les DNG d'origine ne sont jamais modifiés. Utilisation dans Siril : voir le [guide photo](docs/GUIDE_PHOTO.md).
+- **Carte des pixels chauds** : un fichier texte documenté accompagne chaque master dark (pixels au-dessus de la
+  médiane + 6 fois l'écart absolu médian, seuil réglable par l'API).
+- **Empilement JPEG** (`_STACKn.jpg`, désactivé par défaut) : moyenne en lumière linéaire et non plus sur les valeurs
+  JPEG, avec un rejet à 2,5 écarts types qui ne retire que les valeurs vraiment aberrantes (avions, satellites). Avant,
+  la plus haute et la plus basse valeur de chaque pixel étaient toujours jetées : sur 4 images, il n'en restait que 2.
+  Il demande plus de mémoire : 10 octets par valeur de couleur, soit environ 370 Mo en pleine résolution au lieu
+  d'environ 150 Mo. Pas encore de recalage sur les étoiles (lot 2b).
+- **Vérification d'Aurion** : elle affiche la température du capteur et les gains lus dans les métadonnées, et vérifie
+  qu'Aurion sait lire le RAW de la caméra (taille, bits, matrice de Bayer, niveaux de noir et de blanc).
+- **`aurion bench`** mesure aussi le temps de calcul d'un master dark de 10 images pleine résolution.
+
 ## 1.15.0
 
 Objectif : que chaque nuit soit bien exposée dès la première image et que la détection tienne compte de l'intensité

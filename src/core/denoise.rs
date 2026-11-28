@@ -9,11 +9,19 @@
 //!    neighbours are bright too) so it is left untouched. Corrected pixels
 //!    take the median of their neighbours.
 //!
-//! 2. **Stacking with rejection** ([`Stacker`]). Averaging N frames divides
-//!    random noise by about √N. For N ≥ 4 the highest and lowest value of
-//!    each pixel are discarded before averaging, which removes planes,
-//!    satellites and cosmic-ray hits appearing on a single frame. Memory:
-//!    4 bytes per sub-pixel (12 MP → 144 MB), whatever N.
+//! 2. **Stacking with sigma rejection** ([`Stacker`]). Averaging N frames
+//!    divides random noise by about √N. The average is taken in linear light
+//!    (sRGB codes converted to light, averaged, converted back), not on the
+//!    gamma-encoded codes. Mean and variance of each sub-pixel are updated
+//!    frame by frame with Welford's method; at the end, the brightest and
+//!    then the darkest value of each sub-pixel are discarded when they lie
+//!    more than [`SIGMA_REJECT`] standard deviations from the mean of the
+//!    other values (from 3 frames on). This removes planes, satellites and
+//!    cosmic-ray hits present on a single frame without throwing away good
+//!    frames, unlike the former min/max rejection which always dropped 2.
+//!    Limit: one high and one low outlier per sub-pixel at most. Memory:
+//!    10 bytes per sub-pixel (4056×3040 → 370 MB), whatever N (up to
+//!    [`MAX_STACK`]). No alignment on the stars: see lot 2b.
 //!
 //! The sensor ISP denoise (`rpicam-still --denoise cdn_hq`) is configured
 //! separately in the camera adapter.
@@ -82,23 +90,64 @@ pub fn remove_hot_pixels(rgb: &mut [u8], width: u32, height: u32, threshold: u8)
     corrected
 }
 
+/// Rejection threshold of [`Stacker`], in standard deviations.
+pub const SIGMA_REJECT: f32 = 2.5;
+
+/// sRGB transfer function (IEC 61966-2-1), code 0..255 → linear 0..1.
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(l: f32) -> f32 {
+    if l <= 0.003_130_8 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 }
+}
+
+/// Linear light of each 8-bit sRGB code.
+fn to_linear_lut() -> &'static [f32; 256] {
+    static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| std::array::from_fn(|v| srgb_to_linear(v as f32 / 255.0)))
+}
+
+/// 8-bit sRGB code of each linear value quantised on 16 bits.
+fn to_srgb_lut() -> &'static [u8] {
+    static LUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| (0..=u16::MAX).map(|i| (linear_to_srgb(i as f32 / 65535.0) * 255.0).round().clamp(0.0, 255.0) as u8).collect())
+}
+
+fn encode_linear(l: f32) -> u8 {
+    to_srgb_lut()[(l.clamp(0.0, 1.0) * 65535.0).round() as usize]
+}
+
 /// Accumulates frames of identical size and produces a denoised average.
 pub struct Stacker {
     width: u32,
     height: u32,
-    sum: Vec<u16>,
+    /// Welford running mean (linear light) of each sub-pixel.
+    mean: Vec<f32>,
+    /// Welford sum of squared deviations from the mean.
+    m2: Vec<f32>,
+    /// Darkest and brightest sRGB code seen (rejection candidates).
     min: Vec<u8>,
     max: Vec<u8>,
     count: u32,
 }
 
-/// Maximum number of frames (keeps the u16 sum from overflowing: 255 × 255).
+/// Maximum number of frames of one stack.
 pub const MAX_STACK: u32 = 255;
+
+/// Count, sum and sum of squares of `n` values once `x` is taken out, and
+/// the standard deviation of the remaining ones (`n >= 3`).
+fn without(n: f32, sum: f32, sumsq: f32, x: f32) -> (f32, f32, f32, f32) {
+    let (n1, s1, q1) = (n - 1.0, sum - x, sumsq - x * x);
+    let mean = s1 / n1;
+    let var = ((q1 - n1 * mean * mean) / (n1 - 1.0)).max(0.0);
+    (n1, s1, q1, var.sqrt())
+}
 
 impl Stacker {
     pub fn new(width: u32, height: u32) -> Self {
         let n = (width * height * 3) as usize;
-        Self { width, height, sum: vec![0; n], min: vec![u8::MAX; n], max: vec![0; n], count: 0 }
+        Self { width, height, mean: vec![0.0; n], m2: vec![0.0; n], min: vec![u8::MAX; n], max: vec![0; n], count: 0 }
     }
 
     pub fn count(&self) -> u32 {
@@ -112,44 +161,68 @@ impl Stacker {
     /// Add a frame. Returns false (and ignores it) if the size differs or the
     /// stack is full.
     pub fn add(&mut self, rgb: &[u8]) -> bool {
-        if rgb.len() != self.sum.len() || self.count >= MAX_STACK {
+        if rgb.len() != self.mean.len() || self.count >= MAX_STACK {
             return false;
         }
-        for (i, &v) in rgb.iter().enumerate() {
-            self.sum[i] += v as u16;
-            if v < self.min[i] {
-                self.min[i] = v;
-            }
-            if v > self.max[i] {
-                self.max[i] = v;
-            }
-        }
+        let lut = to_linear_lut();
         self.count += 1;
+        let inv_n = 1.0 / self.count as f32;
+        for (i, &v) in rgb.iter().enumerate() {
+            let x = lut[v as usize];
+            let d = x - self.mean[i];
+            self.mean[i] += d * inv_n;
+            self.m2[i] += d * (x - self.mean[i]);
+            self.min[i] = self.min[i].min(v);
+            self.max[i] = self.max[i].max(v);
+        }
         true
     }
 
-    /// Average of the frames (min/max rejected when there are at least 4).
+    /// Average of the frames in linear light, extreme values rejected when
+    /// they are more than [`SIGMA_REJECT`] σ from the others (from 3 frames).
     pub fn result(&self) -> Option<Vec<u8>> {
         if self.count == 0 {
             return None;
         }
-        let reject = self.count >= 4;
-        let n = if reject { self.count - 2 } else { self.count };
+        let lut = to_linear_lut();
+        let n = self.count as f32;
         Some(
-            (0..self.sum.len())
+            (0..self.mean.len())
                 .map(|i| {
-                    let mut s = self.sum[i] as u32;
-                    if reject {
-                        s -= self.min[i] as u32 + self.max[i] as u32;
+                    let mean = self.mean[i];
+                    if self.count < 3 {
+                        return encode_linear(mean);
                     }
-                    ((s + n / 2) / n) as u8
+                    let (mut n, mut sum) = (n, n * mean);
+                    let mut sumsq = self.m2[i] + n * mean * mean;
+                    // Brightest value first (planes, satellites, cosmic rays),
+                    // then the darkest one
+                    let (hi, lo) = (self.max[i], self.min[i]);
+                    let x = lut[hi as usize];
+                    let (n1, s1, q1, sd) = without(n, sum, sumsq, x);
+                    // σ floor: one code step, so that a flat stack does not
+                    // reject a value one code away
+                    let floor = x - lut[hi.saturating_sub(1) as usize];
+                    if x - s1 / n1 > SIGMA_REJECT * sd.max(floor) {
+                        (n, sum, sumsq) = (n1, s1, q1);
+                    }
+                    if n >= 3.0 && lo < hi {
+                        let x = lut[lo as usize];
+                        let (n1, s1, _, sd) = without(n, sum, sumsq, x);
+                        let floor = lut[(lo as usize + 1).min(255)] - x;
+                        if s1 / n1 - x > SIGMA_REJECT * sd.max(floor) {
+                            (n, sum) = (n1, s1);
+                        }
+                    }
+                    encode_linear(sum / n)
                 })
                 .collect(),
         )
     }
 
     pub fn reset(&mut self) {
-        self.sum.iter_mut().for_each(|v| *v = 0);
+        self.mean.iter_mut().for_each(|v| *v = 0.0);
+        self.m2.iter_mut().for_each(|v| *v = 0.0);
         self.min.iter_mut().for_each(|v| *v = u8::MAX);
         self.max.iter_mut().for_each(|v| *v = 0);
         self.count = 0;
@@ -271,7 +344,7 @@ mod tests {
             assert!(stack.add(&noisy));
         }
         let stacked = rmse(&clean, &stack.result().unwrap());
-        // 8 frames, 6 kept after rejection: theory √6 ≈ 2.4× less noise
+        // 8 frames, almost all kept: theory up to √8 ≈ 2.8× less noise
         assert!(stacked < single / 2.0, "single {:.2} → stacked {:.2}", single, stacked);
     }
 
@@ -303,11 +376,61 @@ mod tests {
         assert!(s.result().is_none());
         assert!(!s.add(&[0u8; 10]), "wrong size refused");
         assert!(s.add(&[100u8; 48]));
-        assert!(s.add(&[101u8; 48]));
-        assert_eq!(s.result().unwrap()[0], 101, "mean of 100 and 101 rounded");
+        assert!(s.add(&[102u8; 48]));
+        assert_eq!(s.result().unwrap()[0], 101, "mean of the light of 100 and 102");
         s.reset();
         assert_eq!(s.count(), 0);
         assert!(s.result().is_none());
+    }
+
+    #[test]
+    fn transfer_function_round_trips_every_code() {
+        let lut = to_linear_lut();
+        for v in 0..=255u8 {
+            assert_eq!(encode_linear(lut[v as usize]), v, "code {}", v);
+        }
+        // A flat stack gives back exactly the input
+        let mut s = Stacker::new(2, 2);
+        for _ in 0..6 {
+            s.add(&[37u8; 12]);
+        }
+        assert!(s.result().unwrap().iter().all(|&v| v == 37));
+    }
+
+    #[test]
+    fn averages_light_not_gamma_codes() {
+        // Half the frames black, half at code 255: half the light is code
+        // 188 in sRGB, not 128 (the mean of the codes)
+        let mut s = Stacker::new(1, 1);
+        s.add(&[0, 0, 0]);
+        s.add(&[255, 255, 255]);
+        assert_eq!(s.result().unwrap(), vec![188, 188, 188]);
+    }
+
+    #[test]
+    fn sigma_rejection_keeps_every_good_frame() {
+        // 4 frames with mild noise: min/max rejection would keep only 2,
+        // sigma rejection keeps all 4 (exact mean of their light)
+        let frames: [u8; 4] = [60, 62, 61, 63];
+        let mut s = Stacker::new(1, 1);
+        for v in frames {
+            s.add(&[v; 3]);
+        }
+        let lut = to_linear_lut();
+        let mean = frames.iter().map(|&v| lut[v as usize]).sum::<f32>() / 4.0;
+        assert_eq!(s.result().unwrap()[0], encode_linear(mean));
+        // A dark outlier (cloud edge, failed frame) on one frame of 6 goes
+        let mut s = Stacker::new(1, 1);
+        for v in [80u8, 81, 79, 80, 3, 80] {
+            s.add(&[v; 3]);
+        }
+        assert_eq!(s.result().unwrap()[0], 80);
+        // The outlier comes first: the result does not depend on the order
+        let mut s = Stacker::new(1, 1);
+        for v in [255u8, 20, 20, 20, 20] {
+            s.add(&[v; 3]);
+        }
+        assert_eq!(s.result().unwrap()[0], 20);
     }
 
     #[test]

@@ -224,6 +224,38 @@ async fn raw_mode_saves_dng_files() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn raw_night_dngs_are_readable_and_camera_metadata_is_logged() {
+    let (mut night, _) = setup(|c| {
+        c.capture.output_format = OutputFormat::RawDng;
+        c.time_range.duration_hours = Some(0.1);
+    });
+    night.system = SystemMock::new().with_temperature(55.0);
+    let storage = StorageMock::new(night.capture.clone());
+    let camera = CameraMock::with_pattern(SkyPattern::Aurora).with_dng_output().with_reported_metadata(28.0);
+    run_night(&night, camera, storage, clock()).await;
+
+    // Every saved DNG is a real CFA image that the RAW chain can read
+    let dngs: Vec<_> = image_paths(&night.capture).into_iter().filter(|p| p.extension().unwrap() == "dng").collect();
+    assert!(!dngs.is_empty());
+    for p in &dngs {
+        let mut r = aurion::core::dng::DngReader::open(p).unwrap();
+        let info = r.info().clone();
+        assert_eq!((info.width, info.height, info.bayer_pattern().as_deref()), (320, 240, Some("RGGB")));
+        let mut row = vec![0u16; 320];
+        r.read_rows(10, 1, &mut row).unwrap();
+        assert!(row.iter().all(|&v| (256..=4095).contains(&v)));
+    }
+    // event.jsonl carries what the camera reported
+    let events = session_events(&night.capture);
+    assert!(events.iter().all(|e| e["sensor_temp_c"] == 28.0 && e["digital_gain"] == 1.0), "{:?}", events.first());
+    assert!(events.iter().all(|e| e["exposure_applied_us"] == e["exposure_us"]));
+    // The darks reminder uses the sensor temperature, not the processor one
+    let r = aurion::core::dark_reminder::DarkReminder::load(&night.state.paths.dark_reminder).unwrap();
+    assert_eq!(r.temp_c, Some(28.0));
+    assert_eq!(r.temp_source.as_deref(), Some("capteur"));
+}
+
+#[tokio::test(start_paused = true)]
 async fn hot_reload_of_capture_interval() {
     let (night, _) = setup(|c| c.time_range.duration_hours = Some(1.0));
     let storage = StorageMock::new(night.capture.clone());
@@ -705,6 +737,7 @@ async fn end_of_night_writes_the_darks_reminder_with_the_average_settings() {
     assert_eq!(r.iso, avg("iso").round() as u32);
     assert!((r.shutter_us as f64 - avg("exposure_us")).abs() <= 500.0, "{} vs {}", r.shutter_us, avg("exposure_us"));
     assert_eq!(r.temp_c, Some(41.3));
+    assert_eq!(r.temp_source.as_deref(), Some("processeur"), "no camera metadata: processor fallback");
     let name = std::fs::read_dir(night.capture.join("sessions")).unwrap().next().unwrap().unwrap().file_name();
     assert_eq!(r.night.as_deref(), name.to_str());
     // The settings are also in session.log, readable on a computer

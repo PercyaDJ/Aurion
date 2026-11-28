@@ -160,7 +160,31 @@ pub struct DarkProgress {
     pub total: u32,
     pub iso: u32,
     pub shutter_us: u64,
+    /// True until the captures *and* the master dark are finished.
     pub running: bool,
+    /// Error of the captures (the series stopped).
+    pub error: Option<String>,
+    /// Mean sensor temperature of the series (camera metadata), else the
+    /// processor temperature (`temp_source`).
+    pub temp_c: Option<f64>,
+    pub temp_source: Option<String>,
+    /// Master dark computed after a successful series (`None` before).
+    pub master: Option<MasterDarkProgress>,
+}
+
+/// Progress of the master dark computation (see `core::master_dark`).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MasterDarkProgress {
+    /// `"running"`, `"done"` or `"error"`.
+    pub state: String,
+    /// Rows of the sensor processed so far.
+    pub rows_done: u32,
+    pub rows_total: u32,
+    /// Files written in `darks/master/`, relative to the key.
+    pub fits: Option<String>,
+    pub hot_pixels_file: Option<String>,
+    pub hot_pixels: Option<u64>,
+    pub seconds: Option<f64>,
     pub error: Option<String>,
 }
 

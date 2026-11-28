@@ -735,12 +735,18 @@ pub struct DarksRequest {
     pub iso: Option<u32>,
     #[serde(default)]
     pub shutter_us: Option<u64>,
+    /// `k` of the hot pixel map (`median + k × MAD`), 2 to 50, default 6.
+    #[serde(default)]
+    pub hot_k: Option<f64>,
 }
 
 /// Capture a series of dark frames (lens cap ON) in RAW, with the same ISO
 /// and shutter as the night. Subtracting them in post-processing (Sequator,
 /// Siril, PixInsight...) removes the thermal noise and hot pixels of the
 /// sensor from the DNGs. Files: `<key>/darks/dark_<date>_ISO<iso>_<t>s_<n>.dng`.
+/// After a successful series, the master dark (FITS) and the hot pixel map
+/// are computed from these DNGs in `<key>/darks/master/` (originals never
+/// modified, see `core::master_dark`).
 /// Runs in the background; progress with GET /api/darks.
 pub async fn capture_darks(
     State(state): State<AppState>,
@@ -762,6 +768,10 @@ pub async fn capture_darks(
     if !(1..=25_600).contains(&iso) || !(1..=240_000_000).contains(&shutter_us) {
         return Err(err(StatusCode::BAD_REQUEST, "ISO ou temps de pose hors limites"));
     }
+    let hot_k = req.hot_k.unwrap_or(crate::core::master_dark::DEFAULT_HOT_K);
+    if !(2.0..=50.0).contains(&hot_k) {
+        return Err(err(StatusCode::BAD_REQUEST, "Seuil des pixels chauds (k) : 2 à 50"));
+    }
     if state.darks.read().await.as_ref().map(|d| d.running).unwrap_or(false) {
         return Err(err(StatusCode::CONFLICT, "Une série de darks est déjà en cours"));
     }
@@ -775,54 +785,19 @@ pub async fn capture_darks(
     let camera = state.camera_lock.clone().try_lock_owned()
         .map_err(|_| err(StatusCode::CONFLICT, "Caméra occupée (preview en cours)"))?;
 
-    let progress = crate::web::DarkProgress { done: 0, total: count, iso, shutter_us, running: true, error: None };
+    let progress = crate::web::DarkProgress {
+        done: 0, total: count, iso, shutter_us, running: true, error: None, temp_c: None, temp_source: None, master: None,
+    };
     *state.darks.write().await = Some(progress.clone());
     state.add_log(format!("Darks : {} poses ISO {} / {:.1} s (bouchon en place)", count, iso, shutter_us as f64 / 1e6)).await;
 
     let st = state.clone();
     tokio::spawn(async move {
-        let _camera = camera;
-        let mount = FsPath::new(&st.config.read().await.storage.mount_point).join("darks");
-        let tmp = st.paths.tmp_dir.join("aurion_dark.jpg");
-        let tmp_dng = tmp.with_extension("dng");
-        let date = crate::core::time::now_local().strftime("%Y%m%d_%H%M%S").to_string();
-        let mut error = None;
-        for n in 0..count {
-            let shutter = shutter_us.to_string();
-            let gain = crate::core::exposure::rpicam_gain(iso);
-            let out = tmp.to_string_lossy().to_string();
-            let _ = std::fs::remove_file(&tmp_dng);
-            let timeout = Duration::from_secs(shutter_us.div_ceil(1_000_000) * 3 + 20);
-            let res = crate::sys::run(
-                "rpicam-still",
-                &["--nopreview", "--raw", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain,
-                  "--awb", "daylight", "--denoise", "off", "--thumb", "none"],
-                timeout,
-            )
-            .await;
-            // ~20 MB DNG read and written to the key off the async workers
-            let res = match res {
-                Ok(_) => {
-                    let (src, dir) = (tmp_dng.clone(), mount.clone());
-                    let name = format!("dark_{}_ISO{}_{:.1}s_{:02}.dng", date, iso, shutter_us as f64 / 1e6, n + 1);
-                    tokio::task::spawn_blocking(move || {
-                        let dng = std::fs::read(&src).map_err(|e| format!("DNG absent: {}", e))?;
-                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                        crate::core::config::write_atomic(&dir.join(name), &dng, 0o644).map_err(|e| e.to_string())
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(e.to_string()))
-                }
-                Err(e) => Err(e),
-            };
-            if let Err(e) = res {
-                error = Some(e);
-                break;
-            }
-            if let Some(p) = st.darks.write().await.as_mut() {
-                p.done = n + 1;
-            }
-        }
+        let mount_root = std::path::PathBuf::from(&st.config.read().await.storage.mount_point);
+        let started = crate::core::time::Timestamp::now();
+        let series = dark_series(&st, camera, &mount_root, count, iso, shutter_us).await;
+        let error = series.error.clone();
+        let (temp_c, temp_source) = series.temperature();
         let msg = match &error {
             None => format!("Darks terminés ({} fichiers dans darks/)", count),
             Some(e) => format!("Darks interrompus : {}", e),
@@ -832,13 +807,166 @@ pub async fn capture_darks(
             st.add_log("Rappel des darks de la dernière nuit : fait".into()).await;
         }
         if let Some(p) = st.darks.write().await.as_mut() {
-            p.running = false;
-            p.error = error;
+            p.error = error.clone();
+            p.temp_c = temp_c;
+            p.temp_source = temp_source.map(str::to_string);
         }
         st.add_log(msg).await;
+
+        if error.is_none() {
+            let params = crate::core::master_dark::MasterDarkParams {
+                iso,
+                shutter_us,
+                temp_c,
+                temp_source,
+                hot_k,
+                date_obs: started,
+                instrument: "Raspberry Pi HQ Camera (IMX477)".into(),
+            };
+            build_master_dark(&st, &mount_root, series.files, params).await;
+        }
+        if let Some(p) = st.darks.write().await.as_mut() {
+            p.running = false;
+        }
     });
 
     Ok(Json(progress))
+}
+
+/// Result of the captures of a dark series.
+struct DarkSeries {
+    files: Vec<std::path::PathBuf>,
+    sensor_temps: Vec<f64>,
+    cpu_temps: Vec<f64>,
+    error: Option<String>,
+}
+
+impl DarkSeries {
+    /// Mean temperature of the series: the sensor one (camera metadata)
+    /// when known, else the processor one.
+    fn temperature(&self) -> (Option<f64>, Option<&'static str>) {
+        let mean = |v: &[f64]| (!v.is_empty()).then(|| (v.iter().sum::<f64>() / v.len() as f64 * 10.0).round() / 10.0);
+        match (mean(&self.sensor_temps), mean(&self.cpu_temps)) {
+            (Some(t), _) => (Some(t), Some(crate::core::dark_reminder::TEMP_SENSOR)),
+            (None, Some(t)) => (Some(t), Some(crate::core::dark_reminder::TEMP_CPU)),
+            _ => (None, None),
+        }
+    }
+}
+
+/// Take the dark frames one by one (camera lock held until the last one).
+async fn dark_series(
+    st: &AppState,
+    camera: tokio::sync::OwnedMutexGuard<()>,
+    mount_root: &FsPath,
+    count: u32,
+    iso: u32,
+    shutter_us: u64,
+) -> DarkSeries {
+    let _camera = camera;
+    let mount = mount_root.join("darks");
+    let tmp = st.paths.tmp_dir.join("aurion_dark.jpg");
+    let tmp_dng = tmp.with_extension("dng");
+    let tmp_meta = tmp.with_extension("json");
+    let date = crate::core::time::now_local().strftime("%Y%m%d_%H%M%S").to_string();
+    let mut series = DarkSeries { files: Vec::new(), sensor_temps: Vec::new(), cpu_temps: Vec::new(), error: None };
+    for n in 0..count {
+        let shutter = shutter_us.to_string();
+        let gain = crate::core::exposure::rpicam_gain(iso);
+        let out = tmp.to_string_lossy().to_string();
+        let meta = tmp_meta.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&tmp_dng);
+        let _ = std::fs::remove_file(&tmp_meta);
+        let timeout = Duration::from_secs(shutter_us.div_ceil(1_000_000) * 3 + 20);
+        let res = crate::sys::run(
+            "rpicam-still",
+            &["--nopreview", "--raw", "-o", &out, "-t", "100", "--shutter", &shutter, "--gain", &gain,
+              "--awb", "daylight", "--denoise", "off", "--thumb", "none",
+              "--metadata", &meta, "--metadata-format", "json"],
+            timeout,
+        )
+        .await;
+        // ~20 MB DNG read and written to the key off the async workers
+        let name = format!("dark_{}_ISO{}_{}_{:02}.dng", date, iso, crate::core::master_dark::shutter_label(shutter_us), n + 1);
+        let dest = mount.join(&name);
+        let res = match res {
+            Ok(_) => {
+                let (src, dir, dest) = (tmp_dng.clone(), mount.clone(), dest.clone());
+                tokio::task::spawn_blocking(move || {
+                    let dng = std::fs::read(&src).map_err(|e| format!("DNG absent: {}", e))?;
+                    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                    crate::core::config::write_atomic(&dest, &dng, 0o644).map_err(|e| e.to_string())
+                })
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()))
+            }
+            Err(e) => Err(e),
+        };
+        if let Err(e) = res {
+            series.error = Some(e);
+            break;
+        }
+        series.files.push(dest);
+        if let Some(t) = crate::core::rpicam_metadata::read(&tmp_meta).sensor_temp_c {
+            series.sensor_temps.push(t);
+        }
+        if let Some(t) = crate::sys::cpu_temperature() {
+            series.cpu_temps.push(t);
+        }
+        if let Some(p) = st.darks.write().await.as_mut() {
+            p.done = n + 1;
+        }
+    }
+    let _ = std::fs::remove_file(&tmp_meta);
+    series
+}
+
+/// Median master dark and hot pixel map of a finished series, computed off
+/// the async workers. A failure here never fails the series: the DNGs stay
+/// on the key for an external tool.
+async fn build_master_dark(st: &AppState, mount_root: &FsPath, files: Vec<std::path::PathBuf>, params: crate::core::master_dark::MasterDarkParams) {
+    if let Some(p) = st.darks.write().await.as_mut() {
+        p.master = Some(crate::web::MasterDarkProgress { state: "running".into(), ..Default::default() });
+    }
+    let out_dir = mount_root.join("darks").join("master");
+    let started = std::time::Instant::now();
+    let darks = st.darks.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        crate::core::master_dark::build(&files, &out_dir, &params, |done, total| {
+            // Progress written from the blocking thread (short lock)
+            if let Some(m) = darks.blocking_write().as_mut().and_then(|p| p.master.as_mut()) {
+                m.rows_done = done;
+                m.rows_total = total;
+            }
+        })
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+    let rel = |p: &FsPath| p.strip_prefix(mount_root).unwrap_or(p).to_string_lossy().to_string();
+    let secs = started.elapsed().as_secs_f64();
+    let msg = match &result {
+        Ok(r) => format!(
+            "Master dark : {} ({} darks, {} pixels chauds, {:.0} s)",
+            rel(&r.fits), r.frames, r.hot_pixels, secs
+        ),
+        Err(e) => format!("Master dark impossible : {} (les DNG restent dans darks/)", e),
+    };
+    if let Some(m) = st.darks.write().await.as_mut().and_then(|p| p.master.as_mut()) {
+        m.seconds = Some((secs * 10.0).round() / 10.0);
+        match result {
+            Ok(r) => {
+                m.state = "done".into();
+                m.fits = Some(rel(&r.fits));
+                m.hot_pixels_file = Some(rel(&r.hot_pixels_file));
+                m.hot_pixels = Some(r.hot_pixels);
+            }
+            Err(e) => {
+                m.state = "error".into();
+                m.error = Some(e);
+            }
+        }
+    }
+    st.add_log(msg).await;
 }
 
 pub async fn get_darks(State(state): State<AppState>) -> Json<Option<crate::web::DarkProgress>> {

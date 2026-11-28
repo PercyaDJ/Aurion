@@ -497,6 +497,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
                     consecutive_hits: night.confirmation.hits(),
                     frame_number: night.frame_number,
                     capture_ms,
+                    reported: &analysis_frame.metadata,
                 });
                 if let Err(e) = logger.log_event(&event) {
                     warn!("Orchestrator: log event failed: {}", e);
@@ -648,7 +649,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let raw = shot.raw.filter(|_| keeps_raw(config.capture.output_format, night.last_aurora_at.clone(), self.now()));
         self.save_frame(config, &files.layout, shot.frame, raw, night.frame_number, shot.detected, &mut night.stacker).await;
         night.frame_number += 1;
-        night.stats.add(shot.exposure.iso, shot.exposure.shutter_us, self.system.temperature_c());
+        // Sensor temperature from the camera metadata, processor as fallback
+        let sensor = shot.raw.map(|r| &r.metadata).unwrap_or(&shot.frame.metadata).sensor_temp_c;
+        night.stats.add_frame(shot.exposure.iso, shot.exposure.shutter_us, sensor, self.system.temperature_c());
     }
 
     /// SHUTDOWN: close the logs, write the aurora index, forget or keep the
@@ -1276,6 +1279,8 @@ struct NightEventInput<'a> {
     consecutive_hits: u32,
     frame_number: u64,
     capture_ms: u64,
+    /// Metadata of the analysed frame (values reported by the camera).
+    reported: &'a crate::core::models::FrameMetadata,
 }
 
 /// One line of event.jsonl. The frame number only exists in RUN (saved frames).
@@ -1295,6 +1300,10 @@ fn night_event(i: NightEventInput) -> SessionEvent {
         moon_mask_active: i.detection.moon_masked,
         frame_number: (i.phase == Phase::Run).then_some(i.frame_number),
         capture_ms: Some(i.capture_ms),
+        exposure_applied_us: i.reported.exposure_time_us,
+        analogue_gain: i.reported.analogue_gain,
+        digital_gain: i.reported.digital_gain,
+        sensor_temp_c: i.reported.sensor_temp_c,
     }
 }
 
@@ -1501,7 +1510,8 @@ mod tests {
         let config = AppConfig::default();
         let exposure = ExposureSettings::new(800, 2_000_000);
         let detection = DetectionResult::negative();
-        let event = |phase| night_event(NightEventInput {
+        let requested = crate::core::models::FrameMetadata::requested(&exposure);
+        let event = |phase, reported| night_event(NightEventInput {
             timestamp: "2026-01-15T23:00:00".into(),
             config: &config,
             mode: "FILTER",
@@ -1511,12 +1521,26 @@ mod tests {
             consecutive_hits: 2,
             frame_number: 42,
             capture_ms: 1500,
+            reported,
         });
-        let run = event(Phase::Run);
+        let run = event(Phase::Run, &requested);
         assert_eq!(run.frame_number, Some(42));
         assert_eq!((run.iso, run.exposure_us, run.consecutive_hits, run.capture_ms), (800, 2_000_000, 2, Some(1500)));
         assert_eq!(run.roi_excluded_percent, 100 - config.detection.roi_top_percent);
-        assert_eq!(event(Phase::Watch).frame_number, None);
+        assert_eq!(event(Phase::Watch, &requested).frame_number, None);
+        // No camera metadata (PC): the fields are not written at all
+        let line = serde_json::to_string(&run).unwrap();
+        assert!(!line.contains("sensor_temp_c") && !line.contains("analogue_gain"), "{}", line);
+        // Camera metadata: written as reported
+        let reported = requested.clone().with_reported(crate::core::rpicam_metadata::RpicamMetadata {
+            exposure_time_us: Some(1_999_980),
+            analogue_gain: Some(8.0),
+            digital_gain: Some(1.0),
+            sensor_temp_c: Some(31.0),
+        });
+        let run = event(Phase::Run, &reported);
+        assert_eq!(run.exposure_applied_us, Some(1_999_980));
+        assert_eq!((run.analogue_gain, run.digital_gain, run.sensor_temp_c), (Some(8.0), Some(1.0), Some(31.0)));
     }
 
     #[tokio::test]

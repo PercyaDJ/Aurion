@@ -14,13 +14,32 @@ use aurion::core::dark_reminder::{DarkReminder, NightStats};
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 
+/// Hot pixels of the template DNG (x, y).
+const HOT: [(u32, u32); 2] = [(5, 6), (50, 40)];
+
 fn fake_camera() {
     static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIR.get_or_init(|| {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
+        // A real (small) DNG with the rpicam-apps layout and two hot pixels
+        let (w, h) = (64u32, 48u32);
+        let mut px: Vec<u16> = (0..w * h).map(|i| 256 + (i % 3) as u16).collect();
+        for (x, y) in HOT {
+            px[(y * w + x) as usize] = 2000;
+        }
+        let template = dir.path().join("template.dng");
+        std::fs::write(&template, aurion::core::dng::test_dng_bytes(w, h, &px, &Default::default())).unwrap();
+        // Metadata as rpicam-still writes it (not valid JSON: unquoted size)
         let bin = dir.path().join("rpicam-still");
-        std::fs::write(&bin, "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"-o\" ] && out=\"$2\"; shift; done\nprintf DNG > \"${out%.*}.dng\"\n").unwrap();
+        let script = format!(
+            "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\";; --metadata) meta=\"$2\";; esac; shift; done\n\
+             cp '{}' \"${{out%.*}}.dng\"\n\
+             [ -n \"$meta\" ] && printf '{{\\n    \"ExposureTime\": 4999990,\\n    \"SensorTemperature\": 33.000000,\\n    \"AnalogueGain\": 8.000000,\\n    \"OutputSize\": 4056x3040\\n}}\\n' > \"$meta\"\n\
+             exit 0\n",
+            template.display()
+        );
+        std::fs::write(&bin, script).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap_or_default());
         std::env::set_var("PATH", path);
@@ -35,7 +54,7 @@ fn reminder(iso: u32, shutter_us: u64) -> DarkReminder {
 }
 
 async fn wait_darks(t: &common::TestEnv) -> Value {
-    for _ in 0..100 {
+    for _ in 0..200 {
         let st: Value = t.server.get("/api/darks").await.json();
         if st["running"] == false {
             return st;
@@ -93,4 +112,42 @@ async fn reminder_disappears_once_the_darks_are_done() {
         .filter(|n| n.contains("_ISO1600_5.0s_"))
         .collect();
     assert_eq!(darks.len(), 2, "{:?}", darks);
+}
+
+#[tokio::test]
+async fn a_dark_series_gives_a_master_dark_and_a_hot_pixel_map() {
+    fake_camera();
+    let t = common::env();
+    t.server.post("/api/darks").json(&json!({"count": 3, "iso": 800, "shutter_us": 5_000_000})).await.assert_status_ok();
+    let st = wait_darks(&t).await;
+    assert!(st["error"].is_null(), "{}", st);
+    // Sensor temperature from the camera metadata, not the processor
+    assert_eq!(st["temp_c"], 33.0);
+    assert_eq!(st["temp_source"], "capteur");
+    let m = &st["master"];
+    assert_eq!(m["state"], "done", "{}", st);
+    assert_eq!(m["rows_done"], 48);
+    assert_eq!(m["rows_total"], 48);
+    assert_eq!(m["fits"], "darks/master/master_dark_ISO800_5.0s_T35.fits");
+    assert_eq!(m["hot_pixels_file"], "darks/master/hot_pixels_ISO800_5.0s_T35.txt");
+    assert_eq!(m["hot_pixels"], 2);
+
+    let fits = std::fs::read(t.capture_dir().join("darks/master/master_dark_ISO800_5.0s_T35.fits")).unwrap();
+    assert_eq!(fits.len() % 2880, 0);
+    let header = String::from_utf8_lossy(&fits[..2880]).to_string();
+    assert!(header.contains("CCD-TEMP=                 33.0"), "{}", header);
+    assert!(header.contains("STACKCNT=                    3"));
+    let map = std::fs::read_to_string(t.capture_dir().join("darks/master/hot_pixels_ISO800_5.0s_T35.txt")).unwrap();
+    assert!(map.lines().any(|l| l == "5 6 2000"), "{}", map);
+    assert!(map.lines().any(|l| l == "50 40 2000"), "{}", map);
+    // The 3 original DNGs are still there, untouched
+    let dngs = std::fs::read_dir(t.capture_dir().join("darks")).unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".dng"))
+        .count();
+    assert_eq!(dngs, 3);
+
+    // Invalid k refused before anything starts
+    t.server.post("/api/darks").json(&json!({"count": 1, "iso": 800, "shutter_us": 5_000_000, "hot_k": 0.5})).await
+        .assert_status(StatusCode::BAD_REQUEST);
 }

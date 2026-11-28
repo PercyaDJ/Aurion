@@ -25,7 +25,13 @@ pub struct NightStats {
     shutter_max: u64,
     temp_sum: f64,
     temp_count: u32,
+    sensor_sum: f64,
+    sensor_count: u32,
 }
+
+/// Origin of the temperature of a reminder.
+pub const TEMP_SENSOR: &str = "capteur";
+pub const TEMP_CPU: &str = "processeur";
 
 impl NightStats {
     pub fn new() -> Self {
@@ -34,6 +40,19 @@ impl NightStats {
 
     /// One saved frame, with the processor temperature when known.
     pub fn add(&mut self, iso: u32, shutter_us: u64, temp_c: Option<f64>) {
+        self.add_frame(iso, shutter_us, None, temp_c);
+    }
+
+    /// One saved frame with the sensor temperature reported by the camera
+    /// (`SensorTemperature`) and the processor one. The sensor value is
+    /// used whenever the camera reported it; the processor temperature is
+    /// the fallback.
+    pub fn add_frame(&mut self, iso: u32, shutter_us: u64, sensor_c: Option<f64>, cpu_c: Option<f64>) {
+        if let Some(t) = sensor_c.filter(|t| t.is_finite()) {
+            self.sensor_sum += t;
+            self.sensor_count += 1;
+        }
+        let temp_c = cpu_c;
         if self.frames == 0 {
             self.iso_min = iso;
             self.iso_max = iso;
@@ -65,6 +84,11 @@ impl NightStats {
         }
         let n = self.frames as u64;
         let shutter_ms = (self.shutter_sum + n * 500) / n / 1000;
+        let (temp_c, source) = if self.sensor_count > 0 {
+            (Some(round1(self.sensor_sum / self.sensor_count as f64)), TEMP_SENSOR)
+        } else {
+            ((self.temp_count > 0).then(|| round1(self.temp_sum / self.temp_count as f64)), TEMP_CPU)
+        };
         Some(DarkReminder {
             night,
             ended_epoch_ms,
@@ -75,7 +99,8 @@ impl NightStats {
             iso_max: self.iso_max,
             shutter_min_us: self.shutter_min,
             shutter_max_us: self.shutter_max,
-            temp_c: (self.temp_count > 0).then(|| round1(self.temp_sum / self.temp_count as f64)),
+            temp_c,
+            temp_source: temp_c.map(|_| source.to_string()),
         })
     }
 }
@@ -101,9 +126,13 @@ pub struct DarkReminder {
     pub iso_max: u32,
     pub shutter_min_us: u64,
     pub shutter_max_us: u64,
-    /// Average processor temperature (°C), close to the sensor one. None
-    /// when not available (PC, no thermal sensor).
+    /// Average temperature (°C): of the sensor when the camera reports it
+    /// (`SensorTemperature`), else of the processor, which sits next to the
+    /// camera. None when not available (PC, no thermal sensor).
     pub temp_c: Option<f64>,
+    /// `"capteur"` or `"processeur"` (absent in reminders of version 1.15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_source: Option<String>,
 }
 
 impl DarkReminder {
@@ -116,6 +145,15 @@ impl DarkReminder {
         let total = (p.frames + self.frames).max(1) as f64;
         let weighted = |a: f64, b: f64| (a * p.frames as f64 + b * self.frames as f64) / total;
         let shutter_ms = (weighted(p.shutter_us as f64, self.shutter_us as f64) / 1000.0).round().max(1.0) as u64;
+        // Average only temperatures of the same origin; the sensor one wins
+        let sensor = |r: &DarkReminder| r.temp_source.as_deref() == Some(TEMP_SENSOR);
+        let (temp_c, temp_source) = match (p.temp_c, self.temp_c) {
+            (Some(a), Some(b)) if p.temp_source == self.temp_source => (Some(round1(weighted(a, b))), self.temp_source.clone()),
+            (Some(_), Some(_)) if sensor(&p) && !sensor(&self) => (p.temp_c, p.temp_source.clone()),
+            (Some(_), Some(_)) => (self.temp_c, self.temp_source.clone()),
+            (Some(_), None) => (p.temp_c, p.temp_source.clone()),
+            _ => (self.temp_c, self.temp_source.clone()),
+        };
         Self {
             night: self.night.clone(),
             ended_epoch_ms: self.ended_epoch_ms,
@@ -126,10 +164,8 @@ impl DarkReminder {
             iso_max: p.iso_max.max(self.iso_max),
             shutter_min_us: p.shutter_min_us.min(self.shutter_min_us),
             shutter_max_us: p.shutter_max_us.max(self.shutter_max_us),
-            temp_c: match (p.temp_c, self.temp_c) {
-                (Some(a), Some(b)) => Some(round1(weighted(a, b))),
-                (a, b) => b.or(a),
-            },
+            temp_c,
+            temp_source,
         }
     }
 
@@ -143,6 +179,9 @@ impl DarkReminder {
         let mut s = format!("Darks à faire : ISO {} / {:.1} s", self.iso, self.shutter_us as f64 / 1e6);
         if let Some(t) = self.temp_c {
             s.push_str(&format!(" / {:.0} °C", t));
+            if let Some(src) = &self.temp_source {
+                s.push_str(&format!(" ({})", src));
+            }
         }
         s.push_str(&format!(" (moyenne de {} images)", self.frames));
         s
@@ -210,6 +249,35 @@ mod tests {
         assert!(r.matches(1600, 5_000_000));
         assert_eq!(r.temp_c, None);
         assert_eq!(r.summary(), "Darks à faire : ISO 1600 / 5.0 s (moyenne de 100 images)");
+    }
+
+    #[test]
+    fn sensor_temperature_wins_over_the_processor() {
+        let mut s = NightStats::new();
+        s.add_frame(800, 4_000_000, Some(30.0), Some(55.0));
+        s.add_frame(800, 4_000_000, None, Some(57.0));
+        s.add_frame(800, 4_000_000, Some(32.0), Some(56.0));
+        let r = s.reminder(None, 0).unwrap();
+        assert_eq!(r.temp_c, Some(31.0), "mean of the sensor values only");
+        assert_eq!(r.temp_source.as_deref(), Some(TEMP_SENSOR));
+        assert_eq!(r.summary(), "Darks à faire : ISO 800 / 4.0 s / 31 °C (capteur) (moyenne de 3 images)");
+        // No sensor value at all: the processor is the fallback
+        let mut s = NightStats::new();
+        s.add_frame(800, 4_000_000, None, Some(50.0));
+        let cpu = s.reminder(None, 0).unwrap();
+        assert_eq!((cpu.temp_c, cpu.temp_source.as_deref()), (Some(50.0), Some(TEMP_CPU)));
+        // Merge of a resumed night: sensor beats processor
+        let night = Some("n".to_string());
+        let mut a = NightStats::new();
+        a.add_frame(800, 4_000_000, Some(20.0), Some(45.0));
+        let mut b = NightStats::new();
+        b.add_frame(800, 4_000_000, None, Some(47.0));
+        let first = a.reminder(night.clone(), 1).unwrap();
+        let merged = b.reminder(night, 2).unwrap().merge(Some(first));
+        assert_eq!((merged.temp_c, merged.temp_source.as_deref()), (Some(20.0), Some(TEMP_SENSOR)));
+        // A reminder written by 1.15.0 (no source) still loads
+        let old: DarkReminder = serde_json::from_str(r#"{"night":null,"ended_epoch_ms":0,"frames":1,"iso":800,"shutter_us":1000,"iso_min":800,"iso_max":800,"shutter_min_us":1000,"shutter_max_us":1000,"temp_c":40.0}"#).unwrap();
+        assert_eq!(old.temp_source, None);
     }
 
     #[test]

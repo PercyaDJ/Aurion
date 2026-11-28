@@ -235,9 +235,19 @@
                 const btn = document.getElementById('darkBtn');
                 if (!d) { el.textContent = ''; return; }
                 btn.disabled = d.running;
-                el.textContent = d.running
-                    ? `⏳ ${d.done}/${d.total} (ISO ${d.iso}, ${(d.shutter_us / 1e6).toFixed(1)} s)`
-                    : (d.error ? '❌ ' + d.error : `✅ ${d.done} darks enregistrés dans darks/`);
+                const m = d.master;
+                if (d.running && m && m.state === 'running') {
+                    const pct = m.rows_total ? Math.round(100 * m.rows_done / m.rows_total) : 0;
+                    el.textContent = `⏳ Calcul du master dark : ${pct} % (le bouchon peut être retiré)`;
+                } else if (d.running) {
+                    el.textContent = `⏳ ${d.done}/${d.total} (ISO ${d.iso}, ${(d.shutter_us / 1e6).toFixed(1)} s)`;
+                } else if (d.error) {
+                    el.textContent = '❌ ' + d.error;
+                } else if (m && m.state === 'done') {
+                    el.textContent = `✅ ${d.done} darks et master dark (${m.hot_pixels} pixels chauds) dans darks/`;
+                } else {
+                    el.textContent = `✅ ${d.done} darks enregistrés dans darks/` + (m && m.error ? ` (master dark impossible : ${m.error})` : '');
+                }
                 if (d.running) setTimeout(pollDarks, 3000);
             } catch (_) { }
         }

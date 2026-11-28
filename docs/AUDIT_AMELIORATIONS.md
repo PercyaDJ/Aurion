@@ -89,7 +89,13 @@ choix des lots 1 à 5.
 Ordre conseillé : les lots 1 et 2 d'abord (sans achat), puis les autres selon les priorités de l'association.
 
 **État** : lot 1 réalisé en version 1.15.0 (voir le [journal des versions](../CHANGELOG.md)), sauf la traduction des
-erreurs caméra et le QR code Wi-Fi, reportés au lot 5.
+erreurs caméra et le QR code Wi-Fi, reportés au lot 5. Lot 2 réalisé en version 1.16.0 pour sa partie simple :
+métadonnées réelles de la caméra (QW7), lecture du DNG, écriture FITS, master dark par série avec carte des pixels
+chauds (IQ-6, points 1 et 2), empilement en lumière linéaire avec rejet sigma (IQ-7). Restent : le binning 2x2 et
+l'alignement de l'empilement sur les étoiles (**lot 2b**, recalage par rotation autour du pôle à partir des étoiles de
+la vignette), le script Siril généré par nuit et la soustraction du dark sur la vignette d'analyse (IQ-6, points 3
+et 4). Points à valider sur le matériel : format réel du DNG, clés de métadonnées, temps de calcul du master dark sur
+Pi 4.
 
 | Lot | Contenu | Matériel | Effort |
 |---|---|---|---|

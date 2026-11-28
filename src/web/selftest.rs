@@ -21,6 +21,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::web::api::{capture_in_progress, err, require_system_actions, ApiError};
+use crate::core::rpicam_metadata::RpicamMetadata;
 use crate::web::AppState;
 
 /// Minutes between the power-off and the RTC alarm of the wake test.
@@ -159,32 +160,71 @@ fn board_model() -> String {
         .unwrap_or_else(|_| if cfg!(feature = "rpi") { "Raspberry Pi".into() } else { "PC (dev)".into() })
 }
 
-/// One full-resolution photo with its RAW: the real chain of a night.
-async fn capture_pair(state: &AppState, awb: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
+/// One full-resolution photo with its RAW and the camera metadata: the
+/// real chain of a night.
+async fn capture_pair(state: &AppState, awb: &str) -> Result<(Vec<u8>, Vec<u8>, RpicamMetadata), String> {
     if !cfg!(feature = "rpi") {
         // Simulated camera on PC: files of the right shape, small
-        return Ok((vec![0xFF; 400_000], vec![0x2A; 2_000_000]));
+        return Ok((vec![0xFF; 400_000], vec![0x2A; 2_000_000], RpicamMetadata::default()));
     }
     let jpg = state.paths.tmp_dir.join("aurion_selftest.jpg");
     let dng = jpg.with_extension("dng");
-    let _ = std::fs::remove_file(&jpg);
-    let _ = std::fs::remove_file(&dng);
+    let meta = jpg.with_extension("json");
+    for f in [&jpg, &dng, &meta] {
+        let _ = std::fs::remove_file(f);
+    }
     let out = jpg.to_string_lossy().to_string();
+    let meta_arg = meta.to_string_lossy().to_string();
     let result = crate::sys::run(
         "rpicam-still",
         &["--nopreview", "-o", &out, "-t", "100", "--shutter", "10000", "--gain", "1", "--awb", awb,
-          "--thumb", "320:240:90", "--raw"],
+          "--thumb", "320:240:90", "--raw", "--metadata", &meta_arg, "--metadata-format", "json"],
         Duration::from_secs(40),
     )
     .await;
     let files = result.and_then(|_| {
         let j = std::fs::read(&jpg).map_err(|e| format!("JPEG absent : {}", e))?;
         let d = std::fs::read(&dng).map_err(|e| format!("RAW absent : {}", e))?;
-        Ok((j, d))
+        Ok((j, d, crate::core::rpicam_metadata::read(&meta)))
     });
-    let _ = std::fs::remove_file(&jpg);
-    let _ = std::fs::remove_file(&dng);
+    for f in [&jpg, &dng, &meta] {
+        let _ = std::fs::remove_file(f);
+    }
     files
+}
+
+/// What the camera reported, for the detail of the camera step.
+fn metadata_detail(m: &RpicamMetadata) -> String {
+    if m.is_empty() {
+        return " Métadonnées de la caméra absentes : température du processeur utilisée pour les darks.".into();
+    }
+    let mut parts = Vec::new();
+    if let Some(t) = m.sensor_temp_c {
+        parts.push(format!("capteur à {:.0} °C", t));
+    }
+    if let Some(g) = m.analogue_gain {
+        parts.push(format!("gain analogique {:.2}", g));
+    }
+    if let Some(g) = m.digital_gain {
+        parts.push(format!("gain numérique {:.2}", g));
+    }
+    if let Some(e) = m.exposure_time_us {
+        parts.push(format!("pose appliquée {} µs", e));
+    }
+    format!(" Caméra : {}.", parts.join(", "))
+}
+
+/// The RAW can be read by Aurion (master dark): size, bits, Bayer pattern.
+fn dng_detail(dng: &[u8]) -> Result<String, String> {
+    let r = crate::core::dng::DngReader::new(std::io::Cursor::new(dng)).map_err(|e| e.to_string())?;
+    let i = r.info();
+    Ok(format!(
+        " RAW lisible : {} x {}, {} bits par échantillon, matrice {}, noir {:.0}, blanc {}.",
+        i.width, i.height, i.bits_per_sample,
+        i.bayer_pattern().unwrap_or_else(|| "inconnue".into()),
+        i.black_level_mean(),
+        i.white_level.map(|v| v.to_string()).unwrap_or_else(|| "inconnu".into())
+    ))
 }
 
 /// Write `data` on the key, flush it to the device, read it back.
@@ -226,12 +266,20 @@ pub async fn run_selftest(State(state): State<AppState>) -> Result<Json<Stored>,
     match pair {
         Err(e) => steps.push(step("camera", "error", "La caméra ne prend pas de photo",
             format!("{}. Débranchez le Raspberry Pi, vérifiez la nappe (sens et loquet) des deux côtés, puis rallumez.", e))),
-        Ok((jpg, dng)) if cfg!(feature = "rpi") && dng.len() < MIN_DNG_BYTES => {
+        Ok((jpg, dng, _)) if cfg!(feature = "rpi") && dng.len() < MIN_DNG_BYTES => {
             steps.push(step("camera", "error", "Photo RAW incomplète",
                 format!("RAW de {:.1} Mo au lieu d'environ 24 Mo (JPEG {:.1} Mo).", dng.len() as f64 / 1e6, jpg.len() as f64 / 1e6)));
         }
-        Ok((jpg, dng)) => {
-            let detail = format!("JPEG {:.1} Mo et RAW {:.1} Mo en {:.1} s.", jpg.len() as f64 / 1e6, dng.len() as f64 / 1e6, took.as_secs_f64());
+        Ok((jpg, dng, meta)) => {
+            let mut detail = format!("JPEG {:.1} Mo et RAW {:.1} Mo en {:.1} s.", jpg.len() as f64 / 1e6, dng.len() as f64 / 1e6, took.as_secs_f64());
+            if cfg!(feature = "rpi") {
+                detail.push_str(&metadata_detail(&meta));
+                match dng_detail(&dng) {
+                    Ok(d) => detail.push_str(&d),
+                    Err(e) => steps.push(step("raw", "warn", "RAW illisible par Aurion",
+                        format!("{}. Les DNG restent utilisables dans Siril, mais le master dark ne sera pas calculé.", e))),
+                }
+            }
             if took > SLOW_CAPTURE {
                 steps.push(step("camera", "warn", "Photo pleine résolution lente", detail));
             } else {
@@ -416,6 +464,16 @@ pub async fn get_report(State(state): State<AppState>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_details_for_the_report() {
+        assert!(metadata_detail(&RpicamMetadata::default()).contains("processeur"));
+        let m = RpicamMetadata { exposure_time_us: Some(9990), analogue_gain: Some(1.0), digital_gain: Some(1.0), sensor_temp_c: Some(31.4) };
+        assert_eq!(metadata_detail(&m), " Caméra : capteur à 31 °C, gain analogique 1.00, gain numérique 1.00, pose appliquée 9990 µs.");
+        let dng = crate::core::dng::test_dng_bytes(32, 16, &[300; 512], &Default::default());
+        assert_eq!(dng_detail(&dng).unwrap(), " RAW lisible : 32 x 16, 16 bits par échantillon, matrice RGGB, noir 256, blanc 4095.");
+        assert!(dng_detail(&[0x2A; 100]).is_err());
+    }
 
     #[test]
     fn levels_and_parsing() {
