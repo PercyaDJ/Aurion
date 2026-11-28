@@ -18,6 +18,7 @@
 | [PLAN_ACTION.md](PLAN_ACTION.md) | pilotage | plan d'action priorisé |
 | [PROTOCOLE_TEST_PI5.md](PROTOCOLE_TEST_PI5.md) | vous, avant une expédition | tester le Pi 5 sans rien risquer : deux cartes SD, rallumage seul, heure sans téléphone, batterie, fiche de résultats |
 | [ETUDE_PI_ZERO.md](ETUDE_PI_ZERO.md) | vous | caméra plus compacte avec un Pi Zero 2 W : ce qui est plausible, les inconnues, un essai à 30 € avant tout autre achat |
+| [AUDIT_AMELIORATIONS.md](AUDIT_AMELIORATIONS.md) | pilotage, association | audit de novembre 2026 : qualité d'image, détection, énergie, installation, capteurs, optique, triangulation, lots de travaux |
 | [../CHANGELOG.md](../CHANGELOG.md) | tous | nouveautés de chaque version |
 
 Installation avancée : [DEPLOY_RPI.md](../DEPLOY_RPI.md).
