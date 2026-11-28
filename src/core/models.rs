@@ -231,6 +231,14 @@ pub struct DetectionResult {
     pub luminosity: f64,
     pub confidence: f64,
     pub moon_masked: bool,
+    /// Sky background removed from the colour of each cell (dominant
+    /// colour, same unit as its threshold), see `core::detection`.
+    pub background: f64,
+    /// Sun/Moon gate applied to this frame (see `core::sky`): the score is
+    /// divided by `gate_factor` (1 = no gate) before the decision.
+    pub gate_factor: f64,
+    /// Twilight: detection suspended, `detected` is always false.
+    pub suspended: bool,
 }
 
 impl DetectionResult {
@@ -246,6 +254,9 @@ impl DetectionResult {
             luminosity: 0.0,
             confidence: 0.0,
             moon_masked: false,
+            background: 0.0,
+            gate_factor: 1.0,
+            suspended: false,
         }
     }
 }
@@ -285,6 +296,33 @@ pub struct SessionEvent {
     pub digital_gain: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_temp_c: Option<f64>,
+    /// Share of the cells in excess over the sky background (%), and that
+    /// background (dominant colour), see `core::detection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sky_background: Option<f64>,
+    /// Sun and Moon at the place of the camera (absent without a place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sun_alt_deg: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moon_alt_deg: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moon_illumination: Option<f64>,
+    /// Gate applied: thresholds multiplied by this factor (absent = 1), or
+    /// detection suspended (twilight).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_factor: Option<f64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detection_suspended: bool,
+    /// Watch thumbnail saved for this frame, relative to the night folder
+    /// (`watch/watch_YYYYMMDD_HHMMSS.jpg`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_thumb: Option<String>,
+    /// Watch frame written to the key at the confirmation of the aurora
+    /// (pre-trigger buffer): repeats the watch line, with the frame number.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pretrigger: bool,
 }
 
 // ─── Time Range ────────────────────────────────────────────

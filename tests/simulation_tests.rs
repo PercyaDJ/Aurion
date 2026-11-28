@@ -764,3 +764,145 @@ async fn night_without_saved_frame_asks_for_no_darks() {
     run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock()).await;
     assert!(!night.state.paths.dark_reminder.exists(), "no aurora → no RAW to calibrate");
 }
+
+// ─── 1.18.0: surface score, Sun/Moon gates, pre-trigger buffer ──────────
+
+/// Night folder of the simulation (one night).
+fn night_dir(capture: &Path) -> PathBuf {
+    std::fs::read_dir(capture.join("sessions")).unwrap().next().expect("one session").unwrap().path()
+}
+
+#[tokio::test(start_paused = true)]
+async fn blue_twilight_without_aurora_never_triggers_with_the_sun_gate() {
+    // A purple twilight sky looks violet to the colour rules: without a
+    // place it triggers (what the gate is for)...
+    let (night, _) = setup(|c| {
+        c.detection.detection_capture_enabled = true;
+        c.time_range.duration_hours = Some(0.25);
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Twilight), storage, clock()).await;
+    assert!(session_events(&night.capture).iter().any(|e| e["phase"] == "Run"), "no gate: false aurora");
+
+    // ...with a place where the Sun is at -3.5° then -8° (latitude 60° N,
+    // longitude 75° W, 15/01/2026 21:00 to 21:30 UTC): never.
+    let (night, _) = setup(|c| {
+        c.detection.detection_capture_enabled = true;
+        c.location = Some(aurion::core::config::LocationConfig { name: "Test".into(), latitude: 60.0, longitude: -75.0 });
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Twilight), storage, clock()).await;
+    assert!(images(&night.capture).is_empty(), "no image saved");
+    let events = session_events(&night.capture);
+    assert!(events.iter().all(|e| e["phase"] == "Watch" && e["aurora_detected"] == false));
+    assert!(events.iter().all(|e| e["aurora_score"].as_f64().unwrap() >= 1.0), "the sky does look violet");
+    let sun: Vec<f64> = events.iter().map(|e| e["sun_alt_deg"].as_f64().expect("sun altitude logged")).collect();
+    assert!(sun[0] > -6.0 && *sun.last().unwrap() < -6.0, "{:?}", sun);
+    assert!(events[0]["detection_suspended"] == true, "bright twilight: suspended");
+    assert!(events.last().unwrap()["gate_factor"].as_f64().unwrap() >= 2.0, "nautical twilight: thresholds raised");
+    // The reason of the gate is in session.log and in the shared state
+    let log = std::fs::read_to_string(night_dir(&night.capture).join("session.log")).unwrap();
+    assert!(log.contains("Porte de détection : Soleil à") && log.contains("détection suspendue"), "{}", log);
+    assert!(log.contains("Seuils relevés ×2"), "{}", log);
+    assert!(night.state.detection_gate.read().await.as_deref().unwrap().contains("crépuscule"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn faint_aurora_low_on_the_horizon_is_detected_and_captured() {
+    let (night, _) = setup(|c| c.detection.detection_capture_enabled = true);
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::LowBand), storage, clock()).await;
+    let events = session_events(&night.capture);
+    let first = &events[0];
+    assert_eq!(first["aurora_detected"], true, "{}", first);
+    assert!((first["aurora_score"].as_f64().unwrap() - 20.0 / 15.0).abs() < 0.1, "{}", first);
+    assert!(events.iter().any(|e| e["phase"] == "Run"), "confirmed, then captured");
+    assert!(images(&night.capture).iter().any(|f| f.contains("_AURORA")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn aurora_only_mode_keeps_the_frames_before_the_confirmation() {
+    // Aurora from the 4th camera frame (index 3; the first ones are the
+    // calibration), confirmation after 2 watch frames
+    let (night, _) = setup(|c| {
+        c.detection.detection_capture_enabled = true;
+        c.detection.consecutive_required = 2;
+        c.detection.pretrigger_frames = 3;
+        c.capture.output_format = OutputFormat::RawDng;
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    let calib = aurion::core::exposure::CALIBRATION_MAX_FRAMES as usize;
+    let from = calib + 3;
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Burst { from, to: from + 200 }), storage, clock()).await;
+
+    let events = session_events(&night.capture);
+    let first_run = events.iter().position(|e| e["phase"] == "Run").expect("RUN after the confirmation");
+    // The pre-trigger lines repeat the last watch frames, numbered from 0
+    let pre: Vec<&serde_json::Value> = events.iter().filter(|e| e["pretrigger"] == true).collect();
+    assert_eq!(pre.len(), 3, "the 3 frames kept in memory");
+    let numbers: Vec<u64> = pre.iter().map(|e| e["frame_number"].as_u64().unwrap()).collect();
+    assert_eq!(numbers, [0, 1, 2]);
+    assert_eq!(events[first_run]["frame_number"], 3, "RUN continues the numbering");
+    assert!(pre[1]["aurora_detected"] == true && pre[2]["aurora_detected"] == true);
+    // Written on the key as JPEG (the watch reads no RAW), before the first RUN frame
+    let files = images(&night.capture);
+    let jpgs: Vec<&String> = files.iter().filter(|f| f.ends_with(".jpg")).collect();
+    assert_eq!(jpgs.len(), 3, "{:?}", files);
+    assert!(jpgs.iter().filter(|f| f.contains("_AURORA")).count() == 2);
+    let first_dng = files.iter().filter(|f| f.ends_with(".dng")).min().expect("RAW in RUN");
+    assert!(jpgs.iter().all(|j| j[7..22] <= first_dng[7..22]), "earlier: {:?} {}", jpgs, first_dng);
+    assert!(thumb_path(&night.capture, jpgs[0]).exists(), "gallery thumbnail");
+    let log = std::fs::read_to_string(night_dir(&night.capture).join("session.log")).unwrap();
+    assert!(log.contains("Pré-déclenchement : 3 image(s)"), "{}", log);
+}
+
+#[tokio::test(start_paused = true)]
+async fn watch_thumbnails_and_scores_are_collected_for_the_data_set() {
+    let (night, _) = setup(|c| c.detection.detection_capture_enabled = true);
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock()).await;
+    let dir = night_dir(&night.capture);
+    let events = session_events(&night.capture);
+    let thumbs: Vec<String> = events.iter().filter_map(|e| e["watch_thumb"].as_str().map(str::to_string)).collect();
+    assert_eq!(thumbs.len(), events.len(), "one per watch frame (every 60 s)");
+    for t in &thumbs {
+        assert!(t.starts_with("watch/watch_2026"), "{}", t);
+        let bytes = std::fs::read(dir.join(t)).unwrap();
+        assert!(image::load_from_memory(&bytes).is_ok());
+    }
+    assert!(events.iter().all(|e| e["area_percent"].is_number() && e["sky_background"].is_number()));
+    // Nothing in the gallery: watch thumbnails are not images of the night
+    assert!(images(&night.capture).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn dusk_to_dawn_follows_the_sun_at_the_chosen_place() {
+    // Tromsø, 15/01/2026 from 12:00 UTC: the night starts when the Sun
+    // goes below -12° and ends when it comes back above
+    let start = utc(jiff::civil::date(2026, 1, 15).at(12, 0, 0, 0));
+    let clock = Arc::new(TokioClock::new(start));
+    let place = aurion::core::config::LocationConfig { name: "Tromsø (Norvège)".into(), latitude: 69.65, longitude: 18.96 };
+    let (night, _) = setup(|c| {
+        c.detection.detection_capture_enabled = true;
+        c.capture.watch_interval_secs = 600;
+        c.time_range.duration_hours = None;
+        c.time_range.auto_twilight = true;
+        c.location = Some(place.clone());
+    });
+    let storage = StorageMock::new(night.capture.clone());
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark), storage, clock.clone()).await;
+
+    // The night is planned once the 15 s of the disconnection are over
+    let from = plus_secs(&start.to_zoned_datetime(aurion::core::time::local_tz()), 15);
+    let (dusk, dawn) = aurion::core::sky::night_between(&from, place.place(), -12.0).unwrap();
+    let logs = night.state.log_buffer.read().await.join("\n");
+    assert!(logs.contains(&format!("Du crépuscule à l'aube (Tromsø (Norvège)) : {} -> {}",
+        dusk.strftime("%H:%M"), dawn.strftime("%H:%M"))), "{}", logs);
+    let events = session_events(&night.capture);
+    let first = CivilDateTime::strptime("%Y-%m-%dT%H:%M:%S", events[0]["timestamp"].as_str().unwrap()).unwrap();
+    let last = CivilDateTime::strptime("%Y-%m-%dT%H:%M:%S", events.last().unwrap()["timestamp"].as_str().unwrap()).unwrap();
+    // Minutes: the range is kept to the minute
+    assert!(first >= plus_secs(&dusk, -60).datetime(), "{} before dusk {}", first, dusk);
+    assert!(last <= plus_secs(&dawn, 700).datetime(), "{} after dawn {}", last, dawn);
+    assert!(events.iter().all(|e| e["sun_alt_deg"].as_f64().unwrap() < -11.5), "dark sky only");
+}

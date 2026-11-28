@@ -116,9 +116,12 @@ async fn golden_detection_scores() {
     let r = det.analyze(&f.data, f.width, f.height);
     assert!(r.detected);
     assert_eq!(r.aurora_color, aurion::core::models::AuroraColor::Green);
-    assert!((r.aurora_score - 1.56).abs() < 0.08, "score {}", r.aurora_score);
+    // 1.18.0: surface score (mean excess of the coloured cells, 3.04)
+    // instead of the mean over the whole ROI dark sky included (1.56).
+    // Global green mean unchanged; the area is now a share of cells.
+    assert!((r.aurora_score - 3.04).abs() < 0.15, "score {}", r.aurora_score);
     assert!((r.green_score - 23.4).abs() < 1.2, "green {}", r.green_score);
-    assert!((r.area_percent - 49.6).abs() < 2.5, "area {}", r.area_percent);
+    assert!((r.area_percent - 49.5).abs() < 2.5, "area {}", r.area_percent);
 
     let dark = CameraMock::with_pattern(SkyPattern::Dark);
     let mut det = AuroraDetector::from_config(&cfg.detection);

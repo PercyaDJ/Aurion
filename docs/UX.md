@@ -35,11 +35,11 @@ Deux niveaux d'usage coexistent :
 
 | Écran | Contenu | Mode |
 |---|---|---|
-| Accueil | reprise éventuelle, mot de passe (premier démarrage), vérifications, choix de la nuit, **Lancer la nuit**, dernière nuit, cadrage, extinction | simple |
-| Nuit en cours | remplace l'accueil dès que la nuit démarre : consignes, rien à toucher | simple |
-| Photos | toutes les images, par nuit (RAW / JPG / Tout), meilleures aurores ; `#best` et `#sessions` ouvrent directement l'onglet | simple |
+| Accueil | reprise éventuelle, mot de passe (premier démarrage), vérifications (dont le lieu et le ciel du soir : heures de ciel noir, Lune), choix de la nuit, **Lancer la nuit**, dernière nuit, cadrage, extinction | simple |
+| Nuit en cours | remplace l'accueil dès que la nuit démarre : consignes, rien à toucher, porte de détection en cours (crépuscule, Lune) | simple |
+| Photos | toutes les images, par nuit (RAW / JPG / Tout), meilleures aurores ; étiquetage en un geste dans l'image agrandie (Aurore, Pas d'aurore, Nuages, Lune, Lumière parasite ; l'image suivante s'affiche), étiquette visible sur la vignette ; `#best` et `#sessions` ouvrent directement l'onglet | simple |
 | Cadrage | aperçu, darks | simple |
-| Réglages photo | ISO, pose, intervalle, format | simple |
+| Réglages photo | ISO, pose, intervalle, format, lieu (liste de sites ou latitude/longitude ; `#lieu` ouvre la carte), plage horaire ou du crépuscule à l'aube | simple |
 | Réglages experts | balance des blancs, verrou d'exposition, débruitage, détection, réseau | expert |
 | Presets | réglages enregistrés | expert |
 | Stockage | espace, état de la clé | expert |

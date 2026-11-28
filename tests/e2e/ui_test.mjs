@@ -193,6 +193,37 @@ try {
     assert(saved.network.password === 'aurora2024', 'password must be kept');
   });
 
+  await step('réglages : lieu choisi une fois, nuit du crépuscule à l\'aube, ciel du soir sur l\'accueil', async () => {
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#checks [data-check=sky].warn');
+    assert(await page.locator('#choosePlaceBtn').count() === 1, 'choose place button');
+    await page.goto(base + '/settings.html#lieu');
+    await page.waitForLoadState('networkidle');
+    assert(await page.inputValue('#placeSelect') === '', 'no place by default');
+    // Custom coordinates, checked before saving
+    await page.selectOption('#placeSelect', 'custom');
+    await page.fill('#placeLat', '95');
+    await page.fill('#placeLon', '10');
+    await page.evaluate(() => saveSettings());
+    await page.waitForSelector('.toast.error');
+    await page.selectOption('#placeSelect', { label: 'Tromsø (Norvège)' });
+    await page.check('#autoTwilight');
+    await page.evaluate(() => saveSettings());
+    await page.waitForSelector('.toast.success');
+    const saved = JSON.parse(fs.readFileSync(path.join(configDir, 'aurion.json'), 'utf8'));
+    assert(saved.location && saved.location.name === 'Tromsø (Norvège)' && saved.location.latitude === 69.65
+      && saved.location.longitude === 18.96, JSON.stringify(saved.location));
+    assert(saved.time_range.auto_twilight === true, 'auto twilight saved');
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    assert(await page.locator('#placeSelect option:checked').textContent() === 'Tromsø (Norvège)', 'place shown again');
+    assert(await page.isChecked('#autoTwilight'), 'auto twilight shown again');
+    await page.goto(base + '/index.html');
+    await page.waitForSelector('#checks [data-check=sky].ok');
+    const sky = await page.textContent('#checks [data-check=sky]');
+    assert(sky.includes('Ce soir') && sky.includes('Tromsø') && sky.includes('crépuscule à l\'aube'), sky);
+  });
+
   await step('réglages avancés : sauvegarde sans retaper le mot de passe (non-régression)', async () => {
     await page.goto(base + '/settings_advanced.html');
     await page.waitForLoadState('networkidle');
@@ -282,6 +313,37 @@ try {
     await page.waitForFunction(() => document.getElementById('lightboxImg').naturalWidth > 0);
     await page.evaluate(() => closeLightbox());
     await page.evaluate(() => switchTab ? switchTab('sessions') : null).catch(() => {});
+  });
+
+  await step('galerie : étiquetage en un geste, écrit dans labels.csv', async () => {
+    await page.goto(base + '/gallery.html');
+    await page.waitForSelector('.gallery-item');
+    await page.locator('.gallery-item[data-filename="aurora_20260305_213100_00000.jpg"]').click();
+    await page.waitForSelector('#lightbox.active');
+    await page.click('#lightboxLabels [data-label=nuages]');
+    // One tap: saved, then the next image is shown (the RAW of the next frame, by name)
+    await page.waitForFunction(() => currentLightboxFile === 'aurora_20260305_223100_00001_AURORA.dng');
+    await page.click('#lightboxLabels [data-label=aurore]');
+    const csvPath = path.join(nightDir, 'labels.csv');
+    await page.waitForFunction(() => document.querySelectorAll('.gallery-item .label-badge').length === 2);
+    const csv = fs.readFileSync(csvPath, 'utf8').trim().split('\n');
+    assert(csv[0] === 'image;etiquette;date_utc', csv[0]);
+    assert(csv[1].startsWith('aurora_20260305_213100_00000.jpg;nuages;20'), csv[1]);
+    assert(csv[2].startsWith('aurora_20260305_223100_00001_AURORA.dng;aurore;20'), csv[2]);
+    // Still there after a reload, the active label is highlighted
+    await page.reload();
+    await page.waitForSelector('.gallery-item .label-badge[data-label=aurore]');
+    await page.locator('.gallery-item[data-filename="aurora_20260305_223100_00001_AURORA.dng"]').click();
+    await page.waitForSelector('#lightboxLabels [data-label=aurore].active');
+    // A second tap on the same label removes it
+    await page.click('#lightboxLabels [data-label=aurore]');
+    await page.waitForFunction(() => !document.querySelector('#lightboxLabels .label-btn.active'));
+    assert(!fs.readFileSync(csvPath, 'utf8').includes('00001_AURORA.dng'), 'label removed');
+    await page.evaluate(() => closeLightbox());
+    // Unknown label refused by the API
+    const bad = await fetch(base + '/api/gallery/labels', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'aurora_20260305_213100_00000.jpg', label: 'soleil' }) });
+    assert(bad.status === 400, 'status ' + bad.status);
   });
 
   await step('galerie : onglet meilleures aurores', async () => {

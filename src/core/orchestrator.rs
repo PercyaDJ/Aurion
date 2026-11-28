@@ -104,6 +104,7 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
         let resumed_session = self.mark_night(&mut config, resume, &marker_path).await;
         self.log_start_clock().await;
 
+        self.plan_twilight_night(&mut config).await;
         if !self.wait_for_night(&config).await {
             return Ok(());
         }
@@ -145,6 +146,9 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             failures: CameraFailures::default(),
             window: NightWindow::new(config.time_range.duration_hours, range, self.now()),
             wait_iters: 0,
+            gate_reason: None,
+            pretrigger: PretriggerBuffer::new(config.detection.pretrigger_frames),
+            last_watch_thumb: None,
         };
         let interrupted = self.capture_loop(&config, &mut files, &mut night, mode).await;
 
@@ -207,6 +211,38 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             let warn_msg = "[!] Horloge systeme < 2024 - NTP non synchronise ? La plage horaire peut ne pas fonctionner.";
             warn!("Orchestrator: {}", warn_msg);
             self.log(warn_msg).await;
+        }
+    }
+
+    /// "Du crépuscule à l'aube": replace the time range by tonight's dusk
+    /// and dawn (Sun below -12° at the chosen place). Without a place, or
+    /// when the Sun never goes that low (summer at high latitude), the
+    /// configured range is kept and the reason is logged.
+    async fn plan_twilight_night(&self, config: &mut AppConfig) {
+        if !config.time_range.auto_twilight || config.time_range.duration_hours.is_some() {
+            return;
+        }
+        let Some(loc) = config.location.clone() else {
+            self.log("Du crépuscule à l'aube : aucun lieu choisi, plage horaire réglée utilisée").await;
+            return;
+        };
+        match crate::core::sky::night_between(&self.now(), loc.place(), crate::core::sky::TWILIGHT_GATE_DEG) {
+            Some((dusk, dawn)) => {
+                config.time_range.start = dusk.time();
+                config.time_range.end = dawn.time();
+                self.log(&format!(
+                    "Du crépuscule à l'aube ({}) : {} -> {} (Soleil sous {}°)",
+                    loc.name, dusk.strftime("%H:%M"), dawn.strftime("%H:%M"), crate::core::sky::TWILIGHT_GATE_DEG
+                ))
+                .await;
+            }
+            None => {
+                self.log(&format!(
+                    "Du crépuscule à l'aube : le Soleil ne descend pas sous {}° cette nuit à {}, plage réglée utilisée ({} -> {})",
+                    crate::core::sky::TWILIGHT_GATE_DEG, loc.name, config.time_range.start, config.time_range.end
+                ))
+                .await;
+            }
         }
     }
 
@@ -483,22 +519,34 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             };
             let capture_ms = capture_started.elapsed().as_millis() as u64;
 
+            let sky = self.update_gate(config, files, night).await;
             let det_result = night.analyze(&analysis_frame, config, current_phase);
+            let watch_thumb = if current_phase == Phase::Watch {
+                self.save_watch_thumbnail(config, files, night, &analysis_frame).await
+            } else {
+                None
+            };
 
             // ─── Session logging ────────────────────────────
+            let mut event = night_event(NightEventInput {
+                timestamp: self.now().strftime("%Y-%m-%dT%H:%M:%S").to_string(),
+                config,
+                mode,
+                phase: current_phase,
+                exposure: &exposure,
+                detection: &det_result,
+                consecutive_hits: night.confirmation.hits(),
+                frame_number: night.frame_number,
+                capture_ms,
+                reported: &analysis_frame.metadata,
+            });
+            if let Some(s) = sky {
+                event.sun_alt_deg = Some(round2(s.sun_alt_deg));
+                event.moon_alt_deg = Some(round2(s.moon_alt_deg));
+                event.moon_illumination = Some(round2(s.moon_illumination));
+            }
+            event.watch_thumb = watch_thumb;
             if let Some(ref mut logger) = files.logger {
-                let event = night_event(NightEventInput {
-                    timestamp: self.now().strftime("%Y-%m-%dT%H:%M:%S").to_string(),
-                    config,
-                    mode,
-                    phase: current_phase,
-                    exposure: &exposure,
-                    detection: &det_result,
-                    consecutive_hits: night.confirmation.hits(),
-                    frame_number: night.frame_number,
-                    capture_ms,
-                    reported: &analysis_frame.metadata,
-                });
                 if let Err(e) = logger.log_event(&event) {
                     warn!("Orchestrator: log event failed: {}", e);
                 }
@@ -516,7 +564,10 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
             // ─── Phase-specific logic ───────────────────────
             match current_phase {
-                Phase::Watch => self.watch_step(config, night, &det_result, live_watch_interval).await,
+                Phase::Watch => {
+                    night.pretrigger.push(analysis_frame, self.now(), det_result.detected, event, &exposure);
+                    self.watch_step(config, files, night, &det_result, live_watch_interval).await
+                }
                 Phase::Run => {
                     let shot = Shot { frame: &analysis_frame, raw: raw_frame.as_ref(), detected: det_result.detected, exposure: &exposure };
                     self.run_step(config, files, night, shot).await;
@@ -615,7 +666,14 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
 
     /// WATCH (FILTER mode): switch to RUN once the aurora is confirmed on
     /// consecutive frames, then wait for the watch interval.
-    async fn watch_step(&self, config: &AppConfig, night: &mut NightLoop, det: &DetectionResult, interval_secs: u64) {
+    async fn watch_step(
+        &self,
+        config: &AppConfig,
+        files: &mut NightFiles,
+        night: &mut NightLoop,
+        det: &DetectionResult,
+        interval_secs: u64,
+    ) {
         let confirmed = night.confirmation.observe(det.detected);
         if det.detected {
             info!(
@@ -630,8 +688,101 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
             self.set_phase(Phase::Run).await;
             self.power_profile(PowerProfile::Capture).await;
             self.log("🌌 Aurore confirmée → capture intensive!").await;
+            self.save_pretrigger(files, night).await;
         }
         sleep(Duration::from_secs(interval_secs)).await;
+    }
+
+    /// Sun and Moon at the place of the camera, gate of the detector for
+    /// this frame. A new reason (or its end) goes to session.log and to the
+    /// home screen. `None` without a place: no gate, as before 1.18.0.
+    async fn update_gate(
+        &self,
+        config: &AppConfig,
+        files: &mut NightFiles,
+        night: &mut NightLoop,
+    ) -> Option<crate::core::sky::SkyState> {
+        let loc = config.location.as_ref()?;
+        let sky = crate::core::sky::sky_state(self.clock.now(), loc.place());
+        let gate = crate::core::sky::gate(&sky);
+        night.detector.set_gate(gate.detection());
+        if gate.reason != night.gate_reason {
+            let msg = match &gate.reason {
+                Some(r) => format!("Porte de détection : {}", r),
+                None => "Porte de détection levée : seuils normaux".to_string(),
+            };
+            self.log(&msg).await;
+            files.text(&msg);
+            night.gate_reason = gate.reason.clone();
+            *self.state.detection_gate.write().await = gate.reason;
+        }
+        Some(sky)
+    }
+
+    /// Watch thumbnail (data set): the analysis thumbnail of the frame in
+    /// `watch/`, at most one every [`WATCH_THUMB_MIN_SECS`]. Returns its
+    /// path relative to the night folder, for event.jsonl.
+    async fn save_watch_thumbnail(
+        &self,
+        config: &AppConfig,
+        files: &NightFiles,
+        night: &mut NightLoop,
+        frame: &CaptureFrame,
+    ) -> Option<String> {
+        if !config.detection.watch_thumbnails || files.path.is_none() {
+            return None;
+        }
+        let now = self.now();
+        if night.last_watch_thumb.as_ref().is_some_and(|t| secs_between(t, &now) < WATCH_THUMB_MIN_SECS) {
+            return None;
+        }
+        let bytes = thumbnail_bytes(frame)?;
+        let name = format!("watch_{}.jpg", now.strftime("%Y%m%d_%H%M%S"));
+        if let Err(e) = self.storage.save_file(&files.layout.watch(&name), &bytes).await {
+            warn!("Orchestrator: watch thumbnail: {}", e);
+            return None;
+        }
+        night.last_watch_thumb = Some(now);
+        Some(format!("{}/{}", layout::WATCH_DIR, name))
+    }
+
+    /// Aurora confirmed (*Aurores seulement*): write the watch frames kept
+    /// in memory, so the start of the aurora is on the key. JPEG only (the
+    /// watch never reads the RAW), numbered before the first RUN frame.
+    async fn save_pretrigger(&self, files: &mut NightFiles, night: &mut NightLoop) {
+        let frames = night.pretrigger.drain();
+        if frames.is_empty() {
+            return;
+        }
+        let count = frames.len();
+        let mut saved = 0;
+        for b in frames {
+            let suffix = if b.detected { "_AURORA" } else { "" };
+            let name = format!("aurora_{}_{:05}{}.jpg", b.at.strftime("%Y%m%d_%H%M%S"), night.frame_number, suffix);
+            let jpeg = if !b.frame.raw_bytes.is_empty() {
+                Some(b.frame.raw_bytes.clone())
+            } else {
+                encode_jpeg(&b.frame.data, b.frame.width, b.frame.height)
+            };
+            let Some(jpeg) = jpeg else { continue };
+            if let Err(e) = self.storage.save_file(&files.layout.image(&name), &jpeg).await {
+                error!("Orchestrator: pre-trigger frame: {}", e);
+                continue;
+            }
+            self.save_thumbnail(&files.layout, &b.frame, &name).await;
+            let mut event = b.event;
+            event.frame_number = Some(night.frame_number);
+            event.pretrigger = true;
+            if let Some(ref mut logger) = files.logger {
+                let _ = logger.log_event(&event);
+            }
+            night.stats.add_frame(b.exposure.iso, b.exposure.shutter_us, b.frame.metadata.sensor_temp_c, self.system.temperature_c());
+            night.frame_number += 1;
+            saved += 1;
+        }
+        let msg = format!("Pré-déclenchement : {} image(s) de surveillance d'avant la confirmation enregistrée(s) sur {}", saved, count);
+        self.log(&msg).await;
+        files.text(&msg);
     }
 
     /// RUN: save the frame already captured (no second capture). A drop in
@@ -914,17 +1065,8 @@ impl<C: CameraPort, S: StoragePort, Sys: SystemPort> Orchestrator<C, S, Sys> {
     /// when available (no encoding at all), otherwise a 320×240 resize of the
     /// analysis pixels.
     async fn save_thumbnail(&self, night: &NightLayout, frame: &CaptureFrame, filename: &str) {
-        let thumb_name = night.thumb(filename);
-        if let Some(thumb) = crate::core::jpeg::exif_thumbnail(&frame.raw_bytes) {
-            let _ = self.storage.save_file(&thumb_name, thumb).await;
-            return;
-        }
-        use image::{ImageBuffer, Rgb};
-        if let Some(img) = ImageBuffer::<Rgb<u8>, &[u8]>::from_raw(frame.width, frame.height, &frame.data[..]) {
-            let thumb = image::imageops::resize(&img, 320, 240, image::imageops::FilterType::Triangle);
-            if let Some(buf) = encode_jpeg(thumb.as_raw(), 320, 240) {
-                let _ = self.storage.save_file(&thumb_name, &buf).await;
-            }
+        if let Some(buf) = thumbnail_bytes(frame) {
+            let _ = self.storage.save_file(&night.thumb(filename), &buf).await;
         }
     }
 
@@ -1108,6 +1250,82 @@ struct NightLoop {
     failures: CameraFailures,
     window: NightWindow,
     wait_iters: u64,
+    /// Reason of the Sun/Moon gate in force (`None`: no gate).
+    gate_reason: Option<String>,
+    pretrigger: PretriggerBuffer,
+    /// Last watch thumbnail written.
+    last_watch_thumb: Option<ZonedDateTime>,
+}
+
+/// Watch thumbnails: at most one every this many seconds (about one per
+/// minute with the default watch interval of 60 s).
+pub const WATCH_THUMB_MIN_SECS: i64 = 55;
+
+/// JPEG thumbnail of a capture (320×240): the EXIF thumbnail when there is
+/// one (no encoding), otherwise a resize of the analysis pixels.
+fn thumbnail_bytes(frame: &CaptureFrame) -> Option<Vec<u8>> {
+    if let Some(thumb) = crate::core::jpeg::exif_thumbnail(&frame.raw_bytes) {
+        return Some(thumb.to_vec());
+    }
+    use image::{ImageBuffer, Rgb};
+    let img = ImageBuffer::<Rgb<u8>, &[u8]>::from_raw(frame.width, frame.height, &frame.data[..])?;
+    let thumb = image::imageops::resize(&img, 320, 240, image::imageops::FilterType::Triangle);
+    encode_jpeg(thumb.as_raw(), 320, 240)
+}
+
+fn round2(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
+}
+
+/// One watch frame kept for the pre-trigger buffer.
+pub struct BufferedFrame {
+    pub frame: CaptureFrame,
+    pub at: ZonedDateTime,
+    pub detected: bool,
+    pub event: SessionEvent,
+    pub exposure: ExposureSettings,
+}
+
+/// The last `capacity` watch frames, in memory (RAM: lost on a power cut,
+/// like a tmpfs). Memory: one full-resolution JPEG per frame (about 4 MB
+/// on the HQ Camera, to measure) plus its analysis thumbnail.
+pub struct PretriggerBuffer {
+    capacity: usize,
+    frames: std::collections::VecDeque<BufferedFrame>,
+}
+
+impl PretriggerBuffer {
+    pub fn new(capacity: u32) -> Self {
+        Self { capacity: capacity as usize, frames: Default::default() }
+    }
+
+    pub fn push(&mut self, frame: CaptureFrame, at: ZonedDateTime, detected: bool, event: SessionEvent, exposure: &ExposureSettings) {
+        if self.capacity == 0 {
+            return;
+        }
+        while self.frames.len() >= self.capacity {
+            self.frames.pop_front();
+        }
+        self.frames.push_back(BufferedFrame { frame, at, detected, event, exposure: *exposure });
+    }
+
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    /// Bytes held (JPEG + analysis pixels).
+    pub fn bytes(&self) -> usize {
+        self.frames.iter().map(|b| b.frame.raw_bytes.len() + b.frame.data.len()).sum()
+    }
+
+    /// Oldest first; the buffer is left empty.
+    pub fn drain(&mut self) -> Vec<BufferedFrame> {
+        self.frames.drain(..).collect()
+    }
 }
 
 impl NightLoop {
@@ -1348,6 +1566,11 @@ fn night_event(i: NightEventInput) -> SessionEvent {
         analogue_gain: i.reported.analogue_gain,
         digital_gain: i.reported.digital_gain,
         sensor_temp_c: i.reported.sensor_temp_c,
+        area_percent: Some(round2(i.detection.area_percent)),
+        sky_background: Some(round2(i.detection.background)),
+        gate_factor: (i.detection.gate_factor > 1.0).then_some(round2(i.detection.gate_factor)),
+        detection_suspended: i.detection.suspended,
+        ..Default::default()
     }
 }
 
@@ -1609,6 +1832,9 @@ mod tests {
             failures: CameraFailures::default(),
             window: NightWindow::new(Some(1.0), night_range(), at(21, 0)),
             wait_iters: 0,
+            gate_reason: None,
+            pretrigger: PretriggerBuffer::new(3),
+            last_watch_thumb: None,
         };
 
         // Not settled yet (calibration did not converge): the lock waits

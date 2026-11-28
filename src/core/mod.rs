@@ -20,3 +20,5 @@ pub mod stars;
 pub mod align;
 pub mod raw_bin;
 pub mod siril_script;
+pub mod sky;
+pub mod labels;

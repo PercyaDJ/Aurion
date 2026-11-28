@@ -5,7 +5,8 @@
 //!     JPG/aurora_20260115_213000_00000.jpg
 //!     RAW/aurora_20260115_213000_00000.dng
 //!     thumbs/aurora_20260115_213000_00000.jpg
-//!     event.jsonl  session.log  aurores.csv
+//!     watch/watch_20260115_213000.jpg   (watch thumbnails, 1.18)
+//!     event.jsonl  session.log  aurores.csv  labels.csv
 //! ```
 //!
 //! A folder per night keeps directories small (creating a file in a huge
@@ -24,6 +25,10 @@ pub const SESSIONS_DIR: &str = "sessions";
 pub const JPG_DIR: &str = "JPG";
 pub const RAW_DIR: &str = "RAW";
 pub const THUMBS_DIR: &str = "thumbs";
+/// Analysis thumbnails of the watch frames (data set), one per minute.
+pub const WATCH_DIR: &str = "watch";
+/// Labels given in the gallery (data set).
+pub const LABELS_FILE: &str = "labels.csv";
 pub const AURORA_INDEX: &str = "aurores.csv";
 
 /// Where the files of one night go, relative to the key.
@@ -48,6 +53,14 @@ impl NightLayout {
         match &self.dir {
             Some(d) => format!("{}/{}/{}", d, if is_raw(filename) { RAW_DIR } else { JPG_DIR }, filename),
             None => filename.to_string(),
+        }
+    }
+
+    /// Relative path of a watch thumbnail.
+    pub fn watch(&self, filename: &str) -> String {
+        match &self.dir {
+            Some(d) => format!("{}/{}/{}", d, WATCH_DIR, filename),
+            None => format!("{}/{}", WATCH_DIR, filename),
         }
     }
 

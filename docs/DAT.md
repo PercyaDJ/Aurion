@@ -54,7 +54,7 @@ sur le terrain ou un appareil de test à l'atelier.
 
 | Dossier | Rôle | Fichiers clés |
 |---|---|---|
-| `src/core/` | règles métier pures, testables sans matériel | `orchestrator.rs` (déroulé de la nuit), `exposure.rs`, `detection.rs`, `denoise.rs`, `jpeg.rs` (EXIF), `dng.rs` (lecture des RAW), `raw_bin.rs` (binning des RAW par couleur), `fits.rs` (écriture FITS), `master_dark.rs`, `siril_script.rs` (script Siril de la nuit), `stars.rs` (détection des étoiles), `align.rs` (recalage de l'empilement), `rpicam_metadata.rs`, `night.rs` (reprise après coupure), `config.rs`, `validate.rs`, `session_logger.rs`, `state_machine.rs`, `models.rs` |
+| `src/core/` | règles métier pures, testables sans matériel | `orchestrator.rs` (déroulé de la nuit), `exposure.rs`, `detection.rs`, `denoise.rs`, `jpeg.rs` (EXIF), `dng.rs` (lecture des RAW), `raw_bin.rs` (binning des RAW par couleur), `fits.rs` (écriture FITS), `master_dark.rs`, `siril_script.rs` (script Siril de la nuit), `stars.rs` (détection des étoiles), `align.rs` (recalage de l'empilement), `sky.rs` (Soleil, Lune, portes de détection, crépuscule et aube), `labels.rs` (étiquettes de la galerie, `labels.csv`), `rpicam_metadata.rs`, `night.rs` (reprise après coupure), `config.rs`, `validate.rs`, `session_logger.rs`, `state_machine.rs`, `models.rs` |
 | `src/ports/` | contrats | `camera`, `storage`, `clock`, `network`, `system` |
 | `src/adapters/rpi/` | matériel réel | `camera_rpi.rs` (`rpicam-still`), `storage_rpi.rs` (fsync), `network_rpi.rs` et `system_rpi.rs` (via le helper) |
 | `src/adapters/pc/` | simulateurs | `CameraMock` (ciels synthétiques, pannes), `StorageMock`, `NetworkMock`, `SystemMock`, `TokioClock` (temps virtuel) |
@@ -138,6 +138,52 @@ Points clés :
 - le DNG n'est jamais modifié : c'est le fichier natif du capteur, destiné au post-traitement ;
 - les traitements optionnels (pixels chauds, empilement) ne touchent que le JPEG ; voir GUIDE_PHOTO.md.
 
+### Détection (1.18.0)
+
+Sur la miniature d'analyse (320x240), zone ciel du haut (`roi_top_percent`) :
+
+1. masque lune : cases trop lumineuses, et taches de pixels blancs saturés (au moins 250 sur les trois couleurs)
+   avec une marge de 3 fois leur rayon plus 2 pixels ;
+2. dominance de chaque couleur par pixel (vert, rouge, violet = rouge et bleu au-dessus du vert), moyennée sur une
+   grille de 16 x 12 cases ;
+3. fond du ciel : valeur du quart des cases le moins coloré. Il est retiré de chaque case tant qu'il reste sous la
+   moitié du seuil de maintien. Au-delà du seuil de maintien, il est jugé neutre (une aurore sur tout le ciel ne se
+   distingue pas d'une teinte sur une seule image), avec une transition continue entre les deux ;
+4. score = excès moyen des cases au-dessus du seuil de maintien, divisé par le seuil de la couleur ; surface = part
+   des cases au-dessus du seuil de déclenchement ; étalement = au moins 3 blocs de 4 x 3 cases dont un quart des
+   cases sont en excès ;
+5. porte Soleil et Lune (`core::sky`, lieu choisi) : détection suspendue quand le Soleil est au-dessus de -6°, score
+   divisé par 2 entre -6° et -12°, par 1 + 0,5 x la fraction éclairée quand la Lune est levée (facteurs
+   multipliés) ;
+6. hystérésis et confiance (1.15.0) sur le score après la porte ; `event.jsonl` garde le score mesuré avant la
+   porte.
+
+Éphémérides : formules de faible précision de l'*Astronomical Almanac* pour le Soleil (section C, aussi publiées
+par l'USNO sous le nom « Approximate Solar Coordinates ») et pour la Lune (section D), temps sidéral de Meeus (12.4),
+fraction éclairée de Meeus (chapitre 48). Les tests les comparent aux exemples 25.a, 47.a et 48.a de Meeus,
+*Astronomical Algorithms*, repris dans les tests du paquet Go `github.com/soniakeys/meeus` (v3). Écarts mesurés :
+Soleil 0,006° en ascension droite et 0,002° en déclinaison ; Lune 0,09° en longitude, 0,08° en latitude, 0,0009° en
+parallaxe ; fraction éclairée 0,002. Le numéro de page de l'*Astronomical Almanac* pour la série lunaire reste à
+vérifier sur l'ouvrage. La réfraction n'est pas prise en compte (sans effet sur une porte à -6° ou -12°).
+
+### Tampon de pré-déclenchement et vignettes de surveillance
+
+En mode *Aurores seulement*, les `pretrigger_frames` (3 par défaut) dernières images de surveillance restent en
+mémoire vive : le JPEG pleine résolution renvoyé par `rpicam-still` et ses pixels d'analyse. Elles sont perdues sur
+une coupure, comme un fichier dans `/tmp` (tmpfs). À la confirmation, elles sont écrites dans `JPG/`, numérotées
+avant la première image de capture, avec `_AURORA` si elles étaient détectées. Leur ligne de surveillance est
+répétée dans `event.jsonl` avec `frame_number` et `"pretrigger": true`.
+
+Mémoire du tampon : `pretrigger_frames` x (JPEG plein format + 320 x 240 x 3 octets). Avec la taille type de 4 Mo
+retenue pour l'estimation de capacité (`api.rs`, à mesurer sur le matériel), cela fait environ 13 Mo pour 3 images
+et 42 Mo au maximum (10 images).
+
+Vignettes de surveillance : la miniature EXIF de chaque image de surveillance (320x240, qualité 90, produite par
+`rpicam-still --thumb`), au plus une toutes les 55 s, dans `watch/`, sans réencodage. Une période de surveillance
+dure l'intervalle (60 s par défaut) plus la pose et la prise (jusqu'à 30 s de pose), soit 40 à 60 vignettes par
+heure. Avec environ 20 Ko par vignette (estimation de l'audit, à mesurer), cela fait 0,8 à 1,2 Mo par heure, soit 11
+à 17 Mo pour une nuit d'hiver de 14 h : moins qu'un seul DNG (12 à 15 Mo).
+
 ## 6. Données et stockage
 
 ### Clé USB (`/mnt/capture`, exFAT ou FAT32)
@@ -148,7 +194,9 @@ Points clés :
 | `sessions/…/RAW/aurora_….dng` | DNG natifs, même nom que leur JPEG |
 | `sessions/…/JPG/aurora_…_STACK.jpg` | JPEG empilé (si activé) |
 | `sessions/…/thumbs/` | miniatures de galerie |
-| `sessions/…/event.jsonl` | un événement JSON par image (phase, exposition demandée, score, numéro d'image ; pose appliquée, gains analogique et numérique, température capteur quand la caméra les donne) |
+| `sessions/…/watch/watch_AAAAMMJJ_HHMMSS.jpg` | vignettes de surveillance (mode *Aurores seulement*), une par minute environ, non listées dans la galerie, incluses dans le ZIP complet de la nuit |
+| `sessions/…/labels.csv` | étiquettes données dans la galerie : `image;etiquette;date_utc`, séparateur `;`, UTF-8, une ligne par image (la dernière étiquette l'emporte), triée par nom d'image ; étiquettes `aurore`, `pas_aurore`, `nuages`, `lune`, `lumiere_parasite` |
+| `sessions/…/event.jsonl` | un événement JSON par image (phase, exposition demandée, score, numéro d'image ; pose appliquée, gains analogique et numérique, température capteur quand la caméra les donne ; depuis 1.18 : `area_percent`, `sky_background`, `sun_alt_deg`, `moon_alt_deg`, `moon_illumination`, `gate_factor`, `detection_suspended`, `watch_thumb`, `pretrigger`) |
 | `sessions/…/session.log` | journal lisible de la nuit (config effective, erreurs, recalage de l'empilement) |
 | `sessions/…/calibrer.ssf` | script Siril de la nuit (conversion des DNG et calibration avec le master dark), écrit en fin de nuit quand il y a des RAW |
 | `sessions/…/aurores.csv` | images avec aurore triées par score (image, heure, score, couleur, JPG, RAW), écrit en fin de nuit |
@@ -251,11 +299,11 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 
 | Route | Rôle |
 |---|---|
-| `GET /api/preflight` | vérifications avant la nuit (caméra, clé et autonomie, heure et sa source, alimentation, température, mot de passe, expédition), `ready`, reprise, départ automatique, nuits possibles, réveil possible |
+| `GET /api/preflight` | vérifications avant la nuit (caméra, clé et autonomie, heure et sa source, alimentation, température, lieu et ciel du soir, mot de passe, expédition), `ready`, reprise, départ automatique, nuits possibles, réveil possible |
 | `GET /api/night/last` | résumé de la dernière nuit (photos, aurores, RAW, meilleur score) |
 | `POST /api/night/resume/cancel` | annuler la reprise d'une nuit interrompue |
 | `POST /api/disconnect` | lancer la nuit (ou reprendre tout de suite) |
-| `GET /api/status` | phase, heure, stockage, alertes |
+| `GET /api/status` | phase, heure, stockage, alertes, porte de détection en cours (`detection_gate`) |
 | `GET/POST /api/config` | configuration (mot de passe masqué) |
 | `GET/POST /api/presets`, `POST /api/presets/:name/apply`, `DELETE /api/presets/:name` | presets |
 | `GET /api/preview`, `POST /api/preview/capture` | aperçu |
@@ -269,6 +317,7 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 | `GET /api/wifi/scan`, `/api/wifi/status`, `POST /api/wifi/connect`, `/api/wifi/hotspot` | mode maintenance (Wi-Fi de la maison) |
 | `GET /api/gallery[?session=<nuit>&limit=N]` | images (1000 plus récentes par défaut, `truncated` si plus) |
 | `GET /api/gallery/stats`, `/api/gallery/sessions`, `/api/gallery/best` | galerie (sessions avec nombre de RAW) |
+| `GET /api/gallery/labels`, `POST /api/gallery/labels` | étiquettes de toutes les nuits (nom d'image vers étiquette) ; étiqueter une image (`{"filename", "label"}`, `label` vide pour retirer), écrit dans `labels.csv` de sa nuit |
 | `GET /api/gallery/sessions/:name/download[?only=raw\|jpg]` | ZIP d'une nuit, tout, RAW seuls ou JPEG seuls (flux, sans fichier temporaire) |
 | `GET /api/gallery/:file`, `/api/gallery/thumbnail/:file` | image, miniature |
 | `POST /api/gallery/delete`, `/api/gallery/download-zip`, `DELETE /api/gallery/sessions/:name` | sélection |
@@ -277,6 +326,9 @@ Toutes les routes sont en JSON sauf mention. Les écritures (`POST`, `DELETE`) s
 
 - Pas encore validé sur le matériel réel : hotspot NetworkManager, montage udev, options `rpicam-still`,
   seuils de détection sur de vraies aurores, premier démarrage de l'image (voir PLAN_ACTION.md, V1 à V5).
+- Détection 1.18.0 : seuils du score de surface, facteurs de crépuscule (x2) et de Lune (x1,5 à la pleine Lune),
+  rayon du masque des taches saturées et taille réelle des vignettes de surveillance à valider sur de vraies nuits.
+  Le masque lune ne connaît pas la position de la Lune dans l'image (orientation de la caméra inconnue).
 - Sur Pi 4 sans module horloge, l'heure après une coupure dépend de la dernière heure connue : la reprise est
   bornée, mais la fin de nuit peut être décalée tant qu'aucun téléphone ne s'est connecté ; le départ automatique
   de l'expédition attend une heure fiable.
