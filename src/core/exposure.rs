@@ -29,6 +29,34 @@ pub struct ExposureController {
     target_percentile: f64,
     target_brightness: f64,
     saturation_reject: f64,
+
+    /// Consecutive RUN/WATCH frames metered close to the target.
+    on_target_frames: u32,
+    /// Exposure has reached the target (calibration converged, or a few
+    /// frames metered on target): the RUN lock may freeze it from then on.
+    settled: bool,
+}
+
+/// Highest ISO the HQ Camera (Sony IMX477) reaches with analogue gain only.
+/// libcamera's IMX477 helper tops out at about ×22.3; beyond, rpicam-still
+/// adds digital gain, which brightens the JPEG used for metering but not
+/// the DNG. Capping here keeps the metering honest for the RAW.
+/// To confirm on hardware with `--metadata` (AnalogueGain / DigitalGain).
+pub const MAX_ANALOGUE_ISO: u32 = 2200;
+
+/// Calibration stops after this many frames even if not converged.
+pub const CALIBRATION_MAX_FRAMES: u32 = 6;
+
+/// Change of exposure (ratio) below which the calibration has converged.
+const CONVERGED: std::ops::RangeInclusive<f64> = 0.85..=1.18;
+
+/// Metering error (log) under which a frame counts as on target.
+const ON_TARGET_LOG_ERR: f64 = 0.15;
+
+/// sRGB 8-bit value to linear light (0..1).
+fn srgb_to_linear(v: f64) -> f64 {
+    let c = (v / 255.0).clamp(0.0, 1.0);
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
 impl ExposureController {
@@ -48,8 +76,11 @@ impl ExposureController {
         target_brightness: f64,
         saturation_reject: f64,
     ) -> Self {
-        // Start at minimum exposure (conservative)
+        // Start at minimum exposure (conservative); the night calibration
+        // starts from `calibration_start()` instead.
         let initial = ExposureSettings::new(iso_min, shutter_min_us);
+        // Digital gain adds no information to the RAW (see MAX_ANALOGUE_ISO)
+        let iso_max = iso_max.min(MAX_ANALOGUE_ISO).max(iso_min);
 
         Self {
             iso_min,
@@ -66,6 +97,8 @@ impl ExposureController {
             target_percentile,
             target_brightness,
             saturation_reject,
+            on_target_frames: 0,
+            settled: false,
         }
     }
 
@@ -92,6 +125,42 @@ impl ExposureController {
         self.current
     }
 
+    /// Effective ISO ceiling (user maximum capped at MAX_ANALOGUE_ISO).
+    pub fn iso_max(&self) -> u32 {
+        self.iso_max
+    }
+
+    /// True once the exposure has reached the target: calibration
+    /// converged, or 3 frames in a row metered on target.
+    pub fn settled(&self) -> bool {
+        self.settled
+    }
+
+    /// Starting point of a calibration: geometric middle of the user range
+    /// (same as the preview). Starting from the minimum (before 1.15.0)
+    /// left the first hours of the night underexposed.
+    pub fn calibration_start(&mut self) -> ExposureSettings {
+        let iso = ((self.iso_min as f64) * (self.iso_max as f64)).sqrt() as u32;
+        let shutter = ((self.shutter_min_us as f64) * (self.shutter_max_us as f64)).sqrt() as u64;
+        self.set(ExposureSettings::new(iso, shutter));
+        self.on_target_frames = 0;
+        self.settled = false;
+        self.current
+    }
+
+    /// One calibration frame: jump towards the target. Returns true when
+    /// converged (the exposure barely moved); the controller is then settled.
+    pub fn calibration_step(&mut self, histogram: &[u32; 256]) -> bool {
+        let before = self.current;
+        let next = self.jump(histogram);
+        let change = (next.shutter_us as f64 * next.iso as f64) / (before.shutter_us as f64 * before.iso as f64);
+        let converged = CONVERGED.contains(&change);
+        if converged {
+            self.settled = true;
+        }
+        converged
+    }
+
     /// Main entry point: update exposure based on histogram and current phase.
     /// Returns the new exposure settings.
     pub fn update(&mut self, histogram: &[u32; 256], phase: Phase) -> ExposureSettings {
@@ -112,6 +181,14 @@ impl ExposureController {
 
         // Error in log-space: positive = too dark, negative = too bright
         let err = (self.target_brightness / measured).ln();
+        if err.abs() < ON_TARGET_LOG_ERR {
+            self.on_target_frames += 1;
+            if self.on_target_frames >= 3 {
+                self.settled = true;
+            }
+        } else {
+            self.on_target_frames = 0;
+        }
 
         // Move a fraction `alpha` of the way to the target, in log space
         // (exponential smoothing: no overshoot, no oscillation). The step
@@ -130,15 +207,18 @@ impl ExposureController {
         self.current
     }
 
-    /// One-shot metering used by the preview: correct the exposure directly
-    /// towards the target (no EMA, no rate limit), bounded to ×8 / ÷8 per
-    /// call so a single bad frame cannot send it to an extreme.
+    /// One-shot metering used by the preview and the calibration: correct
+    /// the exposure directly towards the target (no EMA, no rate limit),
+    /// bounded to ×8 / ÷8 per call so a single bad frame cannot send it to
+    /// an extreme. The ratio is computed in linear light: the JPEG is
+    /// gamma-encoded, so a sky at 30 instead of 60 needs about ×4.6 of
+    /// light, not ×2 (before 1.15.0, hence 3 to 4 preview shots).
     pub fn jump(&mut self, histogram: &[u32; 256]) -> ExposureSettings {
         let measured = self.compute_percentile(histogram);
         let mult = if measured < 1.0 {
             8.0
         } else {
-            (self.target_brightness / measured).clamp(0.125, 8.0)
+            (srgb_to_linear(self.target_brightness) / srgb_to_linear(measured)).clamp(0.125, 8.0)
         };
         self.apply_multiplier(mult);
         self.current
@@ -187,6 +267,8 @@ impl ExposureController {
     /// Reset exposure to minimum (start of session).
     pub fn reset(&mut self) {
         self.current = ExposureSettings::new(self.iso_min, self.shutter_min_us);
+        self.on_target_frames = 0;
+        self.settled = false;
     }
 
     /// Set exposure directly (e.g., from config or preset).
@@ -387,16 +469,66 @@ mod tests {
     fn test_jump_converges_fast() {
         let mut ctrl = default_controller();
         ctrl.set(ExposureSettings::new(400, 4_000_000));
-        // Frame twice too dark → exposure doubles in a single step.
+        // Frame at half the target value: the JPEG is gamma-encoded, so the
+        // light needed is the linear ratio (about ×3.5), not ×2.
         let before = ctrl.current();
         let after = ctrl.jump(&make_histogram_for_brightness(30));
         let ratio = (after.shutter_us as f64 * after.iso as f64)
             / (before.shutter_us as f64 * before.iso as f64);
-        assert!((ratio - 2.0).abs() < 0.05, "ratio={}", ratio);
-        // Black frame → bounded ×8, never beyond the limits.
+        let expected = srgb_to_linear(60.0) / srgb_to_linear(30.0);
+        assert!((ratio - expected).abs() < 0.05 && ratio > 3.0, "ratio={} expected={}", ratio, expected);
+        // Black frame → bounded ×8, never beyond the limits (ISO capped at
+        // the analogue maximum, even if the user range goes to 3200).
         for _ in 0..10 { ctrl.jump(&make_histogram_for_brightness(0)); }
         assert_eq!(ctrl.current().shutter_us, 30_000_000);
-        assert_eq!(ctrl.current().iso, 3200);
+        assert_eq!(ctrl.current().iso, MAX_ANALOGUE_ISO);
+    }
+
+    /// Simulated sky: the P80 brightness of the JPEG grows with the light
+    /// collected (ISO × shutter), through the sRGB curve.
+    fn sky_histogram(settings: ExposureSettings, sky: f64) -> [u32; 256] {
+        let light = sky * settings.iso as f64 * settings.shutter_us as f64 / 1e9;
+        let c = light.clamp(0.0, 1.0);
+        let srgb = if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        make_histogram_for_brightness((srgb * 255.0).round() as u8)
+    }
+
+    #[test]
+    fn calibration_reaches_a_dark_sky_target_in_a_few_frames() {
+        let mut ctrl = default_controller();
+        // A sky that needs about ISO 1600 / 20 s to reach the target (60)
+        let target_light = srgb_to_linear(60.0);
+        let sky = target_light / (1600.0 * 20_000_000.0 / 1e9);
+        let start = ctrl.calibration_start();
+        assert!(start.iso > 100 && start.shutter_us > 1_000_000, "starts mid-range: {:?}", start);
+        let mut frames = 0;
+        let mut converged = false;
+        while frames < CALIBRATION_MAX_FRAMES && !converged {
+            converged = ctrl.calibration_step(&sky_histogram(ctrl.current(), sky));
+            frames += 1;
+        }
+        assert!(converged && ctrl.settled(), "converged in {} frames", frames);
+        assert!(frames <= 4, "{} frames", frames);
+        let light = ctrl.current().iso as f64 * ctrl.current().shutter_us as f64;
+        let wanted = 1600.0 * 20_000_000.0;
+        assert!((light / wanted - 1.0).abs() < 0.2, "exposure {:?}", ctrl.current());
+    }
+
+    #[test]
+    fn settles_after_three_frames_on_target_in_run() {
+        let mut ctrl = default_controller();
+        let on_target = make_histogram_for_brightness(60);
+        ctrl.update(&on_target, Phase::Run);
+        ctrl.update(&on_target, Phase::Run);
+        assert!(!ctrl.settled());
+        ctrl.update(&on_target, Phase::Run);
+        assert!(ctrl.settled());
+    }
+
+    #[test]
+    fn iso_is_capped_at_the_analogue_maximum() {
+        let ctrl = default_controller(); // user maximum 3200
+        assert_eq!(ctrl.iso_max(), MAX_ANALOGUE_ISO);
     }
 
     #[test]

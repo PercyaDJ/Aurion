@@ -57,16 +57,6 @@
                     oninput="updateVal('lumVal', parseFloat(this.value).toFixed(1))">
             </div>
 
-            <div class="range-group">
-                <div class="range-header">
-                    <span class="form-label">Seuil variation temporelle <span class="tooltip-icon"
-                            onclick="event.stopPropagation(); showTooltip(this, 'Changement minimum entre 2 photos pour confirmer un mouvement (aurore vs bruit statique).')">❓</span></span>
-                    <span class="range-value" id="varVal">10.0</span>
-                </div>
-                <input type="range" id="varThreshold" min="1" max="50" step="0.5" value="10"
-                    oninput="updateVal('varVal', parseFloat(this.value).toFixed(1))">
-            </div>
-
             <div class="form-group">
                 <label class="form-label">Détections consécutives requises <span class="tooltip-icon"
                         onclick="event.stopPropagation(); showTooltip(this, 'Nombre de photos positives d\'affilée avant de lancer la capture intensive. 2 = évite les faux déclenchements.')">❓</span></label>
@@ -130,17 +120,6 @@
         <div class="card fade-in">
             <div class="card-header">
                 <span class="card-title">Exposition avancée</span>
-            </div>
-
-            <div class="range-group">
-                <div class="range-header">
-                    <span class="form-label">Pas EV maximum (par frame en RUN) <span class="tooltip-icon"
-                            onclick="event.stopPropagation(); showTooltip(this, 'Limite la variation d\'exposition entre 2 photos. Anti-yoyo : empêche les sauts de luminosité brusques.')">❓</span></span>
-                    <span class="range-value" id="evVal">0.33</span>
-                </div>
-                <input type="range" id="evStepMax" min="0.1" max="1.0" step="0.01" value="0.33"
-                    oninput="updateVal('evVal', parseFloat(this.value).toFixed(2))">
-                <span class="form-hint">Variation d'exposition max entre deux frames (anti-yoyo)</span>
             </div>
 
             <div class="form-group">
@@ -338,12 +317,8 @@
                 document.getElementById('greenVal').textContent = cfg.detection.green_threshold.toFixed(1);
                 document.getElementById('lumThreshold').value = cfg.detection.luminosity_threshold;
                 document.getElementById('lumVal').textContent = cfg.detection.luminosity_threshold.toFixed(1);
-                document.getElementById('varThreshold').value = cfg.detection.variation_threshold;
-                document.getElementById('varVal').textContent = cfg.detection.variation_threshold.toFixed(1);
                 document.getElementById('consecutiveRequired').value = cfg.detection.consecutive_required;
 
-                document.getElementById('evStepMax').value = cfg.exposure.ev_step_max;
-                document.getElementById('evVal').textContent = cfg.exposure.ev_step_max.toFixed(2);
                 document.getElementById('focalLength').value = cfg.capture.focal_length_mm;
 
                 document.getElementById('previewInterval').value = cfg.capture.preview_interval_secs;
@@ -409,10 +384,8 @@
                 cfg.detection.roi_top_percent = parseInt(document.getElementById('roiPercent').value);
                 cfg.detection.green_threshold = parseFloat(document.getElementById('greenThreshold').value);
                 cfg.detection.luminosity_threshold = parseFloat(document.getElementById('lumThreshold').value);
-                cfg.detection.variation_threshold = parseFloat(document.getElementById('varThreshold').value);
                 cfg.detection.consecutive_required = parseInt(document.getElementById('consecutiveRequired').value);
 
-                cfg.exposure.ev_step_max = parseFloat(document.getElementById('evStepMax').value);
                 cfg.capture.focal_length_mm = parseFloat(document.getElementById('focalLength').value);
                 cfg.capture.preview_interval_secs = parseInt(document.getElementById('previewInterval').value);
 

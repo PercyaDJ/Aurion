@@ -1,5 +1,34 @@
 # Journal des versions
 
+## 1.15.0
+
+Objectif : que chaque nuit soit bien exposée dès la première image et que la détection tienne compte de l'intensité
+réelle de l'aurore (lot 1 de [l'audit de novembre 2026](docs/AUDIT_AMELIORATIONS.md)).
+
+- **Exposition de début de nuit** : la calibration part du milieu de la plage de réglages, comme l'aperçu, et corrige
+  directement vers la cible en 6 images au plus, avec arrêt dès qu'elle est atteinte. Avant, elle partait d'ISO 100 et
+  1 s et ne montait que de 15 % par image puis de 3 % : la première partie de la nuit (de l'ordre de 100 à 150 images)
+  était sous-exposée.
+- **Verrou d'exposition** (*Réglages avancés*) : il ne fige l'exposition qu'une fois la cible atteinte. Avant, il
+  figeait la fin de la calibration, sous-exposée, pour toute la nuit.
+- **Correction plus juste** : l'aperçu et la calibration calculent la lumière à ajouter en valeurs linéaires et non
+  sur l'image JPEG corrigée du gamma. Un ciel deux fois trop sombre en apparence demande environ 3,5 fois plus de
+  lumière, pas 2 : l'aperçu converge en moins de prises.
+- **Gain plafonné au maximum analogique du capteur** (ISO 2200 pour la HQ Camera, valeur à confirmer sur le matériel) :
+  au-delà, le gain numérique éclaircissait l'image mesurée mais pas le RAW, qui restait sous-exposé.
+- **Détection** :
+  - le score d'aurore est continu : une aurore nette le dépasse 1, une aurore qui faiblit reste entre le seuil de
+    maintien et 1, et l'hystérésis la garde vraiment (avant, le score valait 0 ou plus de 1 et le seuil de maintien
+    n'avait aucun effet) ;
+  - la confiance va de 0 (au seuil de maintien) à 1 (au double du seuil de déclenchement) ; elle valait toujours 1 ;
+  - le contrôle d'étalement utilise la couleur dominante : il testait la luminosité du vert et bloquait les aurores
+    rouges.
+- **Vignette d'analyse** en qualité 90 au lieu de 70 : moins d'artefacts de compression sur les couleurs mesurées.
+- **Réglages avancés** : *Seuil variation temporelle* et *Pas EV maximum* sont retirés, ils n'étaient utilisés nulle
+  part. Les valeurs déjà enregistrées restent lues sans erreur.
+- Documentation : audit d'amélioration complet avec études des capteurs, de l'optique, de la détection et de la
+  triangulation de l'altitude des aurores ([docs/AUDIT_AMELIORATIONS.md](docs/AUDIT_AMELIORATIONS.md)).
+
 ## 1.14.0
 
 Objectif : brancher, ouvrir la page, et savoir tout de suite que la caméra est opérationnelle, sans protocole de test

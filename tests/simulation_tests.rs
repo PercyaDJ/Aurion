@@ -179,8 +179,9 @@ async fn time_range_mode_waits_for_start_and_stops_at_end() {
 async fn camera_failures_are_retried_and_the_night_continues() {
     let (night, _) = setup(|_| {});
     let storage = StorageMock::new(night.capture.clone());
-    // Calibration (3) + 7 more captures fail → one 5 min recovery pause
-    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark).fail_next(10), storage, clock()).await;
+    // Calibration (all its frames) + 7 more captures fail → one 5 min recovery pause
+    let fails = aurion::core::exposure::CALIBRATION_MAX_FRAMES + 7;
+    run_night(&night, CameraMock::with_pattern(SkyPattern::Dark).fail_next(fails), storage, clock()).await;
     let files = images(&night.capture);
     assert!(files.len() > 100, "capture must resume after camera errors, got {}", files.len());
     let logs = night.state.log_buffer.read().await.join("\n");
